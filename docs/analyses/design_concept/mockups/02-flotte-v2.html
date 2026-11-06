@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<!-- Maquette n°2 : flotte v2.1 — retour de Guillaume intégrés :
+     plus de suggestions, section "À TOI" supprimée (chaque saisie = session en cours),
+     Oui/Non + champ texte custom toujours possible, compteur d'âge retiré,
+     FINI = Repartir (texte) ou Termini, lien ↗ OpenChamber sur chaque carte,
+     En cours = texte bref + barre de progression + confiance (3 points). -->
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family: -apple-system, "Segoe UI", sans-serif; background:#0f1420; color:#e6e9f0; padding:22px 28px; font-size:13.5px; }
+  .muted { color:#8b93a7; }
+  .hdr { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:14px; }
+  h1 { font-size:16px; font-weight:600; }
+  .bar { background:#1a2130; border:1px solid #2a3346; border-radius:10px; margin-bottom:14px; }
+  .bar input { width:100%; background:transparent; border:none; outline:none; color:#e6e9f0; font-size:14px; padding:11px 13px; font-family:inherit; }
+  .bar input::placeholder { color:#5d6577; }
+  .seclabel { display:flex; align-items:center; gap:8px; margin:16px 0 8px; }
+  .seclabel b { font-size:12px; letter-spacing:.03em; }
+  .count { background:#1a2130; border:1px solid #2a3346; font-size:10.5px; border-radius:9px; padding:1px 7px; color:#8b93a7; }
+  .card { background:#1a2130; border:1px solid #2a3346; border-radius:9px; padding:10px 12px; margin-bottom:7px; }
+  .card.att { background:#2b2519; border-color:#5d5022; }
+  .card.ok  { background:#173b2b; border-color:#256a45; }
+  .row { display:flex; align-items:center; gap:10px; }
+  .st { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+  .st.blue { background:#5d9fe0; } .st.yellow { background:#e8c268; } .st.green { background:#4bc98a; }
+  .title { font-weight:600; white-space:nowrap; }
+  .brief { flex:1; color:#aab1c2; font-size:12.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .conf { display:flex; gap:3px; flex-shrink:0; }
+  .conf i { width:7px; height:7px; border-radius:50%; background:#3b465c; }
+  .on-r { background:#d95f5f !important; } .on-y { background:#e8c268 !important; } .on-g { background:#4bc98a !important; }
+  .btn { font-size:11.5px; font-family:inherit; color:#0f1420; background:#5d9fe0; border:none; border-radius:6px; padding:5px 11px; cursor:pointer; white-space:nowrap; font-weight:600; }
+  .btn:hover { background:#7fb4e8; }
+  .btn.ghost { background:transparent; color:#8b93a7; border:1px solid #2a3346; font-weight:400; }
+  .btn.ghost:hover { color:#c8cdd8; border-color:#4a556e; }
+  .oc { padding:5px 7px; }
+  .qbox { margin-top:9px; padding-top:9px; border-top:1px solid rgba(93,80,34,.55); }
+  .qbox .qtext { color:#e6d9b8; font-size:13px; margin-bottom:8px; }
+  .qbox .actions { display:flex; gap:7px; align-items:center; }
+  .qbox input[type=text], .qbox textarea { flex:1; background:#131a28; border:1px solid #3b465c; border-radius:7px; color:#e6e9f0; font-family:inherit; font-size:12.5px; padding:7px 10px; outline:none; }
+  .qbox textarea { width:100%; margin-bottom:7px; resize:none; min-height:44px; }
+  .prog { margin-top:8px; display:flex; align-items:center; gap:8px; }
+  .prog .track { flex:1; height:3px; background:#2a3346; border-radius:2px; overflow:hidden; }
+  .prog .fill { height:100%; background:#5d9fe0; border-radius:2px; transition:width .5s; }
+  .prog .pct { font-size:10.5px; color:#8b93a7; width:30px; text-align:right; }
+  .donebox { margin-top:8px; display:flex; gap:7px; align-items:center; }
+  .donebox input[type=text] { flex:1; background:#131a28; border:1px solid #2a3346; border-radius:7px; color:#e6e9f0; font-family:inherit; font-size:12px; padding:6px 10px; outline:none; }
+  .donebox input::placeholder { color:#5d6577; }
+  @keyframes born { from { opacity:0; transform:translateY(-5px);} to { opacity:1; transform:none;} }
+  .card.born { animation: born .4s ease; }
+  #toast { position:fixed; bottom:16px; left:50%; transform:translateX(-50%); background:#1a2130; border:1px solid #3b465c; color:#c8cdd8; font-size:12px; border-radius:8px; padding:8px 14px; opacity:0; transition:opacity .3s; pointer-events:none; }
+</style>
+</head>
+<body>
+
+<div class="hdr">
+  <div><h1>Superviseur</h1></div>
+  <div class="muted" style="font-size:12px;">10 h 02</div>
+</div>
+
+<div class="bar"><input id="bar" placeholder="Tape une demande, Entrée : ça part en session" autocomplete="off"></div>
+
+<div class="seclabel"><span class="st yellow"></span><b>BESOIN DE TON ATTENTION</b><span class="count" id="c-a">0</span></div>
+<div id="sec-a"></div>
+
+<div class="seclabel"><span class="st blue"></span><b>EN COURS</b><span class="count" id="c-r">0</span></div>
+<div id="sec-r"></div>
+
+<div class="seclabel"><span class="st green"></span><b>FINI</b><span class="count" id="c-d">0</span></div>
+<div id="sec-d"></div>
+
+<div id="toast"></div>
+
+<script>
+const A = document.getElementById('sec-a'), R = document.getElementById('sec-r'), D = document.getElementById('sec-d');
+const input = document.getElementById('bar');
+const toastEl = document.getElementById('toast'); let toastT;
+function toast(msg){ toastEl.textContent = msg; toastEl.style.opacity=1; clearTimeout(toastT); toastT=setTimeout(()=>toastEl.style.opacity=0, 2200); }
+function count(){
+  document.getElementById('c-a').textContent = A.children.length;
+  document.getElementById('c-r').textContent = R.children.length;
+  document.getElementById('c-d').textContent = D.children.length;
+}
+function confDots(level){
+  const w = document.createElement('div'); w.className='conf'; w.title='Confiance '+['basse','moyenne','haute'][level];
+  const col = ['on-r','on-y','on-g'][level];
+  for(let i=0;i<3;i++){ const dot=document.createElement('i'); if(i<level+1) dot.classList.add(col); w.appendChild(dot); }
+  return w;
+}
+const ocBtn = () => { const b=document.createElement('button'); b.className='btn ghost oc'; b.title='Ouvrir la conversation dans OpenChamber'; b.textContent='↗';
+  b.onclick = ()=> toast('Ouverture dans OpenChamber… (lien profond vers la session, maquette)'); return b; };
+
+function card(title, opts){
+  opts = opts || {};
+  const c = document.createElement('div'); c.className='card born';
+  c.innerHTML = `
+    <div class="row">
+      <span class="st blue"></span>
+      <span class="title"></span>
+      <span class="brief"></span>
+      <div class="conf"></div>
+    </div>
+    <div class="prog"><div class="track"><div class="fill" style="width:0%"></div></div><span class="pct"></span></div>
+    <div class="qbox" style="display:none"></div>
+    <div class="donebox" style="display:none"></div>`;
+  c.querySelector('.title').textContent = title;
+  c.querySelector('.brief').textContent = opts.text || '';
+  c.querySelector('.conf').appendChild(confDots(opts.conf==null?2:opts.conf));
+  c.row = c.querySelector('.row');
+  c.setProgress = (p) => { c.querySelector('.fill').style.width = p+'%'; c.querySelector('.pct').textContent = Math.round(p)+'%'; };
+  c.setBrief = (t) => c.querySelector('.brief').textContent = t;
+  c.setProgress(opts.progress || 0);
+  return c;
+}
+
+function toAttention(c, question, {binary=true, compose=null, onSend}={}){
+  c.querySelector('.st').classList.replace('blue','yellow');
+  const q = document.createElement('div'); q.className='qbox';
+  if(compose){
+    const ta = document.createElement('textarea'); ta.value = compose; q.appendChild(ta);
+  } else {
+    const qt = document.createElement('div'); qt.className='qtext'; qt.textContent = question; q.appendChild(qt);
+  }
+  const act = document.createElement('div'); act.className='actions';
+  if(binary){ const y=document.createElement('button'); y.className='btn'; y.textContent='Oui'; act.appendChild(y);
+    const n=document.createElement('button'); n.className='btn ghost'; n.textContent='Non'; act.appendChild(n); }
+  const inp = document.createElement('input'); inp.type='text';
+  inp.placeholder = compose ? '… ou corrige avant d\'envoyer' : '… ou répond autre chose'; act.appendChild(inp);
+  const go = document.createElement('button'); go.className='btn'; go.textContent = compose ? 'Envoyer ⏎' : '➤'; act.appendChild(go);
+  q.appendChild(act);
+  const finish = (result)=>{
+    q.remove(); c.querySelector('.st').classList.replace('yellow','blue');
+    R.prepend(c); count();
+    if(result) c.setBrief(result);
+  };
+  if(onSend){
+    const send = (v)=> onSend(v, finish, c);
+    go.onclick = ()=> send(inp.value);
+    inp.addEventListener('keydown', e=>{ if(e.key==='Enter'&&inp.value.trim()) send(inp.value); });
+    if(binary){ q.querySelectorAll('.btn')[0].onclick=()=>send('oui'); q.querySelectorAll('.btn')[1].onclick=()=>send('non'); }
+  } else {
+    go.onclick = ()=>{ const v = inp.value.trim(); finish(v? 'reprend — ta réponse : « '+v.slice(0,38)+' »' : 'reprend'); };
+    inp.addEventListener('keydown', e=>{ if(e.key==='Enter'){ const v = inp.value.trim(); finish(v? 'reprend — ta réponse : « '+v.slice(0,38)+' »' : 'reprend'); }  });
+    if(binary){ q.querySelectorAll('.btn')[0].onclick=()=>finish('reprend — choix : oui'); q.querySelectorAll('.btn')[1].onclick=()=>finish('reprend — choix : non'); }
+  }
+  c.querySelector('.row').appendChild(ocBtn());
+  c.appendChild(q);
+  A.prepend(c); count();
+  return c;
+}
+
+function build(title, opts){ const c = card(title, opts); R.prepend(c); c.row.appendChild(ocBtn()); count(); return c; }
+
+function toDone(c, livraison){
+  c.querySelector('.st').classList.replace('blue','green');
+  c.setBrief(livraison); c.setProgress(100);
+  const db = c.querySelector('.donebox'); db.style.display='flex';
+  db.innerHTML = '';
+  const rep = (v)=>{ D.replaceChildren(c); finishResume(c, v); };
+  const inp = document.createElement('input'); inp.type='text'; inp.placeholder='… ou fait-il repartir sur quoi ?';
+  inp.addEventListener('keydown', e=>{ if(e.key==='Enter'&&inp.value.trim()) rep(inp.value.trim()); });
+  const b2 = document.createElement('button'); b2.className='btn'; b2.textContent='Repartir ⏎'; b2.onclick=()=>rep(inp.value.trim());
+  const b3 = document.createElement('button'); b3.className='btn ghost'; b3.textContent='Terminer'; b3.onclick=()=>{ c.style.transition='opacity .4s'; c.style.opacity=0; setTimeout(()=>{ c.remove(); count(); },400); };
+  db.append(inp, b2, b3, ocBtn());
+  D.append(c); count();
+}
+function finishResume(c, v){
+  const n = build(c.querySelector('.title').textContent.replace(' — suite','')+' — suite', {text: v? 'repars : '+v.slice(0,40) : 'repart sur les retouches', progress:5, conf:1});
+  setTimeout(()=> toAttention(n, 'C\'est reparti — une question de démarrage ?', {binary:false}), 3000);
+  return n;
+}
+
+/* flotte initiale */
+const bug = build('Bug facturation', {text:'Reproduit : total HT faux, TVA 5,5 %', progress:60, conf:1});
+const pres = build('Présentation IA', {text:'3 angles de tables des matières', progress:30, conf:1});
+
+setTimeout(()=> toAttention(pres, '', {binary:false, compose:'Table des matières — Plan A : « Où l\'aide IA déjà », à valider',
+  onSend:(v,finish)=>{ finish(v && v!=='' ? 'plan validé (avec ta note)' : 'plan validé'); setTimeout(()=> toDone(pres, 'livré : maquette de 8 diapositives'), 900); }}), 2500);
+setTimeout(()=> toAttention(bug, 'Je garde la TVA 5,5 % dans le jeu d\'essai, ou je passe au taux réel ?', {binary:true,
+  onSend:(v,finish)=>{ finish('reprend — décision : '+v); bug.setProgress(75); }}), 6000);
+
+/* barre */
+input.addEventListener('keydown', e => {
+  if(e.key!=='Enter' || !input.value.trim()) return;
+  const v = input.value.trim(); input.value='';
+  const isMax = /max|absent|meeting/i.test(v);
+  const c = build(isMax? 'Message à Max' : v.slice(0,30)+(v.length>30?'…':''), {text: isMax? 'rédige le message pour Mattermost' : 'démarrage — goal rédigé', progress:8, conf:2});
+  setTimeout(()=> toAttention(c, isMax? '' : 'C\'est parti. Une précision avant d\'aller loin ?', {
+    binary:false,
+    compose: isMax? 'Salut Max, je serai absent au meeting d\'aujourd\'hui, on se recalle demain. Bonne réunion !' : null,
+    onSend: isMax? (t,finish)=>{ finish('envoyé'); setTimeout(()=> toDone(c, 'message envoyé à Max (Mattermost)'), 800); } : null
+  }), isMax? 2500 : 4000);
+});
+</script>
+
+</body>
+</html>

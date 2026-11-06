@@ -1,0 +1,4 @@
+.openchamber/
+node_modules/
+dist/
+.env

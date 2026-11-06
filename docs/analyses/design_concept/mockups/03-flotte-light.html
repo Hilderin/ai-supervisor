@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<!-- Maquette n°3 (v3.2) : light theme (« Daylight », réf. claude-agents-dashboard).
+     Retours intégrés : pas de suggestions, saisie = session (« À toi » supprimé), rtéponse Oui/Non + champ libre
+     toujours possible, pas de compteur d'âge, pas de stats d'usage ; FINI = Repartir/Terminer ;
+     ↗ OpenChamber = petite icône coin haut-droit de la carte ; progression + confiance ("piste douteuse/moyen/confiant"). -->
+<style>
+  :root {
+    --bg:#f4f5f4; --card:#fff; --border:#e4e7e4; --text:#1d211e; --muted:#7c847d;
+    --green:#2b9f6a; --green-soft:#e3f2ea; --orange:#d97a2b; --orange-soft:#faeadf; --amber:#d19a2f;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:-apple-system,"Segoe UI",sans-serif; background:var(--bg); color:var(--text); padding:20px 26px; font-size:13.5px; }
+  .hdr { display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; }
+  .brand { display:flex; align-items:center; gap:9px; }
+  .logo { width:26px; height:26px; border-radius:7px; background:var(--green); color:#fff; display:flex; align-items:center; justify-content:center; font-size:13px; }
+  h1 { font-size:15px; font-weight:700; }
+  .bar { background:var(--card); border:1px solid var(--border); border-radius:10px; }
+  .bar input { width:100%; background:transparent; border:none; outline:none; font-family:inherit; font-size:14px; color:var(--text); padding:12px 14px; }
+  .bar input::placeholder { color:#a5aca5; }
+  .seclabel { display:flex; align-items:center; gap:8px; margin:18px 0 9px; font-size:12px; font-weight:700; letter-spacing:.02em; }
+  .sdot { width:8px; height:8px; border-radius:50%; }
+  .sdot.o { background:var(--orange); } .sdot.g { background:var(--green); } .sdot.gg { background:var(--green); opacity:.4; }
+  .cnt { background:var(--card); border:1px solid var(--border); border-radius:9px; font-size:10.5px; font-weight:600; padding:1px 8px; color:var(--muted); }
+  .card { position:relative; background:var(--card); border:1px solid var(--border); border-radius:11px; padding:12px 14px 10px; margin-bottom:9px; }
+  .r1 { display:flex; align-items:center; gap:9px; }
+  .dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+  .dot.g { background:var(--green); } .dot.o { background:var(--orange); animation:blink 1.5s infinite; } .dot.gg { background:var(--green); opacity:.45; }
+  @keyframes blink { 50% { opacity:.35; } }
+  .title { font-weight:650; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .pill { font-size:10.5px; background:#f0f2f0; color:#5d655e; border-radius:5px; padding:2px 7px; font-weight:500; white-space:nowrap; }
+  .pill.warn { background:var(--orange-soft); color:#b35c17; }
+  .sp { flex:1; }
+  .ocbtn { flex-shrink:0; width:22px; height:22px; display:flex; align-items:center; justify-content:center; border:none; background:transparent; color:var(--muted); border-radius:6px; cursor:pointer; font-size:13px; }
+  .ocbtn:hover { color:var(--green); background:var(--green-soft); }
+  .brief { margin-top:5px; font-size:12px; color:var(--muted); padding-right:24px; }
+  .bars { margin-top:8px; display:flex; align-items:center; gap:10px; }
+  .track { height:5px; border-radius:3px; background:#eceeed; flex:1; overflow:hidden; }
+  .fill { height:100%; background:var(--green); transition:width .5s; }
+  .fill.mid { background:var(--amber); }
+  .pct { font-size:11px; font-weight:650; width:34px; text-align:right; font-variant-numeric:tabular-nums; }
+  .qbox { margin-top:10px; padding-top:10px; border-top:1px solid var(--border); }
+  .qtext { font-size:13px; line-height:1.45; margin-bottom:9px; }
+  .actions { display:flex; gap:7px; align-items:center; }
+  .bin { font-family:inherit; background:var(--green); color:#fff; border:none; border-radius:7px; font-size:12px; font-weight:600; padding:7px 14px; cursor:pointer; white-space:nowrap; }
+  .bin.gh { background:#fff; color:var(--text); border:1px solid var(--border); font-weight:500; }
+  .actions input, .draftf { flex:1; background:#f7f8f7; border:1px solid var(--border); border-radius:7px; font-family:inherit; font-size:12.5px; color:var(--text); padding:7px 10px; outline:none; min-width:0; }
+  .actions input:focus, .draftf:focus { border-color:var(--green); }
+  .draftf { width:100%; margin-bottom:8px; min-height:48px; resize:none; line-height:1.45; display:block; }
+  .arrowbtn { background:var(--green); color:#fff; border:none; border-radius:7px; width:32px; height:31px; cursor:pointer; font-size:13px; flex-shrink:0; }
+  .donebox { margin-top:9px; padding-top:9px; border-top:1px solid var(--border); display:flex; gap:7px; align-items:center; }
+  .donebox input { flex:1; background:#f7f8f7; border:1px solid var(--border); border-radius:7px; font-family:inherit; font-size:12px; color:var(--text); padding:7px 10px; outline:none; min-width:0; }
+  #toast { position:fixed; bottom:16px; left:50%; transform:translateX(-50%); background:#20241f; color:#fff; font-size:12.5px; border-radius:9px; padding:9px 16px; opacity:0; transition:opacity .3s; pointer-events:none; }
+  @keyframes born { from { opacity:0; transform:translateY(-4px); } to { opacity:1; transform:none; } }
+  .card.born { animation:born .4s ease; }
+</style>
+</head>
+<body>
+
+<div class="hdr">
+  <div class="brand"><div class="logo">◉</div><h1>Superviseur</h1></div>
+</div>
+
+<div class="bar"><input id="bar" placeholder="Une demande ? Tape ta demande, Entrée." autocomplete="off"></div>
+
+<div class="seclabel"><span class="sdot o"></span>BESOIN DE TON ATTENTION<span class="cnt" id="ca">0</span></div>
+<div id="sa"></div>
+<div class="seclabel"><span class="sdot g"></span>EN COURS<span class="cnt" id="cr">0</span></div>
+<div id="sr"></div>
+<div class="seclabel"><span class="sdot gg"></span>FINI<span class="cnt" id="cd">0</span></div>
+<div id="sd"></div>
+<div id="toast"></div>
+
+<script>
+const A=document.getElementById('sa'), R=document.getElementById('sr'), D=document.getElementById('sd');
+const bar=document.getElementById('bar'), toastEl=document.getElementById('toast'); let tt;
+function toast(m){ toastEl.textContent=m; toastEl.style.opacity=1; clearTimeout(tt); tt=setTimeout(()=>toastEl.style.opacity=0,2200); }
+function count(){ ca.textContent=A.children.length; cr.textContent=R.children.length; cd.textContent=D.children.length; }
+const ca=document.getElementById('ca'), cr=document.getElementById('cr'), cd=document.getElementById('cd');
+const SVG_OC='<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg>';
+function confBadge(l){ const p=document.createElement('span'); p.className='pill'; p.textContent=['piste douteuse','moyen','confiant'][l]; p.style.color=['#d95f5f','#d19a2f','#2b9f6a'][l]; return p; }
+function ocBtn(t){ const b=document.createElement('button'); b.className='ocbtn'; b.title='Ouvrir dans OpenChamber'; b.innerHTML=SVG_OC; b.onclick=()=>toast('Ouverture dans OpenChamber — '+t); return b; }
+
+function card(title,{brief='',prog=0,conf=2,tags=[],channel=null}={}){
+  const c=document.createElement('div'); c.className='card born';
+  c.innerHTML=`<div class="r1"><span class="dot g"></span><span class="title"></span><span class="sp"></span></div>
+    <div class="brief"></div>
+    <div class="bars"><span class="track"><span class="fill"></span></span><span class="pct"></span></div>
+    <div class="qbox" style="display:none"></div>
+    <div class="donebox" style="display:none"></div>`;
+  c._dot=c.querySelector('.dot'); c._title=c.querySelector('.title'); c._fx=c.querySelector('.r1');
+  c._brief=c.querySelector('.brief'); c._fill=c.querySelector('.fill'); c._pct=c.querySelector('.pct');
+  c._q=c.querySelector('.qbox'); c._done=c.querySelector('.donebox');
+  c._title.textContent=title;
+  tags.forEach(t=>{ const p=document.createElement('span'); p.className='pill'; p.textContent=t; c._fx.appendChild(p); });
+  c._fx.appendChild(confBadge(conf));
+  if(channel){ const p=document.createElement('span'); p.className='pill'; p.textContent=channel; c._fx.appendChild(p); }
+  c._fx.appendChild(ocBtn(title));
+  c._brief.textContent=brief;
+  c.setProg=v=>{ c._fill.style.width=v+'%'; c._pct.textContent=Math.round(v)+'%'; c._fill.classList.toggle('mid', v>0&&v<66); };
+  c.setConf=l=>{ const b=c._fx.querySelector('.pill'); b.textContent=['piste douteuse','moyen','confiant'][l]; b.style.color=['#d95f5f','#d19a2f','#2b9f6a'][l]; };
+  c.setProg(prog);
+  return c;
+}
+
+function toAttention(c,{question=null,binary=true,compose=null,onSend=null}={}){
+  c._dot.className='dot o';
+  const warn=document.createElement('span'); warn.className='pill warn'; warn.textContent='attends ta réponse';
+  c._fx.insertBefore(warn, c._fx.firstChild);
+  const q=document.createElement('div');
+  if(compose){ const ta=document.createElement('textarea'); ta.className='draftf'; ta.value=compose; q.appendChild(ta); }
+  else { const qt=document.createElement('div'); qt.className='qtext'; qt.textContent=question; q.appendChild(qt); }
+  const act=document.createElement('div'); act.className='actions';
+  if(binary&&!compose){ const y=document.createElement('button'); y.className='bin'; y.textContent='Oui'; act.appendChild(y);
+    const n=document.createElement('button'); n.className='bin gh'; n.textContent='Non'; act.appendChild(n); }
+  const inp=document.createElement('input'); inp.type='text'; inp.placeholder=compose?'… corrige librement':'… ou répond autre chose'; act.appendChild(inp);
+  const go=document.createElement('button'); go.className='arrowbtn'; go.textContent='➤'; act.appendChild(go);
+  q.appendChild(act);
+  const finish=res=>{ c._dot.className='dot g'; q.remove(); const w=c._fx.querySelector('.warn'); if(w) w.remove(); R.prepend(c); count(); if(res) c._brief.textContent=res; };
+  const handle=raw=>{ if(onSend) onSend(raw, finish, c); else finish(raw? 'ta réponse : « '+raw.slice(0,34)+' » — reprise' : null); };
+  go.onclick=()=>handle(inp.value.trim()||compose);
+  inp.onkeydown=e=>{ if(e.key==='Enter'&&inp.value.trim()) handle(inp.value.trim()); };
+  if(binary&&!compose){ const b=q.querySelectorAll('.bin'); b[0].onclick=()=>handle('oui'); b[1].onclick=()=>handle('non'); }
+  c._q.innerHTML=''; c._q.appendChild(q); c._q.style.display='block';
+  A.prepend(c); count();
+}
+
+function toDone(c,livraison){
+  c._dot.className='dot gg';
+  c._brief.textContent=livraison; c.setProg(100);
+  const db=c._done; db.style.display='flex'; db.innerHTML='';
+  const inp=document.createElement('input'); inp.placeholder='… ou repartir sur quoi ?';
+  const go=document.createElement('button'); go.className='bin'; go.textContent='Repartir ⏎';
+  inp.onkeydown=e=>{ if(e.key==='Enter'&&inp.value.trim()) spawn(c._title.textContent+' — suite',{text:'repars : '+inp.value.trim().slice(0,34),prog:5}); };
+  go.onclick=()=>inp.onkeydown({key:'Enter'});
+  const term=document.createElement('button'); term.className='bin gh'; term.textContent='Terminer';
+  term.onclick=()=>{ c.style.transition='opacity .4s'; c.style.opacity=0; setTimeout(()=>{c.remove(); count();},400); };
+  db.append(inp,go,term);
+  D.append(c); count();
+}
+
+function spawn(title,{text='',prog=8,conf=1,tags=[],channel=null,then=null,delay=3500}={}){
+  const c=card(title,{brief:text||'démarrage — le goal se rédige',prog,conf,tags,channel});
+  R.prepend(c); count();
+  if(then) setTimeout(()=>then(c), delay);
+  return c;
+}
+
+/* flotte initiale */
+const bug=spawn('Bug facturation',{text:'Reproduit : total HT faux avec TVA 5,5 % — inspecte le calculateur',prog:55,conf:1,tags:['debug']});
+const pres=spawn('Présentation IA',{text:'rédige 3 angles possibles de table des matières',prog:30,conf:1,tags:['préparation'],channel:'meet demain'});
+
+setTimeout(()=>toAttention(pres,{compose:'Table des matières — Plan A : « Où l\u2019IA aide déjà », à valider',
+  onSend:(v,fin)=>{ fin(v&&v.trim()?'plan validé (avec ta note)':'plan validé'); setTimeout(()=>toDone(pres,'livré : base de 8 diapositives'),900); }}),2200);
+setTimeout(()=>toAttention(bug,{binary:true,question:'Je garde la TVA à 5,5 % dans le jeu d\u2019essai, ou je passe au taux réel ?',
+  onSend:(v,fin)=>{ fin('décision : '+v+' — reprise des tests'); bug.setProg(75); bug.setConf(2); }}),5500);
+
+bar.addEventListener('keydown',e=>{
+  if(e.key!=='Enter'||!bar.value.trim()) return;
+  const v=bar.value.trim(); bar.value='';
+  const isMax=/max|absent|meeting/i.test(v);
+  if(isMax){
+    spawn('Message à Max',{text:'rédige le message pour Mattermost',prog:12,conf:2,tags:['acte'],channel:'Mattermost',delay:2200,
+      then:c=>toAttention(c,{compose:'Salut Max, je serai absent au meeting d\u2019aujourd\u2019hui, on se recalle demain. Bonne réunion !',
+        onSend:(t,fin)=>{ fin('envoyé'); setTimeout(()=>toDone(c,'message envoyé à Max'),700); }})});
+  } else {
+    spawn(v.slice(0,30)+(v.length>30?'…':''),{text:'démarrage — le goal se rédige',prog:8,conf:1,tags:['nouveau'],delay:3800,
+      then:c=>toAttention(c,{binary:false,question:'C\u2019est parti. Une précision avant d\u2019aller loin ?'})});
+  }
+});
+</script>
+
+</body>
+</html>

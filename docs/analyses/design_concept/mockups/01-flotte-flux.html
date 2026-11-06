@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<!-- Maquette interactive n°1 : flux complet (barre → carte → envoi ; agents → question → réponse inline)
+     Archivée le 2026-11-06. Réalise la doc 08 (§2 attention-first, §6 familles de cartes) et le phare du README.
+     À ouvrir dans un navigateur ; interaction : chips, barre+Entrée, Envoyer, Oui/Non sur les questions. -->
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family: -apple-system, "Segoe UI", sans-serif; background:#0f1420; color:#e6e9f0; padding:22px 28px; font-size:13.5px; }
+  .muted { color:#8b93a7; }
+  h1 { font-size:16px; font-weight:600; }
+  .hdr { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:14px; }
+  .bar { background:#1a2130; border:1px solid #2a3346; border-radius:10px; padding:1px; margin-bottom:14px; }
+  .bar input { width:100%; background:transparent; border:none; outline:none; color:#e6e9f0; font-size:14px; padding:11px 13px; font-family:inherit; }
+  .bar input::placeholder { color:#5d6577; }
+  .chips { display:flex; gap:7px; margin:0 0 16px; flex-wrap:wrap; }
+  .chip { font-size:11.5px; color:#8b93a7; background:#1a2130; border:1px solid #2a3346; border-radius:14px; padding:4px 10px; cursor:pointer; }
+  .chip:hover { color:#c8cdd8; border-color:#3b465c; }
+  .seclabel { display:flex; align-items:center; gap:8px; margin:14px 0 8px; }
+  .seclabel b { font-size:12px; letter-spacing:.03em; }
+  .count { background:#1a2130; border:1px solid #2a3346; font-size:10.5px; border-radius:9px; padding:1px 7px; color:#8b93a7; }
+  .card { background:#1a2130; border:1px solid #2a3346; border-radius:9px; padding:10px 12px; margin-bottom:7px; }
+  .card.att { background:#2b2519; border-color:#5d5022; }
+  .card.ok  { background:#173b2b; border-color:#256a45; }
+  .row { display:flex; align-items:center; gap:10px; }
+  .st { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+  .st.blue { background:#5d9fe0; } .st.yellow { background:#e8c268; } .st.green { background:#4bc98a; }
+  .title { font-weight:600; min-width:130px; flex-shrink:0; }
+  .desc { flex:1; color:#aab1c2; font-size:12.5px; }
+  .tag { font-size:10.5px; border:1px solid #2a3346; color:#8b93a7; border-radius:5px; padding:1px 7px; white-space:nowrap; }
+  .btn { font-size:11.5px; font-family:inherit; color:#0f1420; background:#5d9fe0; border:none; border-radius:6px; padding:5px 11px; cursor:pointer; white-space:nowrap; font-weight:600; }
+  .btn:hover { background:#7fb4e8; }
+  .btn.ghost { background:transparent; color:#8b93a7; border:1px solid #2a3346; font-weight:400; }
+  .btn.ghost:hover { color:#c8cdd8; }
+  .compose { margin-top:9px; }
+  .compose textarea { width:100%; background:#131a28; border:1px solid #2a3346; border-radius:7px; color:#e6e9f0; font-family:inherit; font-size:13px; padding:8px 10px; resize:none; outline:none; min-height:52px; }
+  .compose .row2 { display:flex; justify-content:space-between; align-items:center; margin-top:7px; }
+  .fresh { font-size:11px; color:#8b93a7; white-space:nowrap; }
+  .antenna { font-size:11.5px; color:#e8c268; }
+  .legend { margin-top:16px; border-top:1px solid #2a3346; padding-top:10px; font-size:11.5px; color:#6c7486; line-height:1.65; }
+  .legend b { color:#aab1c2; }
+  @keyframes born { from { opacity:0; transform:translateY(-5px);} to { opacity:1; transform:none;} }
+  .card.born { animation: born .45s ease; }
+  @keyframes blink { 50% { opacity:.35; } }
+  .card.att .st.yellow { animation: blink 1.4s infinite; }
+  .instr { font-size:12px; color:#7d8698; background:#1a2130; border:1px dashed #3b465c; border-radius:8px; padding:8px 12px; margin-bottom:14px; }
+</style>
+</head>
+<body>
+
+<div class="hdr">
+  <div><h1>Superviseur — maquette du flux complet</h1><div class="muted">interactive</div></div>
+  <div class="muted" style="font-size:12px;">10 h 02</div>
+</div>
+
+<div class="instr">À essayer : <b>1.</b> clic sur le chip « …absent au meeting » · <b>2.</b> attendre : les agents passent à l'ambre et se règlent d'un clic · <b>3.</b> ou taper ta demande puis Entrée.</div>
+
+<div class="bar"><input id="bar" placeholder="Tape une demande : « envoie un message à Max… », « check le bug de facturation… »" autocomplete="off"></div>
+<div class="chips">
+  <span class="chip" data-c="max">📄 Envoie un message à Max : je serai absent au meeting aujourd'hui</span>
+  <span class="chip" data-c="bot">🤖 Il y a un bug dans l'app facturation, check ça</span>
+</div>
+
+<div id="flotte">
+  <div class="seclabel"><span class="st yellow"></span><b>À TOI</b><span class="count" id="c-t">0</span></div>
+  <div id="sec-t"></div>
+  <div class="seclabel"><span class="st blue"></span><b>EN COURS</b><span class="count" id="c-r">0</span></div>
+  <div id="sec-r"></div>
+  <div class="seclabel"><span class="st green"></span><b>FINI</b><span class="count" id="c-d">0</span></div>
+  <div id="sec-d"></div>
+</div>
+
+<div class="legend">
+  Ce que cette maquette teste : <b>la carte est la seule surface d'action</b> — acte sortant (message à Max) et agent (bug) se règlent au même endroit, sans ouvrir une conversation. <b>Le tri est le seul enrichissement</b> : la flotte regroupe ce qui t'attend. Une demande arrive du monde (hook), sort de la barre (acte sortant) ou part en session (agent) — même carte, un geste minimum.
+</div>
+
+<script>
+const R = document.getElementById('sec-r'), T = document.getElementById('sec-t'), D = document.getElementById('sec-d');
+const input = document.getElementById('bar');
+function pill(t){ const d=document.createElement('div'); d.className='tag'; d.textContent=t; return d; }
+function count(){
+  document.getElementById('c-t').textContent = T.children.length;
+  document.getElementById('c-r').textContent = R.children.length;
+  document.getElementById('c-d').textContent = D.children.length;
+}
+function maxCard(){
+  const c = document.createElement('div'); c.className='card att born';
+  c.innerHTML = `
+    <div class="row">
+      <span class="st yellow"></span><span class="title">Message à Max</span>
+      <span class="desc muted">acte sortant — à toi de taper et d'envoyer</span>
+      <span class="tag">Mattermost</span>
+      <button class="btn ghost">Défaire</button>
+    </div>
+    <div class="compose" style="display:block;"><textarea>Salut Max, je serai absent au meeting d'aujourd'hui, on se recalle demain. Bonne réunion !</textarea>
+      <div class="row2"><span class="fresh">pré-complété du contexte de ta demande</span><button class="btn send">Envoyer ⏎</button></div></div>`;
+  const ta = c.querySelector('textarea'); ta.focus(); ta.setSelectionRange(ta.value.length,ta.value.length);
+  c.querySelector('.send').onclick = () => {
+    c.classList.remove('att'); c.classList.add('ok');
+    c.innerHTML = `<div class="row"><span class="st green"></span><span class="title">Message à Max</span>
+      <span class="desc">envoyé — « je serai absent au meeting d'aujourd'hui… »</span><span class="tag">Mattermost</span></div>`;
+    setTimeout(()=>{ c.classList.add('born'); D.prepend(c); count(); }, 700);
+    count();
+  };
+  T.prepend(c); count();
+}
+function agentCard(title, tags, runningText){
+  const c = document.createElement('div'); c.className='card born';
+  c.innerHTML = `
+    <div class="row">
+      <span class="st blue"></span><span class="title"></span>
+      <span class="desc">${runningText}</span>
+      ${tags.map(t=>pill(t).outerHTML).join('')}
+      <span class="fresh freshv">vu à l'instant</span>
+    </div>
+    <div class="qbox" style="display:none; margin-top:9px; padding-top:9px; border-top:1px solid rgba(93,80,34,.55);">
+      <div class="row" style="align-items:flex-start">
+        <span class="antenna">❓</span><span class="desc qtext" style="flex:1"></span>
+        <button class="btn qyes">Oui</button><button class="btn ghost qno">Non / autre</button>
+      </div>
+      <div class="row" style="margin-top:6px"><span class="fresh agewarn" style="color:#e8c268"></span></div>
+    </div>`;
+  c.querySelector('.title').textContent = title;
+  const b = c.querySelector('.st');
+  c.ask = (q) => {
+    c.classList.add('att'); b.classList.add('yellow');
+    c.querySelector('.freshv').textContent='';
+    c.querySelector('.qtext').innerHTML = q;
+    c.querySelector('.qbox').style.display='block';
+    let s = 0; const w = c.querySelector('.agewarn');
+    w.textContent = "t'attend depuis 0 s";
+    c._t = setInterval(()=>{ s++; w.textContent = `t'attend depuis ${s} s`; }, 1000);
+    c.querySelector('.qyes').onclick = ()=> c.resume('l\'agent reprend — question réglée dans la flotte');
+    c.querySelector('.qno').onclick  = ()=> c.resume('ouvert dans OpenChamber pour la suite');
+    count();
+  };
+  c.resume = (how) => {
+    clearInterval(c._t); c.classList.remove('att'); b.classList.remove('yellow');
+    c.querySelector('.qbox').style.display='none';
+    c.querySelector('.desc').textContent = how.startsWith('ouvert') ? 'passee dans OpenChamber' : 'l\'agent reprend — question réglée dans la flotte';
+    c.querySelector('.freshv').textContent="vu à l'instant";
+    count();
+  };
+  return c;
+}
+const bug = agentCard('Bug facturation', ['debug','app: facturation'], 'reproduit : « total HT faux avec TVA 5,5 % » — inspecte le calculateur');
+const pres = agentCard('Présentation IA', ['préparation','rencontre demain'], 'rédige la table des matières — « 3 angles proposés »');
+R.appendChild(bug); R.appendChild(pres); count();
+setTimeout(()=> bug.ask('<b>Je garde la TVA à 5,5 % dans le jeu d\'essai, ou je corrige au taux réel 20 % ?</b>'), 9000);
+setTimeout(()=> pres.ask('<b>Plan prêt : 3 propositions de table des matières — je pars sur « Où l IA aide déjà » ?</b>'), 4500);
+input.addEventListener('keydown', e => {
+  if(e.key!=='Enter' || !input.value.trim()) return;
+  const v = input.value.trim(); input.value='';
+  if(/max|absent|meeting/i.test(v)) maxCard();
+  else {
+    const a = agentCard(v.slice(0,34) + (v.length>34?'…':''), ['nouveau'], 'démarrage de la session — goal rédigé puis lancé');
+    R.prepend(a); count();
+    setTimeout(()=> a.ask('<b>Démarré. Une précision avant d\'aller loin : ton budget temps est du large ?</b>'), 5000);
+  }
+});
+document.querySelector('[data-c="max"]').onclick = ()=> { input.value="Envoie un message à Max : je serai absent au meeting aujourd'hui"; input.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter'})); };
+document.querySelector('[data-c="bot"]').onclick = ()=> { R.prepend(agentCard("Explique l'écran X", ['explication'], "lit le code de l'écran X — « 3 passages clés »")); count(); };
+</script>
+
+</body>
+</html>
