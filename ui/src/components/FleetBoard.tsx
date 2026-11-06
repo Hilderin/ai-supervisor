@@ -13,10 +13,11 @@ interface SectionProps {
   label: string;
   rows: FleetRow[];
   waiting: boolean;
+  done: boolean;
   now: number;
 }
 
-function Section({ dot, label, rows, waiting, now }: SectionProps) {
+function Section({ dot, label, rows, waiting, done, now }: SectionProps) {
   return (
     <>
       <div className="mb-[9px] mt-[18px] flex items-center gap-[8px] text-[13px] font-bold tracking-[.02em]">
@@ -27,7 +28,7 @@ function Section({ dot, label, rows, waiting, now }: SectionProps) {
         </span>
       </div>
       {rows.map((row) => (
-        <SessionCard key={row.id} row={row} waiting={waiting} now={now} />
+        <SessionCard key={row.id} row={row} waiting={waiting} done={done} now={now} />
       ))}
     </>
   );
@@ -36,6 +37,7 @@ function Section({ dot, label, rows, waiting, now }: SectionProps) {
 /** Trois sections : attention (form/permission), en cours, terminé. */
 export function FleetBoard({ fleet, now }: Props) {
   const closed = useFleetStore((s) => s.closed);
+  const placements = useFleetStore((s) => s.placements);
 
   const waiting: FleetRow[] = [];
   const running: FleetRow[] = [];
@@ -43,16 +45,18 @@ export function FleetBoard({ fleet, now }: Props) {
 
   for (const row of fleet?.rows ?? []) {
     if (isClosedRow(row, closed)) continue;
-    if (isWaiting(row)) waiting.push(row);
-    else if (isDone(row)) done.push(row);
+    const section =
+      placements[row.id]?.section ?? (isWaiting(row) ? 'waiting' : isDone(row) ? 'done' : 'running');
+    if (section === 'waiting') waiting.push(row);
+    else if (section === 'done') done.push(row);
     else running.push(row);
   }
 
   return (
     <>
-      <Section dot="bg-orange" label="BESOIN DE TON ATTENTION" rows={waiting} waiting now={now} />
-      <Section dot="bg-green" label="EN COURS" rows={running} waiting={false} now={now} />
-      <Section dot="bg-green opacity-40" label="TERMINÉ" rows={done} waiting={false} now={now} />
+      <Section dot="bg-orange" label="BESOIN DE TON ATTENTION" rows={waiting} waiting done={false} now={now} />
+      <Section dot="bg-green" label="EN COURS" rows={running} waiting={false} done={false} now={now} />
+      <Section dot="bg-green opacity-40" label="TERMINÉ" rows={done} waiting={false} done now={now} />
     </>
   );
 }

@@ -14,12 +14,15 @@ export function isStaleTurn(row: FleetRow): boolean {
   );
 }
 
-/** TERMINÉ seulement si le verdict est postérieur au tour en cours. */
+/**
+ * TERMINÉ seulement si le travail LLM est arrêté ET si le verdict est postérieur au tour en cours.
+ * Un job relancé garde le verdict « done » du tour précédent, et le compagnon peut même le
+ * reconfirmer pendant le nouveau tour (verdict frais mais travail visible) : busy est prioritaire.
+ */
 export function isDone(row: FleetRow): boolean {
-  return (
-    !!row.sup?.termine &&
-    !(row.status === 'busy' && !!row.turnStartedAt && (row.sup?.at ?? 0) < row.turnStartedAt)
-  );
+  if (row.status === 'busy') return false;
+  if (!row.sup?.termine) return false;
+  return !(!!row.turnStartedAt && (row.sup.at ?? 0) < row.turnStartedAt);
 }
 
 export function isWaiting(row: FleetRow): boolean {

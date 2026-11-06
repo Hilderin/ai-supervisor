@@ -48,10 +48,14 @@ Directives pour tout agent travaillant dans ce repo.
 - **Tailwind v4 met `line-height:1.5` sur `html`** : la maquette validée est en `normal`. Garder `body { line-height: normal }` dans `src/index.css`, sinon tout le contenu descend de ~5 px et le rendu n'est plus identique.
 - **Le squelette vanilla cachait trois éléments par construction** : le chip « attends ta réponse », la boîte permission et la ligne ✋ orange existent dans `cardHTML` avec `display:none`, et `applyState` ne les crée que s'ils sont absents. La référence ne les affichait donc jamais. React les rend (exigence du brief) : ne pas « corriger » React vers ce bug.
 - **Une carte qui change de section est démontée/remontée par React** : le brouillon du composer vit dans le store Zustand (`drafts`), sinon le texte est perdu en passant EN COURS → BESOIN. Le focus peut être perdu à ce moment-là (comme avec `replaceChildren` en vanilla).
-- **SSE `/api/fleet/stream` pousse la flotte NON enrichie** (pas de `task`, pas de filtrage des fermées) : garder le filtrage local par `closed` + `lastUpdateAt > closed_at` (même règle de réouverture que le daemon), sinon une carte fermée revient au frame suivant.
+- **SSE et GET doivent pousser la MÊME flotte enrichie** : le SSE envoyait `currentFleet()` brut (sans `task` ni filtrage des fermées), le GET filtrait. Les cartes fermées côté daemon réapparaissaient à chaque frame SSE puis disparaissaient au poll suivant : flicker, ordre qui change, titres qui semblent se battre pour le même id. `enrichedFleet()` est maintenant partagé par `/api/fleet` et `/api/fleet/stream`.
+- **`pollOnce` est single-flight** : GET /api/fleet, l'intervalle 3 s et les événements SSE déclenchaient des polls concurrents qui publiaient des snapshots dans le désordre (même session avec deux états). Les demandes concurrentes sont coalescées ; ne pas retirer ce garde-fou.
+- **L'UI ignore un `fleet.at` plus ancien** que celui déjà affiché : un GET en retard ne doit pas écraser un frame SSE plus récent (garde dans `setFleet`).
 - **Les frames SSE se répètent 2x/s à l'identique** : dédupliquer sur la chaîne brute (`ev.data`) avant `setFleet`, sinon re-render inutile deux fois par seconde.
 - **Tailwind : deux utilitaires de la même propriété (`bg-green` + `bg-amber`, `font-medium` + `font-semibold`) ne se départagent pas par l'ordre de la classe** : toujours une classe conditionnelle exclusive.
 - **`bun run build:ui` avant de lancer le daemon** : il sert `ui/dist` avec une table MIME (js/css/svg/woff) ; sans build, `/fleet` renvoie un 404 explicite.
+- **Un job `busy` n'est jamais TERMINÉ**, même avec un verdict `done` frais : un job relancé garde le « done » du tour précédent et le compagnon peut le reconfirmer pendant le nouveau tour (verdict frais, travail visible). `busy` prime toujours sur l'étiquette `termine`.
+- **Le verdict `termine` oscille d'une analyse à l'autre** : sans garde-fou, la carte saute EN COURS ↔ TERMINÉ et décale les titres (flicker connu, antérieur à React). `ui/src/lib/placement.ts` exige 8 s de stabilité pour un changement done/running ; busy, nouveau tour et attente restent immédiats.
 
 ### Compagnon (analyste)
 

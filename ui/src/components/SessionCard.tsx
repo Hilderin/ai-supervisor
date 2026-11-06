@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { closeConversation, replyPermission } from '../lib/api';
 import { cx } from '../lib/cx';
-import { briefRow, dirName, isDone, isStaleTurn } from '../lib/fleet';
+import { briefRow, dirName, isStaleTurn } from '../lib/fleet';
 import { BTN_PRIMARY } from '../lib/ui';
 import { useFleetStore } from '../store/fleetStore';
 import type { FleetRow } from '../types';
@@ -13,16 +13,16 @@ import { QuestionBox } from './QuestionBox';
 interface Props {
   row: FleetRow;
   waiting: boolean;
+  done: boolean;
   now: number;
 }
 
-export function SessionCard({ row, waiting, now }: Props) {
+export function SessionCard({ row, waiting, done, now }: Props) {
   const closeSession = useFleetStore((s) => s.closeSession);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const kebabRef = useRef<HTMLButtonElement>(null);
 
-  const done = isDone(row);
   const stale = isStaleTurn(row);
   const brief = stale ? 'Réflexion en cours…' : row.sup?.resume || briefRow(row, waiting, now);
   const dir = dirName(row.dir);
@@ -112,7 +112,7 @@ export function SessionCard({ row, waiting, now }: Props) {
 
       <div className="mt-[5px] pr-[26px] text-[13.5px] text-muted">{brief}</div>
       {row.sup?.attend ? (
-        <div className="mt-[3px] pr-[26px] text-[13.5px] text-attend">{row.sup.attend}</div>
+        <div className="mt-[3px] pr-[26px] text-[13.5px] text-attend">✋ {row.sup.attend}</div>
       ) : null}
 
       {showBars ? (

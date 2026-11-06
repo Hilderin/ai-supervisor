@@ -23,10 +23,20 @@ describe('isDone / isStaleTurn', () => {
     ).toBe(false);
   });
 
-  test('busy avec verdict frais peut être TERMINÉ', () => {
+  test('busy avec verdict frais (relance) reste EN COURS', () => {
     expect(
       isDone(row({ status: 'busy', sup: { termine: true, at: 60 }, turnStartedAt: 50 })),
-    ).toBe(true);
+    ).toBe(false);
+  });
+
+  test('idle avec verdict antérieur au tour → pas TERMINÉ', () => {
+    expect(
+      isDone(row({ status: 'idle', sup: { termine: true, at: 40 }, turnStartedAt: 50 })),
+    ).toBe(false);
+  });
+
+  test('busy sans verdict → pas TERMINÉ', () => {
+    expect(isDone(row({ status: 'busy' }))).toBe(false);
   });
 
   test('verdict périmé sur un tour busy → stale', () => {

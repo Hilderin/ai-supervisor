@@ -41,7 +41,7 @@ ui/
 
 ## 3. Flux de données
 
-`useFleetStream` ouvre `EventSource('/api/fleet/stream')` et lance en parallèle un poll `GET /api/fleet` toutes les 3 s. Les frames SSE identiques sont ignorées (le daemon renvoie la même flotte deux fois par seconde). Le store Zustand garde :
+`useFleetStream` ouvre `EventSource('/api/fleet/stream')` et lance en parallèle un poll `GET /api/fleet` toutes les 3 s. Les deux routes poussent désormais **la même flotte enrichie** (`enrichedFleet()` côté daemon) : les cartes fermées côté daemon ne réapparaissent plus à chaque frame SSE pour disparaître au poll suivant. Le store ignore en plus un `fleet.at` plus ancien que celui déjà affiché, et le daemon coalesce les polls concurrents (single-flight). Les frames SSE identiques sont ignorées (le daemon renvoie la même flotte deux fois par seconde). Le store Zustand garde :
 
 - `fleet` : la dernière flotte reçue ;
 - `error` : le message « daemon injoignable » du dernier poll en échec ;
@@ -54,14 +54,23 @@ ui/
 2. **TERMINÉ** : `isDone(row)` ;
 3. **EN COURS** : le reste.
 
-`isDone` n'est vrai que si `sup.termine` et que le verdict n'est pas antérieur au tour en cours. Un tour `busy` avec un verdict périmé affiche « Réflexion en cours… » et reste EN COURS.
+`isDone` n'est vrai que si `sup.termine`, que la session n'est pas `busy` et que le verdict n'est pas antérieur au tour en cours. Un job relancé (verdict « done » du tour précédent, même reconfirmé pendant le nouveau tour) reste donc EN COURS, avec « Réflexion en cours… » si le verdict est périmé.
+
+Le placement est en plus **stabilisé par une hystérésis de 8 s** (`lib/placement.ts`) : un verdict `termine` qui oscille d'une analyse à l'autre ne fait plus sauter la carte entre EN COURS et TERMINÉ, ni décaler les titres au-dessus. Un job `busy`, un nouveau tour (`turnStartedAt`) et une attente (question/permission) s'appliquent immédiatement.
+
+Le flicker d'ordre observé avant la migration avait deux causes cumulées, toutes deux corrigées côté daemon :
+
+- le SSE poussait `currentFleet()` brut alors que le GET filtrait les tâches fermées : les mêmes ids réapparaissaient et disparaissaient en boucle, ce qui décalait les titres ;
+- plusieurs polls pouvaient se croiser (GET, intervalle 3 s, événements SSE) et publier des snapshots dans le désordre pour une même session.
+
+`enrichedFleet()` est maintenant partagé par les deux routes et `pollOnce` est single-flight.
 
 ## 4. Contrat API respecté
 
 | Route | Usage UI |
 | --- | --- |
 | `GET /api/fleet` | poll 3 s + état initial (flotte enrichie, fermées filtrées) |
-| `GET /api/fleet/stream` | SSE de la flotte complète |
+| `GET /api/fleet/stream` | SSE de la flotte enrichie, identique au GET |
 | `POST /api/fleet/reply` | `{sessionId, formId, answer}` ou `{sessionId, requestID, decision}` |
 | `POST /api/fleet/send` | `{sessionId, text}` (le daemon applique `delivery: steer`) |
 | `POST /api/fleet/done` | `{sessionId}` |
@@ -94,7 +103,7 @@ Deux écarts de comportement volontaires :
 ## 7. Vérification
 
 - `bun run typecheck` : TypeScript strict, aucune erreur.
-- `bun test` : 19 tests (construction des réponses, placement TERMINÉ / périmé, fermeture / réouverture, âges).
+- `bun test` : 31 tests (construction des réponses, placement TERMINÉ / périmé / busy, hystérésis de section, fermeture / réouverture, âges, garde d'horodatage).
 - `bun run build` : build Vite dans `ui/dist`.
 - Vérification visuelle : captures Playwright de la référence et du build sur une flotte factice, diff au pixel. Les zones communes sont identiques ; les seules différences sont le chip, la permission et la couleur de la ligne ✋ (écarts assumés ci-dessus).
 - Vérification fonctionnelle Playwright sur la flotte factice : 15/15 (options mono et multiselect, texte libre, permission, auto-grow, Enter / Shift+Enter, focus et brouillon sous SSE, menu kebab, tooltip, fermeture).
@@ -119,5 +128,4 @@ bun run dev:ui
 
 - La barre de création de session reste désactivée (position MVP1, design en évolution).
 - Le chemin permission n'a pas encore été exercé sur une vraie demande OpenChamber (aucune demande réelle disponible pendant la migration) ; le contrat et le rendu sont testés sur flotte factice.
-- Le SSE pousse la flotte non enrichie (sans `task`) : la fermeture est donc filtrée localement. Un enrichissement côté daemon pourrait simplifier ce point plus tard.
 - Le déplacement d'une carte entre sections peut perdre le focus du composer (le texte est conservé par le store). Un rendu en liste plate avec portails pourrait le préserver si l'usage le réclame.
