@@ -41,22 +41,39 @@ async function jget(path: string) {
   return res.json();
 }
 
-/** fetch les messages nouveaux depuis le dernier analysé, formatés pour l'injection */
+/** fetch les messages, ordonnés chronologiquement ; détecte l'objectif (1er message humain) */
 async function digestNew(sid: string, s: CompanionState) {
-  type M = { id: string; type: string; content?: Array<{ type: string; text?: string }>; payload?: { text?: string } };
-  const out = await jget(`/api/session/${sid}/message?limit=12`) as { data?: M[] };
-  const msgs = (out.data ?? []).filter(m => m.type === 'user' || m.type === 'assistant');
-  const idx = s.lastMsgID ? msgs.findIndex(m => m.id === s.lastMsgID) : -1;
-  const fresh = idx >= 0 ? msgs.slice(idx + 1) : msgs.slice(-4);
+  type M = { id: string; type: string; time?: { created?: number }; content?: Array<{ type: string; text?: string }>; payload?: { text?: string } };
+  const out = await jget(`/api/session/${sid}/message?limit=30`) as { data?: M[] };
+  const conv = (out.data ?? [])
+    .filter(m => m.type === 'user' || m.type === 'assistant')
+    .sort((a, b) => (a.time?.created ?? 0) - (b.time?.created ?? 0));   // ancien → récent, peu importe l'ordre de l'API
+  if (!conv.length) return null;
+  // objectif : le plus ancien message humain disponible (limit=30 : parfois pas le tout premier)
+  const goal = (conv.find(m => m.type === 'user')?.payload?.text ?? '').slice(0, 400);
+  // du frais : messages apparus depuis la dernière analyse ; premier passage = les 4 derniers
+  const idx = s.lastMsgID ? conv.findIndex(m => m.id === s.lastMsgID) : -1;
+  let fresh = idx >= 0 ? conv.slice(idx + 1) : conv.slice(-4);
+  fresh = fresh.slice(-6);
+  s.lastMsgID = conv[conv.length - 1]?.id ?? s.lastMsgID;
   if (!fresh.length) return null;
-  s.lastMsgID = msgs[msgs.length - 1]?.id ?? s.lastMsgID;
+
   const parts: string[] = [];
-  for (const m of fresh) {
-    const txt = (m.type === 'user' ? m.payload?.text : m.content?.filter(c => c.type === 'text').map(c => c.text).join(' ')) ?? '';
+  for (let i = 0; i < fresh.length; i++) {
+    const m = fresh[i];
+    let txt = (m.type === 'user' ? m.payload?.text : m.content?.filter(c => c.type === 'text').map(c => c.text).join(' ')) ?? '';
+    let tag = (i === fresh.length - 1 && m.type === 'assistant')
+      ? 'AGENT (DERNIER MESSAGE — état le plus récent du travail)'
+      : (m.type === 'user' ? 'HUMAIN' : 'AGENT');
+    if (!txt && m.type === 'assistant') {
+      // tour en cours : souvent des tool calls sans texte — le raisonnement révèle l'activité
+      const reasoning = m.content?.filter(c => c.type === 'reasoning').map(c => c.text).join(' ') ?? '';
+      if (reasoning) { txt = reasoning.slice(0, 500); tag = 'AGENT (raisonnement en cours — tour pas fini)'; }
+    }
     if (!txt) continue;
-    parts.push(`[${m.type === 'user' ? 'HUMAIN' : 'AGENT'}] ${txt}`.slice(0, 900));
+    parts.push(`[${tag}] ${txt}`.slice(0, 950));
   }
-  return parts.join('\n');
+  return parts.join('\n') + `\n(Objectif de la tâche : ${goal || 'inconnu de l\u2019extrait'})`;
 }
 
 function persistedCompanion(sid: string): string | null { return getCompanion(sid); }
@@ -118,7 +135,7 @@ function parseVerdict(text: string): { resume?: string; termine?: boolean; confi
   } catch { return null; }
 }
 
-async function analyseOnce(sid: string, title: string, dir?: string) {
+async function analyseOnce(sid: string, title: string, dir?: string, status?: string) {
   const s = get(sid);
   if (s.inFlight) return;
   try {
@@ -128,6 +145,7 @@ async function analyseOnce(sid: string, title: string, dir?: string) {
     const compId = await ensureCompanion(sid, s);
     const inject = [
       `Tâche : ${title}`,
+      `Session actuellement : ${status ?? 'idle'}`,
       s.lastBrief ? `Ton dernier résumé : ${s.lastBrief}` : '',
       `Message(s) récent(s) :`,
       digest,
@@ -162,7 +180,7 @@ export function companionTick(sessions: OpenchamberSession[], statusMap: Record<
     const due = stt.status === 'idle'
       || (stt.status === 'busy' && (s.lastRunAt ?? 0) < Date.now() - PERIOD_MS);
     if (s.inFlight || !due) continue;
-    void analyseOnce(sess.id, sess.title ?? sess.id.slice(0, 12), sess.location?.directory);
+    void analyseOnce(sess.id, sess.title ?? sess.id.slice(0, 12), sess.location?.directory, stt.status);
   }
 }
 
