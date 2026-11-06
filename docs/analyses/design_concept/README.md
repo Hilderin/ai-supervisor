@@ -39,6 +39,7 @@ Les 12 douleurs visées (P1-P12) sont listées dans [01](01-probleme-et-vision.m
 | [08-que-doit-faire-le-superviseur.md](08-que-doit-faire-le-superviseur.md) | Périmètre clarifié : cadre PILOT adapté, composants, extras MVP, hors périmètre |
 | [09-paysage-concurrentiel.md](09-paysage-concurrentiel.md) | Produits et repos GitHub similaires : orchestrateurs, dashboards ; axes couverts / vides |
 | [10-mvp1-objectif.md](10-mvp1-objectif.md) | MVP1 figé : capacités, exclusions, critères de succès, prochain pas (spike) |
+| [11-spike-integration.md](11-spike-integration.md) | Notes du spike réel : endpoints confirmés, topologie, décisions d'architecture |
 
 ## Méthode de cette phase
 
