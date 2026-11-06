@@ -397,6 +397,28 @@ async function refresh(){
   tick();
 }
 if (DBG) document.getElementById('dbg').style.display = 'block';
+if (DBG) {
+  const genel = el => { const sid = el.closest('[data-sid]')?.dataset.sid ?? ''; const title = el.closest('.card')?.querySelector('.title')?.textContent?.slice(0,22) ?? '?'; return sid.slice(-6) + ' ' + title; };
+  const mo = new MutationObserver(muts => {
+    for (const mm of muts) {
+      const el = mm.target instanceof Element ? mm.target : null;
+      if (mm.attributeName === 'class' && el && el.classList.contains('card')) {
+        dbg('flap', genel(el) + (el.classList.contains('wait') ? ' [WAIT on]' : ' [wait off]'));
+      }
+    }
+  });
+  mo.observe(document.getElementById('sa'), { subtree:true, attributes:true, attributeFilter:['class'] });
+  mo.observe(document.getElementById('sr'), { subtree:true, attributes:true, attributeFilter:['class'] });
+  // contenu de .brief modifié (le flash du message attend):
+  const mox = new MutationObserver(muts => {
+    for (const mm of muts) {
+      const el = mm.target instanceof Element ? el0(mm.target) : null;
+      if (el && el.classList.contains('kit')) dbg('briefflip', genel(el) + ' ▶ ' + el.textContent.slice(0,40));
+    }
+  });
+  const el0 = el => el;
+  mox.observe(document.getElementById('sr'), { subtree:true, characterData:true });
+}
 refresh();
 setInterval(refresh, 3000);        // filet de sécurité : normalement le stream SSE pousse en continu
 function connectStream(){
