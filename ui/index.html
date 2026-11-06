@@ -149,7 +149,7 @@ function cardHTML(row, waiting){
     const col = conf == null ? null : (conf < .35 ? '#d95f5f' : conf < .7 ? '#d19a2f' : '#2b9f6a');
     const note = row.sup.note ? ` : ${esc(row.sup.note)}` : '';
     const confIcons = conf == null ? '' :
-      `<span class="cdots" data-tip="Confiance ${(conf*100).toFixed(0)} %${note ? ' : ' + esc(note) : ''}">` +
+      `<span class="cdots" data-tip="Confiance ${(conf*100).toFixed(0)} %${esc(note)}">` +
       [1,2,3].map(i => `<i${i <= level ? ` class="on" style="background:${col}"` : ''}></i>`).join('') +
       `</span>`;
     bars = `<div class="bars"><span class="track"><span class="fill${pct != null && pct < 66 && pct > 0 ? ' mid' : ''}" style="width:${pct ?? 0}%"></span></span>` +
