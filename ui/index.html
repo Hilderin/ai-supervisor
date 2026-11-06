@@ -376,11 +376,18 @@ async function refresh(){
   tick();
 }
 refresh();
+setInterval(refresh, 3000);        // filet de sécurité : normalement le stream SSE pousse en continu
+function connectStream(){
+  try {
+    const es = new EventSource('/api/fleet/stream');
+    es.onmessage = ev => { fleetData = JSON.parse(ev.data); mount(fleetData); tick(); };
+  } catch { /* le poll 3 s reste le filet */ }
+}
+connectStream();
 // un seul listener global : tout clic ailleurs referme les menus ouverts sur la page
 document.addEventListener('click', () => {
   document.querySelectorAll('[data-menu]').forEach(m => { m.style.display = 'none'; });
 });
-setInterval(refresh, 3000);
 </script>
 
 </body>

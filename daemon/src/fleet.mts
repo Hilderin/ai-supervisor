@@ -140,6 +140,45 @@ export async function pollOnce(): Promise<void> {
 
 export function baseOk(): boolean { return base !== '' && lastGood > 0; }
 
+/* --- SSE : l'événement pousse un poll immédiat (le poll 3 s reste le filet) --- */
+let sseBusy = false;          // reconnexion déjà planifiée
+let pollDebounce: ReturnType<typeof setTimeout> | null = null;
+
+function onEventLine(type: string) {
+  const relevant = /^(session\.|permission\.|form\.|project\.|workspace\.)/.test(type);
+  if (!relevant) return;
+  if (pollDebounce) return;
+  pollDebounce = setTimeout(() => { pollDebounce = null; void pollOnce(); }, 250);
+}
+
+export function startEventStream(): void {
+  if (sseBusy) return; sseBusy = true;
+  const ctl = new AbortController();
+  (async () => {
+    try {
+      const res = await fetch(openchamberUrl('/api/event'), { signal: ctl.signal });
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error('pas de stream');
+      const dec = new TextDecoder();
+      let buf = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        let i: number;
+        while ((i = buf.indexOf('\n')) >= 0) {
+          const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
+          if (!line.startsWith('data: ')) continue;
+          try { onEventLine(String((JSON.parse(line.slice(6)) as { type?: string }).type)); } catch { /* frame partielle */ }
+        }
+      }
+    } catch { /* fin de stream : reconnexion plus bas */ }
+    ctl.abort();
+    sseBusy = false;
+    setTimeout(() => startEventStream(), 3000 + Math.floor(Math.random() * 2000));
+  })();
+}
+
 export function startPolling(): void {
   void pollOnce();
   setInterval(() => void pollOnce(), POLL_FAST_MS);   // status + pending (probablement plus)
@@ -149,4 +188,5 @@ export function startPolling(): void {
       if (Array.isArray(list)) sessionsIndex = new Map(list.map(x => [x.id, x]));
     }); } catch { /* annuaire lent, pas grave */ }
   }, POLL_SLOW_MS);
+  startEventStream();   // événements → poll immédiat
 }

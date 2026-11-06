@@ -131,6 +131,15 @@ async function handleApi(req: http.IncomingMessage, res: http.ServerResponse, ur
     json(res, 200, { ok: true });
     return;
   }
+  if (path === '/api/fleet/stream' && req.method === 'GET') {
+    // SSE : pousse la flotte dès qu'elle est rafraîchie (les événements OpenChamber déclenchent un poll immédiat)
+    res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
+    const send = () => { try { res.write(`data: ${JSON.stringify(currentFleet())}\n\n`); } catch { /* client parti */ } };
+    send();
+    const t = setInterval(send, 500);
+    req.on('close', () => clearInterval(t));
+    return;
+  }
   json(res, 404, { error: `route inconnue : ${path}` });
 }
 
