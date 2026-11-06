@@ -7,6 +7,7 @@ import { useFleetStore } from '../store/fleetStore';
 import type { FleetRow } from '../types';
 import { Composer } from './Composer';
 import { ConfidenceDots } from './ConfidenceDots';
+import { DeliveryBlock } from './DeliveryBlock';
 import { CloseConversationIcon, OpenChamberIcon } from './Icons';
 import { QuestionBox } from './QuestionBox';
 
@@ -132,6 +133,13 @@ export function SessionCard({ row, waiting, done, now }: Props) {
           </span>
         </div>
       ) : null}
+
+      <DeliveryBlock
+        sessionId={row.id}
+        enabled={done || (!waiting && row.status !== 'busy')}
+        done={done}
+        refreshKey={`${row.lastUpdateAt ?? 0}:${row.turnStartedAt ?? 0}`}
+      />
 
       {perm ? (
         <div className="mt-[10px] border-t border-border pt-[10px]">

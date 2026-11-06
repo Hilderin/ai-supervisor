@@ -27,6 +27,7 @@
   --color-ink: #20241f;
   --color-attend: #b35c17;
   --color-arrow: #b6bcb6;
+  --color-render: #fbfcfb;
 
   --animate-dot-spin: dot-spin 0.9s linear infinite;
   --animate-dot-blink: dot-blink 1.5s infinite;
@@ -58,4 +59,148 @@
     line-height: normal;
     padding: 20px 26px;
   }
+}
+
+/*
+ * Markdown de la livraison inline. Hors @layer pour battre le reset de
+ * Tailwind (listes, titres, tableaux) et rester dans les jetons de la maquette.
+ */
+.delivery-md {
+  color: var(--color-text);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.delivery-md > :first-child {
+  margin-top: 0;
+}
+
+.delivery-md > :last-child {
+  margin-bottom: 0;
+}
+
+.delivery-md h1,
+.delivery-md h2,
+.delivery-md h3,
+.delivery-md h4 {
+  margin: 10px 0 5px;
+  color: var(--color-text);
+  font-weight: 650;
+  line-height: 1.3;
+}
+
+.delivery-md h1 {
+  font-size: 15px;
+}
+
+.delivery-md h2 {
+  font-size: 14px;
+}
+
+.delivery-md h3 {
+  font-size: 13px;
+}
+
+.delivery-md h4 {
+  font-size: 12.5px;
+}
+
+.delivery-md p {
+  margin: 0 0 7px;
+}
+
+.delivery-md ul,
+.delivery-md ol {
+  margin: 0 0 7px;
+  padding-left: 18px;
+}
+
+.delivery-md ul {
+  list-style: disc;
+}
+
+.delivery-md ol {
+  list-style: decimal;
+}
+
+.delivery-md li {
+  margin: 1px 0;
+}
+
+.delivery-md li > p {
+  margin: 0;
+}
+
+.delivery-md code {
+  border-radius: 4px;
+  background: var(--color-track);
+  padding: 1px 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+}
+
+.delivery-md pre {
+  margin: 0 0 7px;
+  overflow-x: auto;
+  border: 1px solid var(--color-border);
+  border-radius: 7px;
+  background: #f3f5f3;
+  padding: 8px 10px;
+}
+
+.delivery-md pre code {
+  background: transparent;
+  padding: 0;
+  font-size: 11px;
+}
+
+.delivery-table {
+  margin: 0 0 7px;
+  overflow-x: auto;
+}
+
+.delivery-md table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11.5px;
+}
+
+.delivery-md th,
+.delivery-md td {
+  border-bottom: 1px solid var(--color-border);
+  padding: 4px 6px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.delivery-md th {
+  color: var(--color-muted);
+  font-weight: 600;
+}
+
+.delivery-md tr:last-child > td {
+  border-bottom: 0;
+}
+
+.delivery-md blockquote {
+  margin: 0 0 7px;
+  border-left: 2px solid var(--color-border);
+  padding-left: 8px;
+  color: var(--color-muted);
+}
+
+.delivery-md a {
+  color: var(--color-green);
+  text-decoration: underline;
+}
+
+.delivery-md hr {
+  margin: 8px 0;
+  border: 0;
+  border-top: 1px solid var(--color-border);
+}
+
+.delivery-md img {
+  max-width: 100%;
 }

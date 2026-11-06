@@ -59,3 +59,22 @@ export interface Fleet {
   rows: FleetRow[];
   concern: string | null;
 }
+
+/** `GET /api/fleet/delivery?sessionId=…` : dernier résultat de l'agent. */
+export interface DeliveryRender {
+  html: string;
+  title: string;
+}
+
+export interface Delivery {
+  sessionId: string;
+  at: number;
+  state: 'ok' | 'empty' | 'unavailable';
+  messageId?: string;
+  createdAt?: number;
+  turnStartedAt?: number;
+  markdown?: string;
+  render?: DeliveryRender;
+  truncated?: boolean;
+  error?: string;
+}

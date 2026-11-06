@@ -18,6 +18,7 @@ superviseur/
     src/
       discover.mts      — trouver le port d'OpenChamber (ss -tlnp → process "openchamber", ou OPENCHAMBER_PORT)
       fleet.mts         — lecture : poll /api/sessions/status (3 s) + /api/session ; abonnement SSE /api/event
+      delivery.mts      : livraison inline (dernier texte + rendu openchamber_render, cache invalidé par événements)
       state.mts         — SQLite (bun:sqlite) : journaux, clôtures, seuils
       server.mts        — HTTP : sert /api/fleet (JSON fusionné), les actions, et le build UI statique
       index.mts         — file-tout, lance le tout
@@ -35,6 +36,7 @@ Un seul process **Bun** fait tout (daemon + serveur HTTP + UI statique) : `bun d
 | Route | Rôle |
 | --- | --- |
 | `GET /api/fleet` | l'état fusionné pour l'UI : sessions (de `/api/session`), statut et pending (de `/api/sessions/status`), l'état local (journaux, clôtures) |
+| `GET /api/fleet/delivery` | livraison inline d'une session (`?sessionId=…`) : dernier texte + rendu `openchamber_render`, à la demande (jamais dans les frames de flotte), cache invalidé par événements |
 | `POST /api/fleet/reply` | répondre une question / permission / envoyer du libre (proxy vers form/permission reply) |
 | `POST /api/fleet/create` | créé la session (proxé `/api/openchamber/sessions` — à confirmer) |
 | `POST /api/fleet/done` | clôturer / repartir (nouvelle session liée) |
@@ -54,4 +56,5 @@ Un seul process **Bun** fait tout (daemon + serveur HTTP + UI statique) : `bun d
 - [x] `GET /api/fleet` produit, pour chaque vraie session, ce que la maquette affiche (titre, statut, dernier tour, progression via todos quand disponible) ;
 - [x] l'UI `/fleet` affiche la flotte réelle dans le style v4 (build React servi depuis `ui/dist`) ;
 - [x] répondre à une question depuis l'UI débloque la vraie session ;
-- [ ] ensuite seulement : créations, clôtures, rendus inline.
+- [x] la livraison inline (dernier texte + rendu `openchamber_render`) s'affiche dans la carte ;
+- [ ] ensuite seulement : créations, clôtures.

@@ -33,6 +33,8 @@ Directives pour tout agent travaillant dans ce repo.
 - OpenCode server direct = Basic auth détenue par OpenChamber : **toujours passer par OpenChamber**.
 - Suppression de session via proxy : 404 (route introuvable): archiver plutôt (`POST /api/openchamber/sessions/archive` `{ids:[]}`), en archivant aussi les enfants compagnon.
 - Les scheduled tasks n'ont **pas d'historique de runs** ; `/api/openchamber/message-search` existe (à tester) ; la mémoire agent = JSON lisible-corrigeable via HTTP.
+- **Livraison inline : le dernier message assistant n'est pas la réponse** : un tour finit souvent par des tool calls sans texte. Depuis le dernier message `user`, prendre le dernier texte assistant et le dernier `openchamber_render` du même tour.
+- **`openchamber_render`** : la page est dans `state.input.parameters.html` (ou `state.input.html`), le titre dans `parameters.title` (ou `title`), et le rendu est confirmé par `state.metadata.openchamber.ok`. Les pages en langage `ui` (`parameters.ui`) ne sont pas du HTML : ne pas les dessiner comme telles.
 
 ### UI (patterns de la page flotte)
 
@@ -58,6 +60,8 @@ Directives pour tout agent travaillant dans ce repo.
 - **`bun run build:ui` avant de lancer le daemon** : il sert `ui/dist` avec une table MIME (js/css/svg/woff) ; sans build, `/fleet` renvoie un 404 explicite.
 - **Un job `busy` n'est jamais TERMINÉ**, même avec un verdict `done` frais : un job relancé garde le « done » du tour précédent et le compagnon peut le reconfirmer pendant le nouveau tour (verdict frais, travail visible). `busy` prime toujours sur l'étiquette `termine`.
 - **Le verdict `termine` oscille d'une analyse à l'autre** : sans garde-fou, la carte saute EN COURS ↔ TERMINÉ et décale les titres (flicker connu, antérieur à React). `ui/src/lib/placement.ts` exige 8 s de stabilité pour un changement done/running ; busy, nouveau tour et attente restent immédiats.
+- **Livraison inline : jamais les messages dans la flotte** : `GET /api/fleet` et le SSE ne portent que l'état. L'UI appelle `GET /api/fleet/delivery?sessionId=…` pour une carte TERMINÉ ou au repos (pas busy, pas en attente), et seulement quand `lastUpdateAt`/`turnStartedAt` change. Cache daemon 30 s, invalidé par `message.*`, `session.execution.*`, `session.inbox.*`, `session.text.*`, `session.step.ended`, `session.idle`.
+- **Rendu openchamber_render** : iframe `sandbox="allow-scripts"` sans `allow-same-origin` et CSP (`connect-src 'none'`, `form-action 'none'`). Jamais de HTML brut dans le DOM. Le markdown passe par `react-markdown` avec `skipHtml`, sans `rehype-raw`.
 
 ### Compagnon (analyste)
 
@@ -73,6 +77,7 @@ Directives pour tout agent travaillant dans ce repo.
 
 - **Lister le dossier avant d'attribuer un numéro de doc** (double 09 déjà arrivé).
 - **Une demande de boîte à idées n'est pas un chantier d'implémentation** (déjà arrivé : « ajoute l'idée confiance non définie » lu comme « implémente-la »). Quand un message peut se lire comme une note de conception OU une tâche de code, trancher explicitement avant d'agir (question courte : « note dans la boîte, ou j'implémente ? »).
+- **Image locale dans une réponse** : OpenChamber ne donne un grant que pour un chemin cité par le message assistant lui-même. Une copie du message dans un résumé compagnon (ou un autre fil) affiche une image brisée. Pour une image destinée à être partagée, servir une URL HTTP (build/daemon) ou une data URL, pas un chemin local.
 - Le MVP1 est le contrat (`docs/analyses/mvp1/objectif-mvp1.md`) : création de session en dernier (design en évolution).
 - Ne pas dupliquer : ce qui est analysé ailleurs (spike, architecture) se cite par lien.
 - UI React : décisions et commandes dans `docs/analyses/mvp1/implementation-ui-react.md` et `ui/README.md`.

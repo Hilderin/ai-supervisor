@@ -1,4 +1,4 @@
-import type { Fleet } from '../types';
+import type { Delivery, Fleet } from '../types';
 
 async function post(path: string, body: unknown): Promise<void> {
   const res = await fetch(path, {
@@ -13,6 +13,16 @@ export async function fetchFleet(): Promise<Fleet> {
   const res = await fetch('/api/fleet', { cache: 'no-store' });
   if (!res.ok) throw new Error(String(res.status));
   return (await res.json()) as Fleet;
+}
+
+/** Dernier résultat de l'agent, à la demande (pas dans les frames de flotte). */
+export async function fetchDelivery(sessionId: string, signal?: AbortSignal): Promise<Delivery> {
+  const res = await fetch(`/api/fleet/delivery?sessionId=${encodeURIComponent(sessionId)}`, {
+    cache: 'no-store',
+    signal,
+  });
+  if (!res.ok) throw new Error(String(res.status));
+  return (await res.json()) as Delivery;
 }
 
 /** Réponse à un formulaire : objet complet { qN: valeur }, multiselect = tableau. */

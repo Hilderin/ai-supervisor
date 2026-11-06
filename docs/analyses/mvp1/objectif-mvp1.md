@@ -9,7 +9,7 @@
 | 1 | Saisie → session | ✖ reporté (choix explicite : en dernier, design de page en évolution) | barre désactivée pour l'instant ; position finale I4 |
 | 2 | Cartes d'état | ◐ | statut vivant, âge, titre, projet — **progression décorative** (35 % fixe), confiance non câblée (todos pas encore branchés) |
 | 3 | Réponse inline | ✔ | questions mono et multi-parts (multiselect, champ libre, Répondre) testées de bout en bout ; **permissions : chemin câblé mais jamais testé** (aucune vraie demande) |
-| 4 | Livraison inline | ✖ | le rendu (graph/table/synthèse) dans la carte n'existe pas |
+| 4 | Livraison inline | ✔ | bloc « Résultat » dans la carte : dernier texte markdown + rendu `openchamber_render` sandboxé, route dédiée `GET /api/fleet/delivery`, cache invalidé par événements (détail : `implementation-ui-react.md` §5) |
 | 5 | Clôture | ◐ | endpoint daemon `/api/fleet/done` existe ; **UI sans boutons Terminer / Repartir** |
 | 6 | ↗ OpenChamber | ◐ | ouvre `openchamber-ui://session/{id}` — schéma **deviné, jamais vérifié** (à capturer depuis l'app) |
 | — | SSE instantané | ✖ | le poll 3 s porte tout (tuile planifiée I5) |
@@ -29,7 +29,7 @@ Référence visuelle de l'objectif : `mockups/04-flotte-rendus.html` (la maquett
 | 1 | **Saisie → session** | Entrée dans la barre = une session « En cours » | `POST /api/openchamber/sessions` (ou proxy OpenCode `session.create` + `prompt`) |
 | 2 | **Cartes d'état** | dot + titre + phrase d'activité + progression + point confiance | `sessions/status` + événements WS ; progression = todos (voix A du doc 03) |
 | 3 | **Question inline** | chip « attends ta réponse » + Oui/Non + champ libre → reprise | questions = `form/*`, permissions = `permission/*` via proxy OpenCode |
-| 4 | **Livraison inline** | le rendu (graph, table, synthèse) s'affiche dans la carte LIVRÉS | rendu du dernier message agent (markdown/HTML) ; `openchamber_render` à brancher via les événements (doc 06) |
+| 4 | **Livraison inline** | le rendu (graph, table, synthèse) s'affiche dans la carte LIVRÉS | rendu du dernier message agent (markdown/HTML) ; `openchamber_render` lu dans les tool parts du dernier tour, rendu en iframe sandboxée |
 | 5 | **Clôture** | « Repartir » (nouvelle session liée) ou « Terminer » | archivage natif d'OpenCode + note de clôture dans le store local |
 | 6 | **↗ OpenChamber** | icône coin haut-droite | deep-link session natif d'OpenChamber |
 

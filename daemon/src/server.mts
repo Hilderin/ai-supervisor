@@ -7,6 +7,7 @@ import { readFile } from 'node:fs/promises';
 import { dirname, extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { currentFleet, openchamberUrl, pollOnce, type Fleet } from './fleet.mts';
+import { getDelivery } from './delivery.mts';
 import { companionSessionOf } from './companion.mts';
 import { logEvent, upsertTaskState, getTaskState, reopenTaskState } from './state.mts';
 
@@ -94,6 +95,13 @@ async function handleApi(req: http.IncomingMessage, res: http.ServerResponse, ur
     const fleet = enrichedFleet();
     void pollOnce();
     json(res, 200, fleet);
+    return;
+  }
+  if (path === '/api/fleet/delivery' && req.method === 'GET') {
+    // à la demande : la flotte (GET + SSE) ne transporte pas les messages.
+    const sessionId = (url.searchParams.get('sessionId') ?? '').trim();
+    if (!sessionId) { json(res, 400, { error: 'sessionId requis' }); return; }
+    json(res, 200, await getDelivery(sessionId));
     return;
   }
   if (path === '/api/fleet/reply' && req.method === 'POST') {
