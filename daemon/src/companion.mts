@@ -42,7 +42,7 @@ async function jget(path: string) {
 }
 
 /** fetch les messages, ordonnés chronologiquement ; détecte l'objectif (1er message humain) */
-async function digestNew(sid: string, s: CompanionState) {
+async function digestNew(sid: string, s: CompanionState, force = false) {
   type M = { id: string; type: string; time?: { created?: number }; content?: Array<{ type: string; text?: string }>; payload?: { text?: string } };
   const out = await jget(`/api/session/${sid}/message?limit=30`) as { data?: M[] };
   const conv = (out.data ?? [])
@@ -51,9 +51,10 @@ async function digestNew(sid: string, s: CompanionState) {
   if (!conv.length) return null;
   // objectif : le plus ancien message humain disponible (limit=30 : parfois pas le tout premier)
   const goal = (conv.find(m => m.type === 'user')?.payload?.text ?? '').slice(0, 400);
-  // du frais : messages apparus depuis la dernière analyse ; premier passage = les 4 derniers
+  // du frais : messages apparus depuis la dernière analyse ; premier passage ou force = les 4 derniers
   const idx = s.lastMsgID ? conv.findIndex(m => m.id === s.lastMsgID) : -1;
   let fresh = idx >= 0 ? conv.slice(idx + 1) : conv.slice(-4);
+  if (force && !fresh.length) fresh = conv.slice(-4);
   fresh = fresh.slice(-6);
   s.lastMsgID = conv[conv.length - 1]?.id ?? s.lastMsgID;
   if (!fresh.length) return null;
@@ -124,7 +125,7 @@ function parseVerdict(text: string): { resume?: string; termine?: boolean; confi
     const confiance = pick('confidence', 'confiance');
     const progress = pick('progress', 'progrès', 'avancement');
     const attend = pick('pending_human', 'attend', 'attente');
-    const note = pick('confidence_note', 'confidence_why', 'note');
+    const note = pick('confidence_reason', 'confidence_note', 'confiance_reason', 'pourquoi');
     if (typeof resume !== 'string') return null;
     return {
       resume: String(resume).slice(0, 300),
@@ -137,11 +138,11 @@ function parseVerdict(text: string): { resume?: string; termine?: boolean; confi
   } catch { return null; }
 }
 
-async function analyseOnce(sid: string, title: string, dir?: string, status?: string) {
+async function analyseOnce(sid: string, title: string, dir?: string, status?: string, force = false) {
   const s = get(sid);
   if (s.inFlight) return;
   try {
-    const digest = await digestNew(sid, s);
+    const digest = await digestNew(sid, s, force);
     if (!digest) { s.lastRunAt = Date.now(); return; }
     s.inFlight = true;
     const compId = await ensureCompanion(sid, s);
@@ -151,6 +152,7 @@ async function analyseOnce(sid: string, title: string, dir?: string, status?: st
       s.lastBrief ? `Ton dernier résumé : ${s.lastBrief}` : '',
       `Message(s) récent(s) :`,
       digest,
+      `Rappel : ton JSON doit inclure TOUTES les clés, surtout confidence_reason (ta justification, une phrase).`,
     ].filter(Boolean).join('\n\n').slice(0, MAX_INJECT_CHARS);
     const p = await jpost(`/api/openchamber/sessions/${compId}/send`, { prompt: inject, agent: 'superviseur-analyste', directory: dir });
     if (!p.ok) throw new Error(`prompt compagnon → ${p.status}`);
@@ -180,11 +182,12 @@ export function companionTick(sessions: OpenchamberSession[], statusMap: Record<
     if (!stt) continue;
     const s = get(sess.id);
     const verdict = verdictOf(sess.id) as { note?: string } | null;
+    const needsNote = !!verdict && !verdict.note;
     const due = stt.status === 'idle'
       || (stt.status === 'busy' && (s.lastRunAt ?? 0) < Date.now() - PERIOD_MS)
-      || (!!verdict && !verdict.note && (s.lastRunAt ?? 0) < Date.now() - 60_000);
+      || (needsNote && (s.lastRunAt ?? 0) < Date.now() - 60_000);
     if (s.inFlight || !due) continue;
-    void analyseOnce(sess.id, sess.title ?? sess.id.slice(0, 12), sess.location?.directory, stt.status);
+    void analyseOnce(sess.id, sess.title ?? sess.id.slice(0, 12), sess.location?.directory, stt.status, needsNote);
   }
 }
 

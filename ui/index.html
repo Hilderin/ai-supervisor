@@ -204,7 +204,7 @@ function questionBoxHTML(row){
 function ensureCard(row, waiting){
   let ent = cards.get(row.id);
   const brief = row.sup?.resume || briefRow(row, waiting);
-  const sig = [row.status, waiting ? 'W' : 'R', row.sup?.termine ? 'T' : '', row.pendingForms?.[0]?.id ?? '', row.pendingPermissions?.[0]?.id ?? ''].join('|');
+  const sig = [row.status, waiting ? 'W' : 'R', row.sup?.termine ? 'T' : '', row.sup?.progress ?? '', row.sup?.confiance ?? '', row.pendingForms?.[0]?.id ?? '', row.pendingPermissions?.[0]?.id ?? ''].join('|');
   if (ent && ent.sig === sig) {
     const b = ent.el.querySelector('.brief');
     if (b && b.firstChild && b.textContent !== brief) b.textContent = brief;
