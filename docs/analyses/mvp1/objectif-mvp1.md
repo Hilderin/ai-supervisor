@@ -1,4 +1,8 @@
-# 10 — MVP1 : le Superviseur flotte (objectif figé)
+# MVP1 — Objectif du Superviseur flotte (figé)
+
+> Doc déplacé depuis `design_concept/10-mvp1-objectif.md`. Suite continue dans ce dossier : `spike-integration.md` (constats réels), puis plan d'implémentation.
+
+## 1. L'objectif en une phrase
 
 Référence visuelle de l'objectif : `mockups/04-flotte-rendus.html` (la maquette « pas mal intéressante »), validée par Guillaume le 2026-11-06..Adjugé.
 

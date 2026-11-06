@@ -1,4 +1,6 @@
-# 11 — Notes du spike d'intégration (config réelle)
+# Spike d'intégration — notes (config réelle)
+
+> Doc déplacé depuis `design_concept/11-spike-integration.md`. Suite du dossier MVP1 : `objectif-mvp1.md` avant, plan d'implémentation après.
 
 Spike joué le 2026-11-06 (~45 min) contre l'instance réelle de Guillaume, via les tools OpenChamber (MCP) + curl HTTP. Tout sur session jetable. L'objectif : vérifier que chaque geste de la maquette MVP1 a sa route réelle. Résultat : **les 4 gestes critiques sont confirmés en direct.**
 
