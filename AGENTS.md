@@ -39,6 +39,7 @@ Directives pour tout agent travaillant dans ce repo.
 - Formulaire de questions : **multi-champs** (q0, q1 → un seul bouton Répondre) ; `type` variable (`string`, `multiselect` → valeur en TABLEAU) ; répondre par objet `{qN: ...}` complet.
 - JSON des agents : clés **en anglais** (`summary/done/confidence/progress/pending_human/confidence_reason`) + clés toutes déclarées **requises** (les clés optionnelles ne sont pas nourries de façon fiable) ; parser tolérant aux variantes accentuées.
 - Menu contextuel : `position:absolute` exige un ancêtre positionné: `.card { position:relative }` sinon le menu s'ancre à la page.
+- **ui/index.html est du JS PARSE (pas TypeScript)**: jamais d'annotations de type (`const f = (r: T) =>`) dans les scripts de la page — SyntaxError mort à l'écran, la flotte disparaît entièrement.
 
 ### Compagnon (analyste)
 

@@ -136,8 +136,8 @@ function briefRow(row, waiting){
 const cards = new Map(); // sid -> {el, sig}
 
   // la tâche est vraiment TERMINE seulement si son verdict est postérieur au tour actuel
-  const isDone = (r: { status?: string; sup?: { termine?: boolean; at?: number }; turnStartedAt?: number }) =>
-    !!r.sup?.termine && !(r.status === 'busy' && r.turnStartedAt && (r.sup.at ?? 0) < r.turnStartedAt);
+const isDone = (r) =>
+  !!r.sup?.termine && !(r.status === 'busy' && r.turnStartedAt && (r.sup.at ?? 0) < r.turnStartedAt);
 
 function cardHTML(row, waiting){
   const staleTurn = row.status === 'busy' && row.sup && row.turnStartedAt && row.sup.at && (row.sup.at < row.turnStartedAt);
