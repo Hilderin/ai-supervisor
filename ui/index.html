@@ -136,7 +136,7 @@ const cards = new Map(); // sid -> {el, sig}
 
 function cardHTML(row, waiting){
   const staleTurn = row.status === 'busy' && row.sup && row.turnStartedAt && row.sup.at && (row.sup.at < row.turnStartedAt);
-  const brief = staleTurn ? 'reçu : ta nouvelle demande vient d\u2019être prise en charge' : (row.sup?.resume || briefRow(row, waiting));
+  const brief = staleTurn ? 'Réflexion en cours…' : (row.sup?.resume || briefRow(row, waiting));
   const dot = waiting ? '<span class="dot o"></span>'
     : row.status === 'busy' ? '<span class="dot spin"></span>'
     : (row.sup?.termine ? '<span class="dot pale"></span>' : '<span class="dot full"></span>');
@@ -221,7 +221,7 @@ function questionBoxHTML(row){
 function ensureCard(row, waiting){
   let ent = cards.get(row.id);
   const staleTurn = row.status === 'busy' && row.sup && row.turnStartedAt && row.sup.at && (row.sup.at < row.turnStartedAt);
-  const brief = staleTurn ? 'reçu : ta nouvelle demande vient d\u2019être prise en charge' : (row.sup?.resume || briefRow(row, waiting));
+  const brief = staleTurn ? 'Réflexion en cours…' : (row.sup?.resume || briefRow(row, waiting));
   const sig = [row.status, waiting ? 'W' : 'R', row.sup?.termine ? 'T' : '', row.sup?.progress ?? '', row.sup?.confiance ?? '', row.pendingForms?.[0]?.id ?? '', row.pendingPermissions?.[0]?.id ?? ''].join('|');
   if (ent && ent.sig === sig) {
     const b = ent.el.querySelector('.brief');
