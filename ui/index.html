@@ -110,7 +110,7 @@ function cardHTML(row, waiting){
     <div class="r1">${dot}<span class="title">${esc(row.title)}</span>${chip}<span class="sp"></span>${topActions(row)}
       <button class="ocbtn" data-open="${esc(row.id)}" title="Ouvrir dans OpenChamber">${SVG_OC}</button></div>
     <div class="brief">${esc(brief)}</div>
-    ${composerHTML(row)}${questionBoxHTML(row)}`;
+    ${questionBoxHTML(row)}${composerHTML(row)}`;
 }
 let composerFocusSid = null;
 function composerHTML(row){
