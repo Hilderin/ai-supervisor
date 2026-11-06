@@ -15,9 +15,7 @@ export default function App() {
     <div>
       <div className="mb-[14px] flex items-center justify-between">
         <div className="flex items-center gap-[9px]">
-          <div className="flex h-[26px] w-[26px] items-center justify-center rounded-[7px] bg-green text-[13px] text-white">
-            ◉
-          </div>
+          <img src="/favicon.svg" alt="" aria-hidden="true" className="h-[26px] w-[26px]" />
           <h1 className="text-[16px] font-bold">Superviseur</h1>
         </div>
         <div className="text-[12px] text-muted">
