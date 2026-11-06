@@ -113,7 +113,9 @@ function buildFleet(status: StatusPayload): Fleet {
     const wb = b.pendingForms.length + b.pendingPermissions.length;
     if (wb !== wa) return wb - wa;
     if (a.status !== b.status) return a.status === 'busy' ? -1 : 1;
-    return (b.lastUpdateAt ?? 0) - (a.lastUpdateAt ?? 0);
+    // clé stable: turnStartedAt (et non lastUpdateAt: les refresh de metadata d'OpenChamber
+    // faisaient re-trier à chaque tick = les cartes se déplacaient et flicker à l'écran)
+    return (b.turnStartedAt ?? 0) - (a.turnStartedAt ?? 0);
   });
   return { at: Date.now(), rows, concern };
 }
