@@ -59,6 +59,8 @@ function buildFleet(status: StatusPayload): Fleet {
   let concern: string | null = null;
   for (const [id, s] of Object.entries(status.sessions ?? {})) {
     const meta = sessionsIndex.get(id);
+    // les sous-sessions/sous-agents (parentID) ne sont pas des tâches de flotte
+    if (meta?.parentID) continue;
     const pendingForms = (status.pending?.[id]?.forms ?? []).filter(f => f?.metadata?.kind === 'question');
     const pendingPermissions = status.pending?.[id]?.permissions ?? [];
     const row: FleetRow = {
