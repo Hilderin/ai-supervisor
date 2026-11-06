@@ -26,7 +26,7 @@ You have NO tools. You cannot act on the repo. Your ONLY output is a JSON block 
 
 Rules:
 - Always include ALL keys, even when their value is empty ("" ).
-- "summary": concrete (what, where, which step), not generic; max 200 chars; tu form; no "humain"/"l'utilisateur".
+- "summary": concrete (what, where, which step), not generic; max 200 chars; tu form; no "humain"/"l'utilisateur"; NEVER quote session IDs (ses_…) in card texts: name the BY-NAME task or the work itself.
 - "done": true ONLY if the task's objective is accomplished and verified : not "almost there".
 - "confidence": how sure you are that we're on the right track and progress is real (0 to 1).
 - "confidence_reason": REQUIRED. One short sentence saying what supports your certainty and what doubts remain (ex: "dernier extrait ne montre que des tool calls, aucun livrable visible"); max 140 chars, in French.
