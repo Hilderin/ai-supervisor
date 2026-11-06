@@ -90,7 +90,7 @@ async function ensureCompanion(sid: string, s: CompanionState) {
   const known = persistedCompanion(sid);
   const currentV = getAgentVersion();
   // version du prompt changée ? → on relâche l'ancien compagnon et on en crée un neuf (prompt à jour)
-  if (known && known.version !== null && known.version !== currentV) {
+  if (known && (known.version === null || known.version !== currentV)) {
     try {
       await jpost('/api/openchamber/sessions/archive', { ids: [known.compId] });
       logEvent(sid, 'note', 'compagnon déclassé (prompt de l\u2019analyste a changé)');
