@@ -16,9 +16,28 @@ export function Composer({ sessionId }: Props) {
   const text = useFleetStore((s) => s.drafts[sessionId] ?? '');
   const setDraft = useFleetStore((s) => s.setDraft);
   const clearDraft = useFleetStore((s) => s.clearDraft);
+  const setFocus = useFleetStore((s) => s.setFocus);
+  // une frame de flotte (SSE ou GET) peut déplacer ou remonter la carte :
+  // c'est le signal pour vérifier et restaurer le focus
+  const fleetAt = useFleetStore((s) => s.fleet?.at);
   const ref = useRef<HTMLTextAreaElement>(null);
   const interacted = useRef(false);
   const [atMax, setAtMax] = useState(false);
+
+  useLayoutEffect(() => {
+    const ta = ref.current;
+    if (!ta) return;
+    // le composeur de cette session avait le focus et la carte vient d'être
+    // démontée/remontée ou déplacée (changement de section, fuite GET) :
+    // rendre le curseur et ramener la carte en vue
+    if (useFleetStore.getState().focused !== sessionId) return;
+    if (document.activeElement === ta) return;
+    ta.focus();
+    const len = ta.value.length;
+    ta.setSelectionRange(len, len);
+    const card = ta.closest('[data-sid]');
+    card?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }, [sessionId, text, fleetAt]);
 
   useLayoutEffect(() => {
     const ta = ref.current;
@@ -36,16 +55,19 @@ export function Composer({ sessionId }: Props) {
     const value = text.trim();
     if (!value) return;
     clearDraft(sessionId);
-    ref.current?.blur();
+    // garder le focus après l'envoi : le prompt peut faire changer la carte de place
+    setFocus(sessionId);
+    if (document.activeElement !== ref.current) ref.current?.focus();
     void sendPrompt(sessionId, value).catch((e) => console.error('[send]', e));
   };
 
   return (
-    <div className="mt-[12px] flex items-end gap-[7px] border-t border-border pt-[10px]">
+    <div data-composer className="mt-[12px] flex items-end gap-[7px] border-t border-border pt-[10px]">
       <textarea
         ref={ref}
         rows={1}
         value={text}
+        onFocus={() => setFocus(sessionId)}
         onChange={(e) => {
           interacted.current = true;
           setDraft(sessionId, e.target.value);

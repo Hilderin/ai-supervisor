@@ -11,11 +11,14 @@ interface FleetState {
   closed: Record<string, number>;
   /** brouillons du composer, conservés même si la carte change de section */
   drafts: Record<string, string>;
+  /** composer qui tient le focus : restauré quand React démonte/remonte la carte */
+  focused: string | null;
   setFleet: (fleet: Fleet) => void;
   setError: (error: string | null) => void;
   closeSession: (id: string, at?: number) => void;
   setDraft: (id: string, text: string) => void;
   clearDraft: (id: string) => void;
+  setFocus: (id: string | null) => void;
 }
 
 export const useFleetStore = create<FleetState>((set) => ({
@@ -24,6 +27,7 @@ export const useFleetStore = create<FleetState>((set) => ({
   placements: {},
   closed: {},
   drafts: {},
+  focused: null,
   setFleet: (fleet) =>
     set((s) => {
       // un GET /api/fleet plus ancien peut arriver après un frame SSE plus récent :
@@ -45,6 +49,11 @@ export const useFleetStore = create<FleetState>((set) => ({
       const drafts = { ...s.drafts };
       delete drafts[id];
       return { drafts };
+    }),
+  setFocus: (id) =>
+    set((s) => {
+      if (s.focused === id) return s;
+      return { focused: id };
     }),
 }));
 

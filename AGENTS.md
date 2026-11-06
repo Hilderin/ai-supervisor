@@ -22,6 +22,8 @@ Directives pour tout agent travaillant dans ce repo.
 - **`/api/session` est paginé à 50 par défaut**: au-delà de 50 sessions de l'instance (avec tous les enfants compagnon/sous-agents), les parents glissent dans et hors des 50 premières à chaque création → « fantômes » alternatifs dans la flotte et flicker des cartes. TOUJOURS paginer `/api/session?limit=200` (ou paginer explicitement).
 
 - L'ordre des messages est **descendant** (plus récent d'abord) : `.slice(-n)` prend les plus anciens: toujours trier sur `time.created` avant usage.
+- **Le prompt humain est à la RACINE du message** (`m.text`) sur l'API installée, pas dans `payload.text` (ancienne forme) : lire `m.text ?? m.payload.text` (helper `daemon/src/messages.mts`), sinon le compagnon ne voit aucun message utilisateur, son « objectif » reste `inconnu de l'extrait` et ses résumés ne parlent que de la sortie de l'agent.
+- `/api/session/:id/message?limit=N&order=asc` renvoie les **plus anciens** messages (défaut : desc). Utile pour retrouver le premier prompt sans paginer, et sans dépendre de la fenêtre des 30 derniers (un long tour fait sortir le prompt de la fenêtre).
 - Le marqueur `completed` d'un message assistant arrive **en retard** : filtrer sur `completed` pour décider qu'une réponse est lisible = faux négatif. Vérifier que le texte tient debout (p.ex. parse JSON du compagnon).
 - Un tour en cours = souvent des tool calls **sans texte** : pour savoir ce qui se passe, lire la part `reasoning` du dernier assistant.
 - `POST /api/session/:id/prompt` **ignore le champ `agent`** sur la version installée. Pour changer d'agent : `POST /api/openchamber/sessions/:id/send` avec `{prompt, agent, directory}`: directory **requis** (dossier du parent).
@@ -60,6 +62,8 @@ Directives pour tout agent travaillant dans ce repo.
 ### Compagnon (analyste)
 
 - Session compagnon = enfant de la session supervisée ; agent global sans-tool, **canonical dans `daemon/agent/`** + symlink dans `~/.config/opencode/agent/`.
+- `confidence: null` = état légitime « non disponible » (rien à juger dans l'extrait) : stocké NULL en DB, mappé `undefined` côté UI, **pastilles grises + tooltip « Confiance non disponible »**. Ne pas redistribuer vers 0 (ancien bug : `Number(undefined) || 0` dégradait le « je ne sais pas » en « confiance 0 % », faux signal rouge).
+- `companion_map.version` doit être écrite à chaque `putCompanion` : une deuxième définition non versionnée écrasait la première et laissait `version` à `NULL`, d'où un compagnon ARCHIVÉ et recréé à chaque analyse (historique fragmenté, `comp. supervision` qui semble ne jamais contenir l'échange en cours).
 - Déclencheurs : idle + 5 min si nouveaux messages ; digest **incrémental** (dernier id vu) + goal (1er message humain) + dernier assistant taggé « état le plus récent » + reasoning si busy.
 - Le verdict JSON est un **signal**, jamais une décision : la migration TERMINE reste un geste humain.
 - Rattrapage (ré-analyse sans nouveaux messages) : passer `force` au digest, sinon les sessions au repos ne rafraîchissent jamais leurs verdicts (et une migration de schéma ne se propage jamais).
@@ -68,6 +72,7 @@ Directives pour tout agent travaillant dans ce repo.
 ### Repo & docs
 
 - **Lister le dossier avant d'attribuer un numéro de doc** (double 09 déjà arrivé).
+- **Une demande de boîte à idées n'est pas un chantier d'implémentation** (déjà arrivé : « ajoute l'idée confiance non définie » lu comme « implémente-la »). Quand un message peut se lire comme une note de conception OU une tâche de code, trancher explicitement avant d'agir (question courte : « note dans la boîte, ou j'implémente ? »).
 - Le MVP1 est le contrat (`docs/analyses/mvp1/objectif-mvp1.md`) : création de session en dernier (design en évolution).
 - Ne pas dupliquer : ce qui est analysé ailleurs (spike, architecture) se cite par lien.
 - UI React : décisions et commandes dans `docs/analyses/mvp1/implementation-ui-react.md` et `ui/README.md`.

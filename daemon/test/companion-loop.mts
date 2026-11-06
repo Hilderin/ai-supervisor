@@ -3,6 +3,7 @@
  * Vérifie, sur une session jetable REELLE :
  *  1. un repo instantané : le compagnon met à jour le verdict prompt reçu (< 30 s),
  *  2. un seuil de latence : le déclencheur prompt n'est PERT qu'une fois (une analyse, pas deux, dans les 10 s),
+ *  2 bis. le digest du compagnon contient le prompt humain ([HUMAIN]) et l'objectif (premier prompt),
  *  3. ANTI-FEUILLE : sans nouveau contenu (session idle au repos), le compagnon ne relance RIEN pendant 45 s,
  *  4. la re-activité d'extraction du consentement de l'utilisateur (le dernier message traité devient le reflet de la flotte).
  * Cleanup : archive la session de test (parent et enfants compagnon).
@@ -50,6 +51,16 @@ async function main() {
   }
   check('compagnon relancé par le prompt < 30 s', lat != null, `latence=${lat}ms`);
   await sleep(10_000);   // laisse le tour se terminer et la clôture compagnon finir
+
+  // 2 bis. le compagnon doit VOIR le prompt humain (régression : texte lu dans payload.text au lieu de m.text)
+  const compRow = dbR.query('SELECT companion_session_id c, version v FROM companion_map WHERE parent_session_id = ?').get(sid) as { c?: string; v?: number | null } | undefined;
+  const compId = compRow?.c;
+  const compMsgs = await getJSON(`${OC}/api/session/${compId}/message?limit=20`);
+  const injected = ((compMsgs.data ?? []) as Array<{ type?: string; text?: string }>)
+    .filter(m => m.type === 'user').map(m => m.text ?? '').join('\n');
+  check('prompt humain présent dans le digest ([HUMAIN])', injected.includes('[HUMAIN]') && injected.includes('test kick'));
+  check('objectif = premier prompt de la session', injected.includes('Objectif de la tâche : Robot du test compagnon'));
+  check('companion_map.version enregistrée (pas de recréation à chaque analyse)', compRow?.v != null, `version=${compRow?.v ?? 'NULL'}`);
 
   // 3. anti-relance à vide (SCOPE : session de test; les autres sessions peuvent bouger légitimement)
   const c0s = (dbR.query("SELECT count(*) c FROM task_log WHERE kind='note' AND session_id = ? AND text LIKE '%analyste:%'").get(sid) as { c: number }).c;

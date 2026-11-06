@@ -23,7 +23,17 @@ export function ConfidenceDots({ conf, note }: Props) {
         />
       ))}
       <span className="absolute right-[-6px] bottom-[18px] z-[70] hidden max-w-[300px] rounded-[9px] bg-ink px-[11px] py-[9px] text-left text-[12.5px] leading-[1.5] text-white shadow-[0_8px_22px_rgba(0,0,0,.22)] [overflow-wrap:anywhere] group-hover:block">
-        {conf == null ? null : (
+        {conf == null ? (
+          <>
+            <b>Confiance non disponible</b>
+            {note ? (
+              <>
+                <br />
+                {note}
+              </>
+            ) : null}
+          </>
+        ) : (
           <>
             <b>Confiance {Math.round(conf * 100)} %</b>
             {note ? (

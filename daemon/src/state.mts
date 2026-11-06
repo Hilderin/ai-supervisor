@@ -64,7 +64,7 @@ export function getAgentVersion(): number {
 export function getVerdict(sessionId: string) {
   return db.query('SELECT * FROM task_verdict WHERE session_id = ?').get(sessionId) ?? null;
 }
-export function upsertVerdict(sessionId: string, v: { resume?: string; termine?: boolean; confiance?: number; progress?: number; attend?: string; note?: string }) {
+export function upsertVerdict(sessionId: string, v: { resume?: string; termine?: boolean; confiance?: number | null; progress?: number; attend?: string; note?: string }) {
   db.query(`INSERT INTO task_verdict (session_id, resume, confiance, progress, termine, attend, note, at)
             VALUES (?,?,?,?,?,?,?,?)
             ON CONFLICT(session_id) DO UPDATE SET resume=excluded.resume, confiance=excluded.confiance,
@@ -84,10 +84,6 @@ export function putCompanion(parentSid: string, compId: string) {
 export function reopenTaskState(sid: string) {
   db.query('UPDATE task_state SET closed_at = NULL, closure = NULL WHERE session_id = ?').run(sid);
   db.query('DELETE FROM task_verdict WHERE session_id = ?').run(sid);
-}
-export function putCompanion(parentSid: string, compId: string) {
-  db.query('INSERT INTO companion_map (parent_session_id, companion_session_id, created_at) VALUES (?,?,?) ON CONFLICT(parent_session_id) DO UPDATE SET companion_session_id=excluded.companion_session_id')
-    .run(parentSid, compId, Date.now());
 }
 
 export function getCompanionOut(parentSid: string): string | null { return getCompanion(parentSid); }

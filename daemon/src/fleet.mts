@@ -18,7 +18,7 @@ export interface OpenchamberSession {
 import { companionTick, verdictOf } from './companion.mts';
 
 function supOf(id: string): Verdict | undefined {
-  const v = verdictOf(id) as { resume?: string; confiance?: number; progress?: number; termine?: number; attend?: string; note?: string; at?: number } | null;
+  const v = verdictOf(id) as { resume?: string; confiance?: number | null; progress?: number; termine?: number; attend?: string; note?: string; at?: number } | null;
   if (!v) return undefined;
   return { resume: v.resume ?? undefined, confiance: v.confiance ?? undefined, progress: v.progress ?? undefined, termine: !!v.termine, attend: v.attend ?? undefined, note: v.note ?? undefined, at: v.at ?? undefined };
 }

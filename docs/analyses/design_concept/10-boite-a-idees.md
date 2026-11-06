@@ -85,4 +85,50 @@ Chaque conversation affiche **la date et l'heure de sa dernière activité**, do
 
 À creuser : quelle activité compte (dernier message ? dernier tool call ?) ; le format court en petit format (fenêtre en coin d'écran) : relatif seul, absolu en tooltip ; et le lien avec les états (une session « en cours » dont la dernière activité date de 3 h est un signal en soi).
 
-Questions à trancher plus tard : ce chat est-il un agent distinct (quel modèle ?) ou une session OpenChamber ordinaire ? Sécurité du MCP de supervision (l'assistant peut tout faire ? confirmation humaine pour les actions d'écriture ?).
+### Objectif courant affiché sur la carte, en plus du résumé
+
+Discussion du 6 nov : ajouter une ligne « objectif courant » sur chaque carte, en plus du `resume` du compagnon. Le résumé dit ce qui se passe, pas où ça va ; sur une flotte, c'est l'info qui manque au retour (« c'est quoi le but de cette carte ? ») et l'entité Goal du doc 02 n'est jamais rendue à l'écran.
+
+En l'état, le verdict du compagnon (`Verdict` dans `ui/src/types.ts`) n'a pas de champ goal : le digest passe le premier message humain comme contexte, et le prompt de l'analyste ne le réutilise qu'au détour d'un tour vide (« je travaille sur ta demande : <objectif court> »).
+
+Avis et réserves (à trancher avant d'implémenter) :
+
+- pas une deuxième phrase de texte : une ligne courte, de type « Objectif : migrer le schéma v2 », sinon la carte devient un mur (anti wall-of-text, doc 03) ;
+- éviter la redondance : pour une petite tâche, objectif = résumé ; l'analyste ne remplit le champ que s'il apporte quelque chose de distinct ;
+- champ de plus à produire à chaque tour : risque de plateau, donc le mettre dans le sig de la carte et ne l'afficher que s'il change (leçon anti flicker) ;
+- coût d'implémentation faible si validé : clé en anglais `goal` déclarée requise dans le JSON de l'analyste (leçon clés en anglais), puis une ligne dans `SessionCard`.
+
+### Le superviseur fixe l'objectif, et peut stopper ou rediriger un agent qui dérape
+
+Idée du 6 nov, née d'un vrai cas : la demande portait sur l'ajout d'une idée dans la boîte (la confiance non définie) ; l'agent l'a comprise comme « implémente-la » et est parti en implémentation. En réunion, avec la flotte qui roule en parallèle, ce genre de glissement passe inaperçu : une demande de conception est devenue un chantier de code sans garde-fou, et on ne s'en aperçoit qu'après coup. (L'implémentation en question est conservée : elle était presque terminée et utile ; mais le cas montre bien le manque.)
+
+Ce que le superviseur devrait savoir faire :
+
+- **fixer l'objectif de chaque conversation** : l'objectif explicite, fixé (ou confirmé) par l'utilisateur au lancement, devient la référence de jugement, pas juste une info affichée (c'est la suite logique de l'idée « objectif courant » ci-dessus) ;
+- **détecter le dérapage** : l'analyste compare le travail observé à l'objectif et remonte un signal quand il part du champ gauche : périmètre élargi sans mandat, type de sortie inattendu (du code au lieu d'une note, par exemple), ou objectif qui a changé sous le coude ;
+- **arrêter ou rediriger en un clic depuis la carte** : stopper (interrupt / kill), recentrer (send direct avec consigne de realignement, les modes d'envoi déjà listés ici), ou fork pour tester une autre voie sans perdre l'original ;
+- potentiellement un garde-fou symétrique pour l'agent du superviseur lui-même : une demande d'écriture dans cette boîte à idées n'est pas une demande d'implémentation ; au delà du cas particulier, une règle générale à écrire : « dérive d'entendement à valider avant d'agir hors du périmètre explicite ».
+
+Lien : Goal du doc 02, niveaux de signal du doc 03, PILOT du doc 08. C'est précisément le cas où le Superviseur porte l'attention : sentir un dérapage d'un coup d'œil, depuis un meeting, pendant que la flotte roule.
+
+### Ordre des cartes figé : les nouvelles en bas, rien ne bouge sous le curseur
+
+Discussion du 6 nov : pendant qu'on lit la flotte, et surtout pendant qu'on écrit dans une carte, de nouvelles tâches surgissent et les cartes se réordonnent. Les titres changent de place sous le curseur, et une carte peut quitter la zone qu'on était en train de lire. Demande : les tâches en cours ne doivent jamais changer d'ordre à l'écran, et les nouvelles doivent se ranger en bas.
+
+Constat sur le code actuel :
+
+- `daemon/src/fleet.mts` retrie à chaque poll : cartes en attente (formulaire / permission) d'abord, puis `busy`, puis `turnStartedAt` décroissant. Un nouveau tour, ou une carte qui devient `busy`, remonte donc au-dessus des autres ;
+- `FleetBoard.tsx` ne fait que répartir les lignes reçues dans les trois sections : c'est le daemon qui décide de l'ordre relatif ;
+- `ui/src/lib/placement.ts` ne stabilise que le passage EN COURS ↔ TERMINÉ (hystérésis de 8 s) : l'ordre interne d'une section n'a aucun garde-fou. Le même type d'hystérésis, appliqué à l'ordre, serait la piste naturelle.
+
+Piste : un ordre d'arrivée strict, tenu côté UI (l'ordre reçu n'est plus suivi) : une carte garde sa position tant qu'elle est affichée, les nouvelles sont ajoutées à la fin, et les changements d'état ne réordonnent pas.
+
+Sous-question soulevée le même jour, à trancher : **faut-il supprimer les sections et n'avoir qu'une seule liste, toujours dans le même ordre ?** Avantages : plus de saut d'une section à l'autre, une carte ne change jamais de place, et on retrouve une carte par sa position (mémoire spatiale). Coûts : on perd le triage « ce qui m'attend » en haut, qui est le signal principal du dashboard ; il faut le remplacer par un marqueur d'état (badge, couleur, liseré d'attention) et par un moyen de faire remonter une carte urgente (voir l'idée « pinner des conversations »).
+
+À creuser avant d'implémenter :
+
+- ordre d'arrivée ou ordre de création de la session (une session ancienne relancée est-elle « nouvelle » et repart-elle en bas ?) ;
+- sort d'une carte terminée : elle reste à sa place et pâlit, ou elle descend en bas une fois le verdict stabilisé (ce qui est déjà un déplacement, donc une exception assumée) ;
+- compagnon qui change d'avis : une carte qui repasse EN COURS revient-elle à sa position d'origine, ou reste-t-elle là où elle est ;
+- interaction avec la liste fermée (`closed`) et avec le filtre des sessions enfant : un retrait ne doit pas faire glisser toutes les cartes vers le haut ;
+- cohérence SSE / GET : l'ordre figé doit être porté par un état persistant de l'UI, sinon chaque snapshot reconstruit depuis `fleet.rows` réintroduit le tri du daemon.

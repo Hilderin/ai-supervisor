@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { FleetBoard } from './components/FleetBoard';
 import { useFleetStream } from './hooks/useFleetStream';
 import { useNow } from './hooks/useNow';
@@ -8,6 +9,19 @@ export default function App() {
   const fleet = useFleetStore((s) => s.fleet);
   const error = useFleetStore((s) => s.error);
   const now = useNow(1000);
+
+  // un clic hors des composers (menu de la carte, question, ailleurs) libère
+  // le focus mémorisé : sans ce garde-fou, on rendrait le curseur bien après
+  // que l'utilisateur a passé la main
+  useEffect(() => {
+    const onDown = (e: PointerEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target?.closest?.('[data-composer]')) return;
+      if (useFleetStore.getState().focused !== null) useFleetStore.getState().setFocus(null);
+    };
+    document.addEventListener('pointerdown', onDown, true);
+    return () => document.removeEventListener('pointerdown', onDown, true);
+  }, []);
 
   const live = fleet == null ? 'connexion…' : now - fleet.at < 8000 ? 'live' : 'reconnexion…';
 

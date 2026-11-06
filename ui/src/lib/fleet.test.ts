@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { isClosedRow } from '../store/fleetStore';
 import type { FleetRow } from '../types';
-import { briefRow, fmtAge, isDone, isStaleTurn } from './fleet';
+import { briefRow, fmtAge, isDone, isStaleTurn, confidenceColor, confidenceLevel } from './fleet';
 
 const row = (over: Partial<FleetRow>): FleetRow => ({
   id: 'ses_test',
@@ -72,6 +72,21 @@ describe('briefRow / fmtAge', () => {
     expect(fmtAge(30_000)).toBe('il y a 30 s');
     expect(fmtAge(3 * 3_600_000)).toBe('il y a 3 h');
     expect(fmtAge(2 * 86_400_000)).toBe('il y a 2 j');
+  });
+});
+
+describe('confiance (three dots)', () => {
+  test('conf null : non disponible → niveau 0, pas de couleur (pastilles grises)', () => {
+    expect(confidenceLevel(null)).toBe(0);
+    expect(confidenceColor(null)).toBe(null);
+  });
+
+  test('paliers : faible / moyenne / haute', () => {
+    expect(confidenceLevel(0.2)).toBe(1);
+    expect(confidenceLevel(0.5)).toBe(2);
+    expect(confidenceLevel(0.9)).toBe(3);
+    expect(confidenceColor(0.2)).toBe('#d95f5f');
+    expect(confidenceColor(0.9)).toBe('#2b9f6a');
   });
 });
 

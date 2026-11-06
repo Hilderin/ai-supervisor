@@ -7,6 +7,7 @@
 import { logEvent, upsertVerdict, getVerdict, getCompanion, putCompanion } from './state.mts';
 import { takeKick } from './kicks.mts';
 import { getAgentVersion } from './state.mts';
+import { messageText } from './messages.mts';
 
 let base = '';
 export function setBase(b: string) { base = b.replace(/\/$/, ''); }
@@ -21,6 +22,7 @@ interface CompanionState {
   lastMsgID?: string;
   lastRunAt?: number;
   lastBrief?: string;
+  goal?: string;
 }
 const st = new Map<string, CompanionState>();
 const get = (sid: string) => {
@@ -42,16 +44,32 @@ async function jget(path: string) {
   return res.json();
 }
 
+type M = { id: string; type: string; time?: { created?: number }; text?: string; content?: Array<{ type: string; text?: string }>; payload?: { text?: string } };
+
+/** objectif stable : premier message humain de la session, pas seulement de la fenêtre récente */
+async function sessionGoal(sid: string, s: CompanionState): Promise<string> {
+  if (s.goal) return s.goal;
+  try {
+    // `order=asc` renvoie les PLUS ANCIENS messages (sans paginer tout l'historique)
+    const first = await jget(`/api/session/${sid}/message?limit=20&order=asc`) as { data?: M[] };
+    const conv = (first.data ?? [])
+      .filter(m => m.type === 'user' || m.type === 'assistant')
+      .sort((a, b) => (a.time?.created ?? 0) - (b.time?.created ?? 0));
+    const txt = messageText(conv.find(m => m.type === 'user') ?? ({ type: 'user' } as M));
+    if (txt) s.goal = txt.slice(0, 400);
+  } catch { /* l'objectif de la fenêtre récente fera l'affaire */ }
+  return s.goal ?? '';
+}
+
 /** fetch les messages, ordonnés chronologiquement ; détecte l'objectif (1er message humain) */
 async function digestNew(sid: string, s: CompanionState, force = false) {
-  type M = { id: string; type: string; time?: { created?: number }; content?: Array<{ type: string; text?: string }>; payload?: { text?: string } };
   const out = await jget(`/api/session/${sid}/message?limit=30`) as { data?: M[] };
   const conv = (out.data ?? [])
     .filter(m => m.type === 'user' || m.type === 'assistant')
     .sort((a, b) => (a.time?.created ?? 0) - (b.time?.created ?? 0));   // ancien → récent, peu importe l'ordre de l'API
   if (!conv.length) return null;
-  // objectif : le plus ancien message humain disponible (limit=30 : parfois pas le tout premier)
-  const goal = (conv.find(m => m.type === 'user')?.payload?.text ?? '').slice(0, 400);
+  // objectif : premier message humain de la session (le tour en cours peut avoir >30 messages)
+  const goal = ((await sessionGoal(sid, s)) || messageText(conv.find(m => m.type === 'user') ?? ({ type: 'user' } as M))).slice(0, 400);
   // du frais : messages apparus depuis la dernière analyse ; premier passage ou force = les 4 derniers
   const idx = s.lastMsgID ? conv.findIndex(m => m.id === s.lastMsgID) : -1;
   let fresh = idx >= 0 ? conv.slice(idx + 1) : conv.slice(-4);
@@ -63,7 +81,7 @@ async function digestNew(sid: string, s: CompanionState, force = false) {
   const parts: string[] = [];
   for (let i = 0; i < fresh.length; i++) {
     const m = fresh[i];
-    let txt = (m.type === 'user' ? m.payload?.text : m.content?.filter(c => c.type === 'text').map(c => c.text).join(' ')) ?? '';
+    let txt = messageText(m);
     let tag = (i === fresh.length - 1 && m.type === 'assistant')
       ? 'AGENT (DERNIER MESSAGE — état le plus récent du travail)'
       : (m.type === 'user' ? 'HUMAIN' : 'AGENT');
@@ -82,7 +100,7 @@ async function digestNew(sid: string, s: CompanionState, force = false) {
   return parts.join('\n') + `\n(Objectif de la tâche : ${goal || 'inconnu de l\u2019extrait'})`;
 }
 
-function persistedCompanion(sid: string): string | null { return getCompanion(sid); }
+function persistedCompanion(sid: string) { return getCompanion(sid); }
 function rememberCompanion(sid: string, compId: string) { putCompanion(sid, compId); }
 
 async function ensureCompanion(sid: string, s: CompanionState) {
@@ -139,7 +157,7 @@ function scrubFrench(t: string): string {
     .replace(/Arbitrage utilisateur attendu/gi, 'À toi de trancher');
 }
 
-function parseVerdict(text: string): { resume?: string; termine?: boolean; confiance?: number; progress?: number; attend?: string } | null {
+function parseVerdict(text: string): { resume?: string; termine?: boolean; confiance?: number | null; progress?: number; attend?: string } | null {
   const m = text.match(/\{[\s\S]*\}/);
   if (!m) return null;
   try {
@@ -148,7 +166,10 @@ function parseVerdict(text: string): { resume?: string; termine?: boolean; confi
     const pick = (...ks: string[]) => { for (const k of ks) if (v[k] != null) return v[k]; return undefined; };
     const resume = pick('summary', 'resume', 'résumé');
     const termine = pick('done', 'termine', 'terminé', 'fini');
-    const confiance = pick('confidence', 'confiance');
+    // confiance = null du modèle (ou clé absente) : le compagnon n'a rien à juger ;
+    // l'UI affiche alors les trois pastilles en gris, on ne dégrade plus vers 0
+    const confRaw = pick('confidence', 'confiance');
+    const confiance = confRaw == null ? null : Math.max(0, Math.min(1, Number(confRaw) || 0));
     const progress = pick('progress', 'progrès', 'avancement');
     const attend = pick('pending_human', 'attend', 'attente');
     const note = pick('confidence_reason', 'confidence_note', 'confiance_reason', 'pourquoi');
@@ -156,7 +177,7 @@ function parseVerdict(text: string): { resume?: string; termine?: boolean; confi
     return {
       resume: scrubFrench(String(resume)).slice(0, 300),
       termine: !!termine,
-      confiance: Math.max(0, Math.min(1, Number(confiance) || 0)),
+      confiance,
       progress: Math.max(0, Math.min(100, Number(progress) || 0)),
       attend: scrubFrench(typeof attend === 'string' ? attend : '').slice(0, 160),
       note: typeof note === 'string' ? scrubFrench(note).slice(0, 160) : '',
