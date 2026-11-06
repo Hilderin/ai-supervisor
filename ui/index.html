@@ -138,7 +138,7 @@ function cardHTML(row, waiting){
   const brief = row.sup?.resume || briefRow(row, waiting);
   const dot = waiting ? '<span class="dot o"></span>'
     : row.status === 'busy' ? '<span class="dot spin"></span>'
-    : (row.sup?.termine ? '<span class="dot full"></span>' : '<span class="dot pale"></span>');
+    : (row.sup?.termine ? '<span class="dot pale"></span>' : '<span class="dot full"></span>');
   const chip = waiting ? '<span class="chip warn">attends ta réponse</span>' : '';
   const attends = row.sup?.attend ? `<div class="brief" style="color:#b35c17; margin-top:3px;">✋ ${esc(row.sup.attend)}</div>` : '';
   let bars = '';
