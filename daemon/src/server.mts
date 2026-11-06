@@ -94,6 +94,20 @@ async function handleApi(req: http.IncomingMessage, res: http.ServerResponse, ur
     }
     return;
   }
+  if (path === '/api/fleet/send' && req.method === 'POST') {
+    const body = await readBody(req);
+    const sessionId = String(body.sessionId ?? '');
+    const text = String(body.text ?? '').trim();
+    if (!sessionId || !text) { json(res, 400, { error: 'sessionId et text requis' }); return; }
+    try {
+      logEvent(sessionId, 'note', '→ prompt : ' + text.slice(0, 120));
+      json(res, 200, await relay(`/api/session/${sessionId}/prompt`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, delivery: body.delivery ?? 'steer' }),
+      }));
+    } catch (e) { json(res, 502, { error: String(e) }); }
+    return;
+  }
   if (path === '/api/fleet/done' && req.method === 'POST') {
     const body = await readBody(req);
     const sessionId = String(body.sessionId ?? '');

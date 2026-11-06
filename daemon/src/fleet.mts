@@ -8,8 +8,9 @@ const POLL_SLOW_MS = 15_000;
 const POLL_FAST_MS = 3_000;
 
 export interface OpenchamberSession {
-  id: string; title?: string; agent?: string;
+  id: string; title?: string; agent?: string; parentID?: string;
   projectID?: string; time?: Record<string, number>;
+  location?: { directory?: string };
   tokens?: Record<string, number>; outcome?: string;
   metadata?: { openchamber?: { work?: { state?: string }, turn?: { durationMs?: number } } };
 }
@@ -20,6 +21,7 @@ export interface PendingForm {
 }
 export interface FleetRow {
   id: string; title: string; status: string;
+  dir?: string;
   turnStartedAt?: number; lastUpdateAt?: number;
   busy?: number | null; idle?: number | null;
   pendingForms: PendingForm[]; pendingPermissions: unknown[];
@@ -69,6 +71,7 @@ function buildFleet(status: StatusPayload): Fleet {
       id,
       title: meta.title ?? id.slice(0, 18),
       status: s.status,
+      dir: meta.location?.directory,
       turnStartedAt: s.turnStartedAt,
       lastUpdateAt: s.lastUpdateAt,
       busy: meta?.time?.busy ?? null,
