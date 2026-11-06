@@ -299,17 +299,24 @@ function wireForm(qbox, row){
 const doneSids = new Set();
 
 function mount(fleet){
+  lastFleet = fleet;
   const waitingRows = fleet.rows.filter(r => !doneSids.has(r.id) && (r.pendingForms?.length || r.pendingPermissions?.length));
   const doneRows = fleet.rows.filter(r => r.sup?.termine && !doneSids.has(r.id));
   const runRows = fleet.rows.filter(r => !doneSids.has(r.id) && !(r.sup?.termine) && !waitingRows.includes(r));
-  sa.replaceChildren(...waitingRows.map(r => ensureCard(r, true).el));
-  sd.replaceChildren(...doneRows.map(r => ensureCard(r, false).el));
-  sr.replaceChildren(...runRows.map(r => ensureCard(r, false).el));
+  setChildrenIfChanged(sa, waitingRows.map(r => ensureCard(r, true).el));
+  setChildrenIfChanged(sd, doneRows.map(r => ensureCard(r, false).el));
+  setChildrenIfChanged(sr, runRows.map(r => ensureCard(r, false).el));
   const ids = new Set(fleet.rows.map(r => r.id));
   for (const sid of [...cards.keys()]) if (!ids.has(sid)) cards.delete(sid);
   ca.textContent = String(waitingRows.length);
   cr.textContent = String(runRows.length);
   cd.textContent = String(doneRows.length);
+}
+/** replaceChildren déplace même les nœuds identiques → blur. On ne touche au DOM que si l'ordre change. */
+function setChildrenIfChanged(container, els){
+  const cur = Array.from(container.children);
+  if (cur.length === els.length && cur.every((n, i) => n === els[i])) return;
+  container.replaceChildren(...els);
 }
 
 let fleetData = null;
