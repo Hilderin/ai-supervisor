@@ -168,7 +168,15 @@ async function analyseOnce(sid: string, title: string, dir?: string, status?: st
   const s = get(sid);
   if (s.inFlight) return;
   try {
-    const digest = await digestNew(sid, s, force);
+    let digest = await digestNew(sid, s, force);
+    // au kick start (tour qui vient de démarrer), le message peut ne pas être persisté/lu tout de suite :
+    // ré-essayer le digest jusqu'à voir du texte réel (le prompt de l'utilisateur), max ~4 s
+    if (force) {
+      for (let i = 0; i < 5 && digest && !digest.includes('[HUMAIN]') && !digest.includes('[AGENT'); i++) {
+        await new Promise(r => setTimeout(r, 900));
+        digest = await digestNew(sid, s, true);
+      }
+    }
     if (!digest) { s.lastRunAt = Date.now(); return; }
     s.inFlight = true;
     const compId = await ensureCompanion(sid, s);
