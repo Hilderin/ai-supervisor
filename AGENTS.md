@@ -19,6 +19,8 @@ Directives pour tout agent travaillant dans ce repo.
 
 ### API OpenCode / OpenChamber (instance réelle)
 
+- **`/api/session` est paginé à 50 par défaut**: au-delà de 50 sessions de l'instance (avec tous les enfants compagnon/sous-agents), les parents glissent dans et hors des 50 premières à chaque création → « fantômes » alternatifs dans la flotte et flicker des cartes. TOUJOURS paginer `/api/session?limit=200` (ou paginer explicitement).
+
 - L'ordre des messages est **descendant** (plus récent d'abord) : `.slice(-n)` prend les plus anciens: toujours trier sur `time.created` avant usage.
 - Le marqueur `completed` d'un message assistant arrive **en retard** : filtrer sur `completed` pour décider qu'une réponse est lisible = faux négatif. Vérifier que le texte tient debout (p.ex. parse JSON du compagnon).
 - Un tour en cours = souvent des tool calls **sans texte** : pour savoir ce qui se passe, lire la part `reasoning` du dernier assistant.

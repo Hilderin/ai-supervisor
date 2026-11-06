@@ -117,6 +117,15 @@ function buildFleet(status: StatusPayload): Fleet {
     // faisaient re-trier à chaque tick = les cartes se déplacaient et flicker à l'écran)
     return (b.turnStartedAt ?? 0) - (a.turnStartedAt ?? 0);
   });
+  // TEMP: trace les bascules (qui surgit/disparaît entre deux polls)
+  const sigNow = rows.map(r => r.id).join(',');
+  if ((globalThis as { lastRowSig?: string }).lastRowSig && (globalThis as { lastRowSig?: string }).lastRowSig !== sigNow) {
+    const prev = ((globalThis as { lastRowSig?: string }).lastRowSig).split(',').filter(Boolean);
+    const added = rows.filter(r => !prev.includes(r.id)).map(r => (r.title ?? '').slice(0, 22));
+    const dropped = prev.filter(id => !rows.some(r => r.id === id));
+    if (added.length || dropped.length) console.log(`[fleet] rows ${prev.length} → ${rows.length} | + ${JSON.stringify(added)} | - ${JSON.stringify(dropped)}`);
+  }
+  (globalThis as { lastRowSig?: string }).lastRowSig = sigNow;
   return { at: Date.now(), rows, concern };
 }
 
@@ -124,7 +133,7 @@ export async function pollOnce(): Promise<void> {
   try {
     const [status, sessions] = await Promise.all([
       jget('/api/sessions/status') as Promise<StatusPayload>,
-      jget('/api/session') as Promise<{ data?: OpenchamberSession[] }>,
+      jget('/api/session?limit=200') as Promise<{ data?: OpenchamberSession[] }>,
     ]);
     if (Array.isArray(sessions?.data)) {
       sessionsIndex = new Map(sessions.data.map(s => [s.id, s]));
@@ -134,7 +143,7 @@ export async function pollOnce(): Promise<void> {
     const unknown = Object.keys(status.sessions ?? {}).some(id => !sessionsIndex.has(id));
     if (unknown) {
       try {
-        const fresh = await jget('/api/session') as { data?: OpenchamberSession[] };
+        const fresh = await jget('/api/session?limit=200') as { data?: OpenchamberSession[] };
         if (Array.isArray(fresh?.data)) sessionsIndex = new Map(fresh.data.map(s => [s.id, s]));
       } catch { /* garde l'ancien annuaire */ }
     }
@@ -198,7 +207,7 @@ export function startPolling(): void {
   void pollOnce();
   setInterval(() => void pollOnce(), POLL_FAST_MS);   // status + pending (probablement plus)
   setInterval(async () => {
-    try { await jget('/api/session').then((s: unknown) => {
+    try { await jget('/api/session?limit=200').then((s: unknown) => {
       const list = (s as { data?: OpenchamberSession[] })?.data;
       if (Array.isArray(list)) sessionsIndex = new Map(list.map(x => [x.id, x]));
     }); } catch { /* annuaire lent, pas grave */ }

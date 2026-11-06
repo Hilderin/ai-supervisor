@@ -101,6 +101,7 @@
 <div id="sd"></div>
 
 <div id="err"></div>
+<div id="dbg" style="display:none; font-family:monospace; font-size:11px; color:#5d6577; margin-top:14px; max-height:200px; overflow-y:auto;"></div>
 
 <script type="module">
 const SVG_OC = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg>';
@@ -134,6 +135,18 @@ function briefRow(row, waiting){
 }
 
 const cards = new Map(); // sid -> {el, sig}
+
+// debug DOM : ?debug=1 -> panneau qui journalise reconstructions/mouvements de cartes
+const DBG = location.search.includes('debug');
+const DBG0 = Date.now();
+const dbgLines = [];
+function dbg(tag, msg){
+  if (!DBG) return;
+  dbgLines.unshift(`+${((Date.now()-DBG0)/1000).toFixed(1)}s ${tag} ${esc(msg||'')}`);
+  dbgLines.length = 24;
+  const el = document.getElementById('dbg');
+  if (el) el.innerHTML = dbgLines.join('<br>');
+}
 
   // la tâche est vraiment TERMINE seulement si son verdict est postérieur au tour actuel
 const isDone = (r) =>
@@ -241,6 +254,7 @@ function ensureCard(row, waiting){
   ent.el.className = 'card' + (waiting ? ' wait' : '') + (isDone(row) ? ' ok' : '');
   ent.el.dataset.sid = row.id;
   ent.el.innerHTML = cardHTML(row, waiting);
+  dbg('rebuild', (row.title||'').slice(0,26) + (waiting ? ' [waiting]' : ''));
   wireCard(ent.el, row);
   const b = ent.el.querySelector('.brief');
   if (b) b.textContent = brief;
@@ -359,6 +373,7 @@ function mount(fleet){
 function setChildrenIfChanged(container, els){
   const cur = Array.from(container.children);
   if (cur.length === els.length && cur.every((n, i) => n === els[i])) return;
+  dbg('move', container.id + ' (' + els.length + ' cartes)');
   container.replaceChildren(...els);
 }
 
@@ -381,6 +396,7 @@ async function refresh(){
   }
   tick();
 }
+if (DBG) document.getElementById('dbg').style.display = 'block';
 refresh();
 setInterval(refresh, 3000);        // filet de sécurité : normalement le stream SSE pousse en continu
 function connectStream(){
