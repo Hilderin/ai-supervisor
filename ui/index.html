@@ -38,6 +38,10 @@
   .ocbtn:hover { color:var(--green); background:var(--green-soft); }
   .brief { margin-top:5px; font-size:12px; color:var(--muted); }
   .qbox { margin-top:10px; padding-top:10px; border-top:1px solid var(--border); }
+  .composer { display:flex; gap:7px; align-items:flex-end; }
+  .composer textarea { flex:1; background:#f7f8f7; border:1px solid var(--border); border-radius:8px; font-family:inherit; font-size:12.5px; color:var(--text); padding:7px 10px; outline:none; min-width:0; resize:none; max-height:120px; overflow-y:auto; line-height:1.45; }
+  .composer textarea:focus { border-color:var(--green); background:#fff; }
+  .composer .arrowbtn { align-self:flex-end; margin-bottom:1px; }
   .dirb { font-size:10.5px; color:var(--muted); background:#f0f2f0; border-radius:5px; padding:2px 7px; white-space:nowrap; flex-shrink:0; max-width:130px; overflow:hidden; text-overflow:ellipsis; }
   .qtext { font-size:13px; line-height:1.45; margin-bottom:9px; }
   .actions { display:flex; gap:7px; align-items:center; flex-wrap:wrap; }
@@ -87,11 +91,8 @@ function fmtAge(ms){
 function topActions(row){
   const dir = row.dir ? row.dir.split('/').pop() ?? row.dir : '';
   const dirBadge = dir ? `<span class="dirb" title="${esc(row.dir)}">${esc(dir)}</span>` : '';
-  const pencil = row.status === 'busy'
-    ? `<button class="ocbtn pencil" data-pencil="${esc(row.id)}" title="Écrire à cette session">${SVG_EDIT}</button>` : '';
-  return `${dirBadge}${pencil}`;
+  return dirBadge;
 }
-const SVG_EDIT = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>';
 
 function cardHTML(row, waiting){
   const brief = waiting
@@ -105,32 +106,37 @@ function cardHTML(row, waiting){
     <div class="r1">${dot}<span class="title">${esc(row.title)}</span>${chip}<span class="sp"></span>${topActions(row)}
       <button class="ocbtn" data-open="${esc(row.id)}" title="Ouvrir dans OpenChamber">${SVG_OC}</button></div>
     <div class="brief">${esc(brief)}</div>
-    ${composeHTML(row)}${questionBoxHTML(row)}`;
+    ${composerHTML(row)}${questionBoxHTML(row)}`;
 }
-let composeSid = null;
-function composeHTML(row){
-  if (composeSid !== row.id) return '';
-  return `<div class="qbox" data-compose="${esc(row.id)}"><div class="actions">
-    <input type="text" placeholder="Message à envoyer à la session (steer)" data-sendto>
-    <button class="arrowbtn" data-send="1">➤</button></div></div>`;
+let composerFocusSid = null;
+function composerHTML(row){
+  return `<div class="qbox composer" data-compose="${esc(row.id)}">
+    <textarea placeholder="Écrire à cette session… ⏎ envoyer · ⇧⏎ nouvelle ligne" rows="1" data-sendto></textarea>
+    <button class="arrowbtn" data-send="1" title="Envoyer">➤</button></div>`;
 }
-function wireCompose(fleet){
-  document.querySelectorAll('[data-compose]').forEach(q => {
+function wireComposer(){
+  document.querySelectorAll('.composer').forEach(q => {
     const sid = q.dataset.compose;
-    const inp = q.querySelector('[data-sendto]');
-    inp.focus();
+    const ta = q.querySelector('textarea');
+    if (composerFocusSid === sid) { ta.focus(); }
+    ta.addEventListener('focus', () => { composerFocusSid = sid; });
+    ta.addEventListener('blur', () => { if (composerFocusSid === sid) composerFocusSid = null; });
+    ta.addEventListener('input', grow);
     const send = () => {
-      const v = inp.value.trim(); if (!v) return;
-      composeSid = null;
+      const v = ta.value.trim(); if (!v) return;
+      ta.value = ''; grow.call(ta);
       fetch('/api/fleet/send', { method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ sessionId: sid, text: v }) }).finally(refresh);
     };
+    ta.addEventListener('keydown', e => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+    });
     q.querySelector('[data-send]').onclick = send;
-    inp.onkeydown = e => { if (e.key === 'Enter') send(); if (e.key === 'Escape') { composeSid = null; mountLast(); } };
   });
-  document.querySelectorAll('[data-pencil]').forEach(b => {
-    b.onclick = () => { composeSid = composeSid === b.dataset.pencil ? null : b.dataset.pencil; mountLast(); };
-  });
+}
+function grow(){
+  this.style.height = 'auto';
+  this.style.height = Math.min(this.scrollHeight, 120) + 'px';
 }
 
 function questionBoxHTML(row){
@@ -157,9 +163,10 @@ function questionBoxHTML(row){
 
 function mount(fleet){
   lastFleet = fleet;
-  // ne pas écraser l'UI pendant que l'utilisateur tape (focus)
+  // ne pas écraser l'UI pendant que l'utilisateur tape (focus + draft)
   const typing = document.activeElement instanceof HTMLElement
-    && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA');
+    && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')
+    && document.activeElement.value !== '';
   if (typing && fleetData) return;
   const waiting = fleet.rows.filter(r => r.pendingForms?.length || r.pendingPermissions?.length);
   const others = fleet.rows.filter(r => !(r.pendingForms?.length || r.pendingPermissions?.length));
@@ -187,7 +194,7 @@ function mount(fleet){
   document.querySelectorAll('.ocbtn[data-open]').forEach(b => {
     b.onclick = () => { open(`openchamber-ui://session/${b.dataset.open}`); };
   });
-  wireCompose(fleet);
+  wireComposer();
 }
 
 async function replyForm(sid, formId, key, value){

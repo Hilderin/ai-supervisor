@@ -22,9 +22,18 @@ Implications à creuser :
 - Ce que l'API OpenCode server / OpenChamber permet réellement pour injecter un message dans une session active (voir doc 05).
 - Lien avec le concept de « débloquer » du doc 04 : le send direct est le cas général de « répondre à une question bloquante ».
 
+### Un petit bouton config dans la conversation
+
+Dans l'en-tête d'une conversation (sans doute à côté du modèle/agent affiché), un petit bouton de config permettant d'ajuster à chaud :
+
+- **le modèle** de la session (ex. besoin de passer sur un modèle plus fort ou plus rapide en cours de route) ;
+- **l'agent** (ex. changer `build` pour un `plan`, ou brancher un agent spécialisé).
+
+À creuser : le changement s'applique-t-il immédiatement (au prochain tour de la session) ou seulement nouvel envoi ? Faut-il une confirmation avant de basculer ? Comment signaler dans l'historique qu'un changement de modèle/agent a eu lieu (traçabilité des échanges) ?
+
 ### Un chat permanent, à droite ? (le « poste de commandement » conversationnel)
 
-Observation : dans PILOT, tout un panneau de chat vit à droite en permanence. Question ouverte ici :**le Superviseur devrait-il avoir ce chat**, et pourrait-il **remplacer la textbox en haut** ?
+Observation : dans PILOT, tout un panneau de chat vit à droite en permanence. Question ouverte ici : **le Superviseur devrait-il avoir ce chat**, et pourrait-il **remplacer la textbox en haut** ?
 
 L'idée :
 
