@@ -84,7 +84,7 @@
 <div class="seclabel"><span class="sdot g"></span>EN COURS<span class="cnt" id="cr">0</span></div>
 <div id="sr"></div>
 
-<div class="seclabel"><span class="sdot gg"></span>TERMINE (à trancher)<span class="cnt" id="cd">0</span></div>
+<div class="seclabel"><span class="sdot gg"></span>TERMINÉ<span class="cnt" id="cd">0</span></div>
 <div id="sd"></div>
 
 <div id="err"></div>
@@ -136,8 +136,7 @@ function cardHTML(row, waiting){
       `${pct != null ? `<span class="pct">${Math.round(pct)}%</span>` : ''}</div>`;
   }
   const done = row.sup?.termine
-    ? `<div class="donebox"><button class="bin gh" data-done="1">Terminer</button>
-        <input type="text" data-repart placeholder="… repartir sur quoi ?"><button class="bin" data-repart-go="1">Repartir ⏎</button></div>` : '';
+    ? `<div class="donebox"><span style="flex:1"></span><button class="bin" data-done="1">Archiver</button></div>` : '';
   return `
     <div class="r1">${dot}<span class="title">${esc(row.title)}</span>${chip}<span class="sp"></span>${topActions(row)}
       <button class="ocbtn" data-open="${esc(row.id)}" title="Ouvrir dans OpenChamber">${SVG_OC}</button></div>
@@ -242,20 +241,11 @@ function wireCard(el, row){
   });
   const qbox = el.querySelector('[data-form]');
   if (qbox) wireForm(qbox, row);
-  const doneBtn = el.querySelector('[data-done]');
-  const ri = el.querySelector('[data-repart]'), rg = el.querySelector('[data-repart-go]');
-  const close = (closure, note) => {
+  const close = () => {
     fetch('/api/fleet/done', { method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ sessionId: row.id, closure, note }) }).finally(refresh);
+      body: JSON.stringify({ sessionId: row.id, closure: 'terminé' }) }).finally(refresh);
   };
-  if (doneBtn) doneBtn.addEventListener('click', () => { doneSids.add(row.id); close('terminé'); });
-  if (rg && ri) rg.addEventListener('click', () => {
-    const v = ri.value.trim(); if (!v) return;
-    doneSids.add(row.id); close('repart', v);
-    fetch('/api/fleet/send', { method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ sessionId: row.id, text: v }) }).finally(refresh);
-  });
-  ri?.addEventListener('keydown', e => { if (e.key === 'Enter' && ri.value.trim()) { doneSids.add(row.id); close('repart', ri.value.trim()); } });
+  if (doneBtn) doneBtn.addEventListener('click', () => { doneSids.add(row.id); close(); });
 }
 
 function wireForm(qbox, row){

@@ -73,8 +73,9 @@ function buildFleet(status: StatusPayload): Fleet {
   let concern: string | null = null;
   for (const [id, s] of Object.entries(status.sessions ?? {})) {
     const meta = sessionsIndex.get(id);
-    // fantômes : id connu du statut mais absent de l'annuaire (session supprimée) → on n'affiche pas
+    // fantômes et archivées : sans carte
     if (!meta) continue;
+    if (meta.time?.archived) continue;
     // les sous-sessions/sous-agents (parentID) ne sont pas des tâches de flotte
     if (meta.parentID) continue;    const pendingForms = (status.pending?.[id]?.forms ?? []).filter(f => f?.metadata?.kind === 'question');
     const pendingPermissions = status.pending?.[id]?.permissions ?? [];

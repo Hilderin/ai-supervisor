@@ -7,6 +7,7 @@ import { readFile } from 'node:fs/promises';
 import { dirname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { currentFleet, openchamberUrl, pollOnce, type Fleet } from './fleet.mts';
+import { companionSessionOf } from './companion.mts';
 import { logEvent, upsertTaskState, getTaskState } from './state.mts';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -110,11 +111,25 @@ async function handleApi(req: http.IncomingMessage, res: http.ServerResponse, ur
   if (path === '/api/fleet/done' && req.method === 'POST') {
     const body = await readBody(req);
     const sessionId = String(body.sessionId ?? '');
-    const closure = String(body.closure ?? 'terminé');
     const note = String(body.note ?? '');
-    upsertTaskState(sessionId, { closedAt: Date.now(), closure });
-    logEvent(sessionId, closure === 'repart' ? 'repart' : 'done', note);
-    json(res, 200, { ok: true });
+    if (!sessionId) { json(res, 400, { error: 'sessionId requis' }); return; }
+    try {
+      // Archiver dans OpenChamber (avec la conversation compagnon, sinon ça s'accumule)
+      const results: Array<{ id: string; status: number }> = [];
+      for (const target of [sessionId, companionSessionOf(sessionId)].filter(Boolean) as string[]) {
+        const r = await relay('/api/openchamber/sessions/archive', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ids: [target] }),
+        });
+        const rAny = r as { ocStatus?: number };
+        results.push({ id: target.slice(-8), status: rAny.ocStatus ?? 0 });
+      }
+      upsertTaskState(sessionId, { closedAt: Date.now(), closure: 'terminé' });
+      logEvent(sessionId, 'done', note ? 'archivé — ' + note.slice(0, 80) : 'archivé dans OpenChamber', { results });
+      json(res, 200, { ok: true, archived: results });
+    } catch (e) {
+      json(res, 502, { error: String(e) });
+    }
     return;
   }
   json(res, 404, { error: `route inconnue : ${path}` });
