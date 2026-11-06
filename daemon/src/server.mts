@@ -4,15 +4,35 @@
  */
 import http from 'node:http';
 import { readFile } from 'node:fs/promises';
-import { dirname, join, normalize } from 'node:path';
+import { dirname, extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { currentFleet, openchamberUrl, pollOnce, type Fleet } from './fleet.mts';
 import { companionSessionOf } from './companion.mts';
 import { logEvent, upsertTaskState, getTaskState, reopenTaskState } from './state.mts';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const uiDir = join(here, '..', '..', 'ui');
+// le build Vite (bun run build:ui) ; le daemon ne sert que des fichiers produits
+const uiDir = join(here, '..', '..', 'ui', 'dist');
 const PORT = Number(process.env.SUPERVISEUR_PORT ?? 5180);
+
+const MIME: Record<string, string> = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.map': 'application/json; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.ico': 'image/x-icon',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
+  '.txt': 'text/plain; charset=utf-8',
+};
 
 const json = (res: http.ServerResponse, code: number, body: unknown) => {
   const buf = Buffer.from(JSON.stringify(body));
@@ -151,13 +171,15 @@ export function startServer(): void {
       const rel = (url.pathname === '/' || url.pathname === '/fleet') ? 'index.html'
         : normalize(url.pathname).replace(/^([/\\])+/, '');
       const file = join(uiDir, rel);
-      if (!file.startsWith(uiDir)) { res.writeHead(403).end(); return; }
+      // anti-traversée : ui/dist et son contenu uniquement
+      if (file !== uiDir && !file.startsWith(uiDir + sep)) { res.writeHead(403).end(); return; }
       const body = await readFile(file);
-      res.writeHead(200, { 'Content-Type': file.endsWith('.html') ? 'text/html; charset=utf-8' : 'text/plain; charset=utf-8' });
+      const type = MIME[extname(file).toLowerCase()] ?? 'application/octet-stream';
+      res.writeHead(200, { 'Content-Type': type });
       res.end(body);
     } catch {
-      res.writeHead(404, { 'Content-Type': 'text/plain' });
-      res.end('404');
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end('404 (UI non buildée ? lancer : bun run build:ui)');
     }
   }).listen(PORT, '127.0.0.1', () => console.log(`[superviseur] UI + daemon sur http://127.0.0.1:${PORT}/fleet`));
 }
