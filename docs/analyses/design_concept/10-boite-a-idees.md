@@ -31,6 +31,30 @@ Dans l'en-tête d'une conversation (sans doute à côté du modèle/agent affich
 
 À creuser : le changement s'applique-t-il immédiatement (au prochain tour de la session) ou seulement nouvel envoi ? Faut-il une confirmation avant de basculer ? Comment signaler dans l'historique qu'un changement de modèle/agent a eu lieu (traçabilité des échanges) ?
 
+### Notifications desktop + badge d'attention sur l'icône
+
+Comme le fait OpenChamber :
+
+- des **notifications desktop** quand quelque chose mérite l'attention (tâche bloquée sur une question, tâche terminée, échec...) — le Superviseur étant une fenêtre qu'on ne regarde pas en continu, c'est lui qui doit venir vers l'utilisateur ;
+- un **badge de compte sur l'icône** de l'app : le nombre de tâches ayant besoin de mon attention, visible sans ouvrir la fenêtre.
+
+À creuser : le seuil de notification (tout ou filtré par priorité ? risque de spam inversé — l'habituer, c'est le tuer), la déduplication (une notification qui reste valable ne doit pas se répéter), et l'alignement avec le badge (qu'est-ce qui « consomme » une notification : la lecture de la carte ? la réponse à la session ?).
+
+### Pinner des conversations / indiquer une priorité
+
+Pouvoir **pinner** des conversations, ou leur **indiquer une priorité**, pour qu'elles remontent en haut de la liste, au-dessus des autres. Complète le triage : ce qui est urgent à mes yeux reste visible même quand la flotte bouge beaucoup.
+
+À creuser : pin simple vs échelle de priorité (combien de niveaux ?), position et signal visuel des cartes épinglées (section dédiée en haut ? badge sur la carte ?), et lien avec les signaux déjà existants (une tâche bloquée mais non épinglée doit-elle passer devant une épinglée qui tourne bien ?).
+
+### Always on top + une UI qui tient dans un coin
+
+Deux compléments, pensés pour **laisser le Superviseur visible en permanence sans lui dédier un écran** :
+
+- **« Always on top »** : une option pour garder la fenêtre au premier plan, au-dessus des autres — le patch à l'écran unique : je code/joue/regarde Netflix, et le Superviseur reste lisible dans le coin.
+- **une UI qui fonctionne en petit format** : s'assurer que tout (ou l'essentiel) se dégrade proprement dans une fenêtre réduite — la liste de la flotte compacte, une carte par ligne active, l'essentiel des signaux visibles. Si la fenêtre fait 300-400 px de large, je dois encore voir *ce qui tourne* et *ce qui m'attend*.
+
+À creuser : est-ce un mode dédié (un « mode coin d'écran » avec densité maximale, défini dès la conception) ou juste une responsive correcte ? Quels parcours restent possibles en petit format (lire oui, mais débloquer / répondre ?) et à partir de quelle taille bascule-t-on sur l'interface complète.
+
 ### Un chat permanent, à droite ? (le « poste de commandement » conversationnel)
 
 Observation : dans PILOT, tout un panneau de chat vit à droite en permanence. Question ouverte ici : **le Superviseur devrait-il avoir ce chat**, et pourrait-il **remplacer la textbox en haut** ?

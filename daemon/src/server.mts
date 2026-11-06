@@ -65,10 +65,9 @@ async function handleApi(req: http.IncomingMessage, res: http.ServerResponse, ur
     const decision = body.decision ? String(body.decision) : undefined;
     try {
       if (formId) {
-        const fields = Array.isArray(body.fields) ? (body.fields as Array<{ key: string }>) : [];
-        const key = fields.find(f => f)?.key ?? Object.keys(answer)[0] ?? 'q0';
-        const payload = { answer: { [key]: answer[key] ?? decision } };
-        logEvent(sessionId, 'reply', `→ form ${formId} : ${JSON.stringify(payload.answer).slice(0, 120)}`);
+        const answer = (body.answer ?? {}) as Record<string, unknown>;
+        const payload = { answer: Object.keys(answer).length ? answer : { q0: decision ?? '' } };
+        logEvent(sessionId, 'reply', `→ form ${formId} : ${JSON.stringify(payload.answer).slice(0, 160)}`);
         json(res, 200, await relay(sendReplyPath(sessionId, { id: formId }), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }));
       } else if (requestID) {
         logEvent(sessionId, 'reply', `→ permission ${requestID} : ${decision}`);
