@@ -105,6 +105,7 @@ Pas de messages dans `GET /api/fleet` ni dans le SSE (2 frames/s). Nouvelle rout
 | Route | Usage UI |
 | --- | --- |
 | `GET /api/fleet/delivery?sessionId=…` | dernier texte + rendu d'une session, à la demande |
+| `GET /api/fleet/asset?sessionId=…&path=…` | image locale citée par une réponse, servie depuis le dossier de la session |
 
 Côté daemon (`daemon/src/delivery.mts`) :
 
@@ -119,6 +120,7 @@ L'UI ne demande la livraison que pour une carte **TERMINÉ** ou **au repos non e
 
 - Markdown : `react-markdown` + `remark-gfm`, `skipHtml` et **pas** de `rehype-raw`. Le HTML brut du message n'est jamais interprété ; les liens sortent avec `target="_blank" rel="noreferrer noopener"`. Titres, listes, code, tableaux et citations sont stylés par `.delivery-md` (jetons de la maquette).
 - Rendu `openchamber_render` : iframe `sandbox="allow-scripts"` **sans** `allow-same-origin` (origine opaque, aucun accès au DOM, au stockage ou aux credentials du Superviseur) et CSP injectée : `default-src 'none'`, `connect-src 'none'`, `form-action 'none'`, `frame-src 'none'`, images `data:`/`blob:`/`https:`, styles et scripts inline. Les scripts inline restent autorisés pour les graphiques ; ils sont confinés à l'origine opaque.
+- Images locales : `DeliveryMarkdown` réécrit une source non HTTP/data vers `/api/fleet/asset?sessionId=…&path=…`. Le daemon résout le chemin dans le dossier de la session (symlinks compris), ne sert que PNG/JPEG/GIF/WebP, borne à 10 Mo, et refuse tout ce qui sort du dossier. Une image refusée affiche « Image indisponible » au lieu d'une icône cassée.
 - Hauteur : la page rapporte sa hauteur par `postMessage`; plafond 420 px (160 px en aperçu), l'iframe défile au-delà.
 - Aperçu : carte TERMINÉ 280 px, carte au repos 72 px (3 lignes) ; bouton « Voir plus » / « Voir moins ». Réponse vide sur TERMINÉ : « Aucune réponse textuelle pour ce tour. » ; erreur : « Résultat indisponible. » + « Réessayer ».
 
@@ -151,8 +153,8 @@ Deux écarts de comportement volontaires :
 ## 8. Vérification
 
 - `bun run typecheck` : TypeScript strict, aucune erreur.
-- `bun test` : 46 tests UI (construction des réponses, placement TERMINÉ / périmé / busy, hystérésis de section, fermeture / réouverture, âges, garde d'horodatage, états de livraison, markdown, CSP du rendu).
-- `bun test daemon/test` : 20 tests (dont 16 livraison : dernier texte, tour courant, rendu, refus, troncature, cache, single-flight, invalidation, course événement/lecture).
+- `bun test` : 48 tests UI (construction des réponses, placement TERMINÉ / périmé / busy, hystérésis de section, fermeture / réouverture, âges, garde d'horodatage, états de livraison, markdown, images locales, CSP du rendu).
+- `bun test daemon/test` : 27 tests (dont 16 livraison et 7 assets : dernier texte, tour courant, rendu, refus, troncature, cache, single-flight, invalidation, course événement/lecture, chemins d'image).
 - `bun run build` : build Vite dans `ui/dist`.
 - Vérification visuelle : captures Playwright de la référence et du build sur une flotte factice, diff au pixel. Les zones communes sont identiques ; les seules différences sont le chip, la permission et la couleur de la ligne ✋ (écarts assumés ci-dessus).
 - Vérification fonctionnelle Playwright sur la flotte factice : 15/15 (options mono et multiselect, texte libre, permission, auto-grow, Enter / Shift+Enter, focus et brouillon sous SSE, menu kebab, tooltip, fermeture).

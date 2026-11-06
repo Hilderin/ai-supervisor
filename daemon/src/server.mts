@@ -8,6 +8,7 @@ import { dirname, extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { currentFleet, openchamberUrl, pollOnce, type Fleet } from './fleet.mts';
 import { getDelivery } from './delivery.mts';
+import { readSessionAsset } from './assets.mts';
 import { companionSessionOf } from './companion.mts';
 import { logEvent, upsertTaskState, getTaskState, reopenTaskState } from './state.mts';
 
@@ -102,6 +103,29 @@ async function handleApi(req: http.IncomingMessage, res: http.ServerResponse, ur
     const sessionId = (url.searchParams.get('sessionId') ?? '').trim();
     if (!sessionId) { json(res, 400, { error: 'sessionId requis' }); return; }
     json(res, 200, await getDelivery(sessionId));
+    return;
+  }
+  if (path === '/api/fleet/asset' && req.method === 'GET') {
+    // image locale citée par une réponse agent (capture, graphique) : le
+    // navigateur ne peut pas lire un chemin du disque, le daemon le sert.
+    const sessionId = (url.searchParams.get('sessionId') ?? '').trim();
+    const source = url.searchParams.get('path') ?? '';
+    if (!sessionId || !source) { json(res, 400, { error: 'sessionId et path requis' }); return; }
+    const row = currentFleet().rows.find(r => r.id === sessionId);
+    if (!row || !row.dir) { json(res, 404, { error: 'session inconnue' }); return; }
+    const asset = await readSessionAsset(row.dir, source);
+    if (!asset.ok) {
+      res.writeHead(asset.status, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end(asset.error);
+      return;
+    }
+    res.writeHead(200, {
+      'Content-Type': asset.type,
+      'Content-Length': asset.body.length,
+      'Cache-Control': 'private, max-age=60',
+      'X-Content-Type-Options': 'nosniff',
+    });
+    res.end(asset.body);
     return;
   }
   if (path === '/api/fleet/reply' && req.method === 'POST') {

@@ -126,7 +126,7 @@ export const DeliveryBlock = memo(function DeliveryBlock({ sessionId, enabled, d
             !preview && long && !expanded && 'max-h-[280px] overflow-hidden',
           )}
         >
-          <DeliveryMarkdown markdown={markdown} />
+          <DeliveryMarkdown markdown={markdown} sessionId={sessionId} />
           {long && !expanded && markdown ? (
             <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[36px] bg-gradient-to-t from-render to-transparent" />
           ) : null}

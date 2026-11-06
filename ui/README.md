@@ -21,6 +21,7 @@ Le daemon sert `ui/dist` : lancer `bun run build` (ou `bun run build:ui` depuis 
 - `src/lib/delivery.ts` : états du bloc « Résultat » (chargement, vide, erreur, contenu).
 - `src/lib/renderDoc.ts` : CSP et rapport de hauteur de l'iframe `openchamber_render`.
 - `src/components/DeliveryBlock.tsx` : livraison inline à la demande (texte + rendu).
+- `src/components/DeliveryMarkdown.tsx` : markdown GFM, HTML brut ignoré, images locales via `/api/fleet/asset`.
 - `src/hooks/useFleetStream.ts` : SSE + poll 3 s.
 - `src/store/fleetStore.ts` : flotte, erreur, fermetures, brouillons des composers.
 

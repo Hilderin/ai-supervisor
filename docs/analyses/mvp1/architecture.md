@@ -19,6 +19,7 @@ superviseur/
       discover.mts      — trouver le port d'OpenChamber (ss -tlnp → process "openchamber", ou OPENCHAMBER_PORT)
       fleet.mts         — lecture : poll /api/sessions/status (3 s) + /api/session ; abonnement SSE /api/event
       delivery.mts      : livraison inline (dernier texte + rendu openchamber_render, cache invalidé par événements)
+      assets.mts        : images locales d'une réponse (validation dans le dossier de session, raster only)
       state.mts         — SQLite (bun:sqlite) : journaux, clôtures, seuils
       server.mts        — HTTP : sert /api/fleet (JSON fusionné), les actions, et le build UI statique
       index.mts         — file-tout, lance le tout
@@ -37,6 +38,7 @@ Un seul process **Bun** fait tout (daemon + serveur HTTP + UI statique) : `bun d
 | --- | --- |
 | `GET /api/fleet` | l'état fusionné pour l'UI : sessions (de `/api/session`), statut et pending (de `/api/sessions/status`), l'état local (journaux, clôtures) |
 | `GET /api/fleet/delivery` | livraison inline d'une session (`?sessionId=…`) : dernier texte + rendu `openchamber_render`, à la demande (jamais dans les frames de flotte), cache invalidé par événements |
+| `GET /api/fleet/asset` | image locale citée par une réponse (`?sessionId=…&path=…`), servie depuis le dossier de la session, formats raster uniquement |
 | `POST /api/fleet/reply` | répondre une question / permission / envoyer du libre (proxy vers form/permission reply) |
 | `POST /api/fleet/create` | créé la session (proxé `/api/openchamber/sessions` — à confirmer) |
 | `POST /api/fleet/done` | clôturer / repartir (nouvelle session liée) |

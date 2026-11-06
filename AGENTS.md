@@ -62,6 +62,7 @@ Directives pour tout agent travaillant dans ce repo.
 - **Le verdict `termine` oscille d'une analyse à l'autre** : sans garde-fou, la carte saute EN COURS ↔ TERMINÉ et décale les titres (flicker connu, antérieur à React). `ui/src/lib/placement.ts` exige 8 s de stabilité pour un changement done/running ; busy, nouveau tour et attente restent immédiats.
 - **Livraison inline : jamais les messages dans la flotte** : `GET /api/fleet` et le SSE ne portent que l'état. L'UI appelle `GET /api/fleet/delivery?sessionId=…` pour une carte TERMINÉ ou au repos (pas busy, pas en attente), et seulement quand `lastUpdateAt`/`turnStartedAt` change. Cache daemon 30 s, invalidé par `message.*`, `session.execution.*`, `session.inbox.*`, `session.text.*`, `session.step.ended`, `session.idle`.
 - **Rendu openchamber_render** : iframe `sandbox="allow-scripts"` sans `allow-same-origin` et CSP (`connect-src 'none'`, `form-action 'none'`). Jamais de HTML brut dans le DOM. Le markdown passe par `react-markdown` avec `skipHtml`, sans `rehype-raw`.
+- **Images locales de la livraison** : le navigateur ne peut pas lire un chemin disque et l'UI n'est pas servie par OpenChamber. `DeliveryMarkdown` réécrit les sources locales vers `/api/fleet/asset` (chemin validé dans le dossier de session, raster only, 10 Mo). Une image refusée affiche un placeholder, jamais une icône cassée.
 
 ### Compagnon (analyste)
 
