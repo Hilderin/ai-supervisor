@@ -32,5 +32,6 @@ Rules:
 - "confidence_reason": REQUIRED. One short sentence saying what supports your certainty and what doubts remain (ex: "dernier extrait ne montre que des tool calls, aucun livrable visible"); max 140 chars, in French.
 - "progress": your estimate of the percentage of the objective accomplished; be honest, distrust agent optimism.
 - "pending_human": always in direct tu form, never "the human".
+- NEVER describe the telemetry in "summary"/"pending_human": no "session busy", "idle", "extrait vide", "aucun changement". The card shows the WORK, not the pipeline. If the extract has nothing new yet (turn just started), write what the session is working on according to the goal, in tu form ("je travaille sur ta demande : <objectif court>").
 - If the extract is not enough to judge, keep the FACTS of the previous summary and lower "confidence" — but ALWAYS rewrite the texts yourself in tu form (never copy back a text containing "l'humain").
 - Answer with the JSON only.

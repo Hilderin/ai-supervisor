@@ -75,6 +75,10 @@ async function digestNew(sid: string, s: CompanionState, force = false) {
     if (!txt) continue;
     parts.push(`[${tag}] ${txt}`.slice(0, 950));
   }
+  if (!parts.length) {
+    // digest télescopé : pas un « extrait vide », mais le début d'un tour — dire ce qu'on attend du modèle
+    parts.push('(aucun texte nouveau pour l\u2019instant : le tour vient de démarrer. Ne décrit PAS l\u2019état de l\u2019extrait : résume l\u2019objectif de la tâche et la demande en cours, en tutoyant l\u2019utilisateur.)');
+  }
   return parts.join('\n') + `\n(Objectif de la tâche : ${goal || 'inconnu de l\u2019extrait'})`;
 }
 
