@@ -133,7 +133,7 @@ Le bloc est mémoïsé : les re-rendus 1 s / 2 s de la carte ne relancent ni la 
 - **Résumé** : `sup.resume`, sinon la phrase d'activité (`travaille`, `tour terminé · il y a …`, `une question t’attend`).
 - **Attend** : la ligne `sup.attend` en orange sous le résumé.
 - **Progression** : barre verte, ambre entre 1 et 65 %, pourcentage à droite.
-- **Confiance** : trois pastilles (rouge < 35 %, ambre < 70 %, vert ensuite) et tooltip HTML avec `Confiance N %` puis `sup.note` (le `confidence_reason` du compagnon).
+- **Confiance** : trois pastilles (rouge < 35 %, ambre < 70 %, vert ensuite) et bulle HTML avec `Confiance N %` puis `sup.note` (le `confidence_reason` du compagnon). La bulle est un portail en `position:fixed` (`width:max-content`, 300 px max), ouverte au survol et au focus clavier.
 - **Question** : un bloc par champ, options (mono ou multiselect) et champ libre, un seul bouton « Répondre ».
 - **Permission** : « Permission demandée » + bouton « Autoriser » (`decision: once`).
 - **Résultat** : bloc de livraison sur les cartes TERMINÉ et au repos (texte markdown + rendu `openchamber_render`), aperçu replié, jamais sur une carte busy ou en attente.
