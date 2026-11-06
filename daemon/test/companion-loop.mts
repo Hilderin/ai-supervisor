@@ -9,6 +9,7 @@
  * Cleanup : archive la session de test (parent et enfants compagnon).
  */
 import { Database } from 'bun:sqlite';
+import { lintSummary, shouldRepair } from '../src/verdict.mts';
 
 const BASE = process.env.SUPERVISEUR_DAEMON ?? 'http://127.0.0.1:5180';
 const OC = process.env.SUPERVISEUR_OC ?? 'http://127.0.0.1:57123';
@@ -53,14 +54,39 @@ async function main() {
   await sleep(10_000);   // laisse le tour se terminer et la clôture compagnon finir
 
   // 2 bis. le compagnon doit VOIR le prompt humain (régression : texte lu dans payload.text au lieu de m.text)
-  const compRow = dbR.query('SELECT companion_session_id c, version v FROM companion_map WHERE parent_session_id = ?').get(sid) as { c?: string; v?: number | null } | undefined;
+  const compRow = dbR.query('SELECT companion_session_id c, version v, agent a FROM companion_map WHERE parent_session_id = ?').get(sid) as { c?: string; v?: number | null; a?: string | null } | undefined;
   const compId = compRow?.c;
   const compMsgs = await getJSON(`${OC}/api/session/${compId}/message?limit=20`);
   const injected = ((compMsgs.data ?? []) as Array<{ type?: string; text?: string }>)
     .filter(m => m.type === 'user').map(m => m.text ?? '').join('\n');
-  check('prompt humain présent dans le digest ([HUMAIN])', injected.includes('[HUMAIN]') && injected.includes('test kick'));
-  check('objectif = premier prompt de la session', injected.includes('Objectif de la tâche : Robot du test compagnon'));
+  check('prompt humain présent dans le digest ([TOI])', injected.includes('[TOI') && injected.includes('test kick'));
+  check('objectif courant présent dans l’injection', injected.includes('Objectif actuel') && injected.includes('Robot du test compagnon'));
   check('companion_map.version enregistrée (pas de recréation à chaque analyse)', compRow?.v != null, `version=${compRow?.v ?? 'NULL'}`);
+  check('compagnon créé avec un agent versionné', String(compRow?.a ?? '').startsWith('superviseur-analyste-'), `agent=${compRow?.a ?? 'NULL'}`);
+  check('digest : actions d’outils ou message lisible', /Actions récentes|\[TOI|\[AGENT/.test(injected));
+
+  // 2 ter. le verdict respecte le nouveau contrat (état, progression, pas de télémétrie)
+  const fleet0 = await getJSON(`${BASE}/api/fleet`);
+  const r0 = (fleet0.rows ?? []).find((r: { id: string }) => r.id === sid);
+  const sup = r0?.sup as { state?: string; termine?: boolean; progress?: number | null; resume?: string; attend?: string } | undefined;
+  check('verdict avec un état sémantique', ['working', 'waiting_human', 'done', 'blocked'].includes(String(sup?.state)), JSON.stringify(sup ?? {}).slice(0, 160));
+  check('progression null ou 0..100', sup?.progress == null || (sup.progress >= 0 && sup.progress <= 100), `progress=${sup?.progress}`);
+  check('done implique 100', !sup?.termine || sup.progress === 100, `termine=${sup?.termine} progress=${sup?.progress}`);
+  const lint = lintSummary(String(sup?.resume ?? ''));
+  check('résumé conforme (pas de télémétrie ni d’identifiant)', !shouldRepair(lint.reasons), lint.reasons.join(', '));
+  check('aucune attente inventée sans question réelle', !sup?.attend, JSON.stringify(sup?.attend ?? ''));
+
+  // 2 quater. une nouvelle consigne longue change l'objectif (version) et remet le plan à zéro
+  const v0 = ((dbR.query('SELECT objective_version v FROM task_state WHERE session_id = ?').get(sid) as { v?: number } | undefined)?.v) ?? 0;
+  await post(`${OC}/api/openchamber/sessions/${sid}/send`, { prompt: 'Démarre une nouvelle étape : ajoute une vérification du plan et réponds OK.', directory: DIR });
+  let v1 = v0;
+  const vUntil = Date.now() + 35_000;
+  while (Date.now() < vUntil && v1 <= v0) {
+    await sleep(2000);
+    v1 = ((dbR.query('SELECT objective_version v FROM task_state WHERE session_id = ?').get(sid) as { v?: number } | undefined)?.v) ?? v0;
+  }
+  check('nouvelle consigne longue = nouvel objectif versionné', v1 > v0, `v0=${v0} v1=${v1}`);
+  await sleep(20_000);   // laisse l'analyse du nouveau tour finir avant le test anti-relance
 
   // 3. anti-relance à vide (SCOPE : session de test; les autres sessions peuvent bouger légitimement)
   const c0s = (dbR.query("SELECT count(*) c FROM task_log WHERE kind='note' AND session_id = ? AND text LIKE '%analyste:%'").get(sid) as { c: number }).c;

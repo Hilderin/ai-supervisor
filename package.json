@@ -8,7 +8,9 @@
     "dev": "bun --watch daemon/src/index.mts",
     "build:ui": "bun run --cwd ui build",
     "dev:ui": "bun run --cwd ui dev",
-    "typecheck:ui": "bun run --cwd ui typecheck"
+    "typecheck:ui": "bun run --cwd ui typecheck",
+    "cleanup:companions": "bun daemon/scripts/cleanup-companions.mts",
+    "test:verdict": "bun test daemon/test/verdict.test.mts"
   },
   "engines": { "bun": ">=1.2" }
 }

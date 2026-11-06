@@ -74,6 +74,15 @@ Directives pour tout agent travaillant dans ce repo.
 - Le verdict JSON est un **signal**, jamais une décision : la migration TERMINE reste un geste humain.
 - Rattrapage (ré-analyse sans nouveaux messages) : passer `force` au digest, sinon les sessions au repos ne rafraîchissent jamais leurs verdicts (et une migration de schéma ne se propage jamais).
 - `bun daemon/test/companion-loop.mts` peut échouer à froid sur l'étape 4 juste après un redémarrage du daemon (le premier verdict arrive avec un `at` antérieur au tour) : relancer une fois avant de conclure à une régression.
+- **Le prompt d'un agent est mis en cache par NOM, pas par contenu** : changer le fichier ne suffit pas, une session créée avec le même nom peut garder l'ancien prompt. Le daemon crée `superviseur-analyste-<hash>` (symlink vers le fichier canonique), le fixe **dès la création** de la session enfant (le `send` ne l'impose pas toujours), et recrée le compagnon si `companion_map.agent` ne correspond pas.
+- **`getAgentVersion` lit et hashe le contenu à chaque appel** : un cache par `mtime` a mémorisé un fichier lu pendant une écriture et est resté figé sur une version périmée. 8 Ko toutes les 3 s sont négligeables.
+- **L'attente humaine ne se décide pas par le LLM** : `attend` vient des formulaires (`question_tool`), des permissions, ou d'une question explicite du dernier message de l'agent. Le compagnon ne fait que reformuler ; sans signal, le daemon vide `attend`. Le digest nomme le lecteur `[TOI]`, jamais `[HUMAIN]`.
+- **La progression vient d'un plan stocké** (3 à 6 étapes), pas d'un pourcentage inventé : le daemon calcule `étapes faites / étapes`, `done` implique 100, `busy` interdit `done`, pas de plan ⇒ pas de barre, baisse refusée à plan identique.
+- **Un nouvel objectif est versionné** : une consigne longue avec un verbe d'action incrémente `task_state.objective_version` et remet le plan à zéro ; une réponse courte ne change pas l'objectif. La carte lit le dernier objectif, pas seulement le premier prompt.
+- **Résumé de carte** : français, troisième personne pour l'agent, « tu » réservé au lecteur ; interdits = identifiants, commits, branches, numéros de document, fichiers, outils, tests, pourcentages, `idle/busy/extrait`, « le compagnon » pour l'agent, et toute allusion au plan/contrat/JSON. Linter + une reprise unique + ancien résumé en repli.
+- **Déclencheurs et coût** : digest inchangé ⇒ aucun appel ; 20 s minimum par session ; 3 analyses simultanées ; les compagnons à migrer passent en priorité sinon deux sessions busy prennent tous les créneaux.
+- **Ménage** : `bun daemon/scripts/cleanup-companions.mts` (simulation) puis `--apply`. Garde le compagnon de `companion_map`, archive les autres, supprime les mappings des parents disparus ou archivés. Idempotent.
+- Détails et décisions : `docs/analyses/mvp1/compagnon-verdict.md`.
 
 ### Repo & docs
 

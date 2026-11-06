@@ -1,13 +1,19 @@
 /** Contrat de données du daemon (`GET /api/fleet`, SSE `/api/fleet/stream`). */
 
+export type VerdictState = 'working' | 'waiting_human' | 'done' | 'blocked';
+export type HumanSource = 'question_tool' | 'permission' | 'agent_ask' | 'none';
+
 export interface Verdict {
   resume?: string;
-  confiance?: number;
-  progress?: number;
+  confiance?: number | null;
+  progress?: number | null;
   termine?: boolean;
   attend?: string;
   note?: string;
   at?: number;
+  state?: VerdictState;
+  humanSource?: HumanSource;
+  next?: string;
 }
 
 export interface FormOption {

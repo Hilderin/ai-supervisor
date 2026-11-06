@@ -1,40 +1,64 @@
 /**
  * Le compagnon : une session analyste (agent `superviseur-analyste` global, sans tool)
- * par session supervisée, qui juge l'avancement à intervalles et pousse son verdict JSON.
- * Déclencheurs : fin de tour (idle) + toutes les 5 min si nouveaux messages.
+ * par session supervisée. Il produit un verdict JSON, mais le daemon garde la main :
+ * - l'attente humaine vient des formulaires/permissions réels ou d'une question
+ *   explicite de l'agent, jamais d'une invention de l'analyste ;
+ * - la progression vient d'un plan stocké, pas d'un pourcentage improvisé ;
+ * - `done` implique 100, et un objectif qui change remet le plan à zéro ;
+ * - un digest inchangé n'est pas réanalysé (dédoublonnage + intervalle minimal).
  * Le verdict n'est qu'un SIGNAL : la clôture reste un geste humain (doc 03).
  */
-import { logEvent, upsertVerdict, getVerdict, getCompanion, putCompanion } from './state.mts';
-import { takeKick } from './kicks.mts';
-import { getAgentVersion } from './state.mts';
+import { createHash } from 'node:crypto';
+import {
+  ensureAgentDefinition, getAgentVersion, getCompanion, getTaskState, getVerdict, logEvent,
+  putCompanion, setTaskObjective, setTaskPlan, upsertVerdict,
+} from './state.mts';
+import { takeKick, kick as pushKick } from './kicks.mts';
 import { messageText } from './messages.mts';
+import {
+  detectHumanQuestion, emptyWait, lintSummary, normalizeVerdict, parsePlanFromDb,
+  parseVerdictText, resolveObjective, scrubSummary, shouldRepair, toolActionLine,
+  type NormalizedVerdict, type PlanStep, type RawVerdict, type WaitInfo,
+} from './verdict.mts';
 
 let base = '';
 export function setBase(b: string) { base = b.replace(/\/$/, ''); }
 
 const PERIOD_MS = Number(process.env.SUPERVISEUR_COMPANION_PERIOD_MS ?? 5 * 60_000);
+/** Deux analyses de la même session ne peuvent pas être plus proches que ça. */
+const MIN_INTERVAL_MS = Number(process.env.SUPERVISEUR_COMPANION_MIN_INTERVAL_MS ?? 20_000);
+/** Analyses simultanées toutes sessions confondues (le modèle local reste réactif). */
+const MAX_CONCURRENT = Number(process.env.SUPERVISEUR_COMPANION_CONCURRENCY ?? 3);
 const MAX_WAIT_MS = 150_000;
-const MAX_INJECT_CHARS = 4500;
+const REPAIR_WAIT_MS = 60_000;
+const MAX_INJECT_CHARS = 6000;
+const MAX_DIGEST_MESSAGES = 6;
+const MAX_ACTIONS = 8;
 
 interface CompanionState {
   compSession?: string;
   inFlight?: boolean;
   lastMsgID?: string;
+  lastDigestHash?: string;
   lastRunAt?: number;
-  lastBrief?: string;
-  goal?: string;
+  lastStatus?: string;
+  lastMigrationAt?: number;
+  failures?: number;
 }
 const st = new Map<string, CompanionState>();
-const get = (sid: string) => {
+let active = 0;
+
+function get(sid: string): CompanionState {
   let s = st.get(sid);
   if (!s) st.set(sid, s = {});
   return s;
-};
+}
 
 async function jpost(path: string, body: unknown) {
   const res = await fetch(`${base}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   const text = await res.text();
-  let data: unknown = null; try { data = text ? JSON.parse(text) : null; } catch { /* pas JSON */ }
+  let data: unknown = null;
+  try { data = text ? JSON.parse(text) : null; } catch { /* pas JSON */ }
   return { status: res.status, ok: res.ok, data };
 }
 
@@ -44,217 +68,424 @@ async function jget(path: string) {
   return res.json();
 }
 
-type M = { id: string; type: string; time?: { created?: number }; text?: string; content?: Array<{ type: string; text?: string }>; payload?: { text?: string } };
-
-/** objectif stable : premier message humain de la session, pas seulement de la fenêtre récente */
-async function sessionGoal(sid: string, s: CompanionState): Promise<string> {
-  if (s.goal) return s.goal;
-  try {
-    // `order=asc` renvoie les PLUS ANCIENS messages (sans paginer tout l'historique)
-    const first = await jget(`/api/session/${sid}/message?limit=20&order=asc`) as { data?: M[] };
-    const conv = (first.data ?? [])
-      .filter(m => m.type === 'user' || m.type === 'assistant')
-      .sort((a, b) => (a.time?.created ?? 0) - (b.time?.created ?? 0));
-    const txt = messageText(conv.find(m => m.type === 'user') ?? ({ type: 'user' } as M));
-    if (txt) s.goal = txt.slice(0, 400);
-  } catch { /* l'objectif de la fenêtre récente fera l'affaire */ }
-  return s.goal ?? '';
+interface ToolPart {
+  type?: string; name?: string; tool?: string;
+  state?: { status?: string; input?: Record<string, unknown> };
+}
+interface WireMessage {
+  id: string;
+  type: string;
+  time?: { created?: number };
+  text?: string;
+  content?: Array<{ type: string; text?: string } & ToolPart>;
+  payload?: { text?: string };
 }
 
-/** fetch les messages, ordonnés chronologiquement ; détecte l'objectif (1er message humain) */
-async function digestNew(sid: string, s: CompanionState, force = false) {
-  const out = await jget(`/api/session/${sid}/message?limit=30`) as { data?: M[] };
+interface DigestResult {
+  text: string;
+  hash: string;
+  lastMsgID?: string;
+  lastUser?: { id: string; text: string };
+  lastAssistantText: string;
+  agentAsk: string | null;
+  actions: string[];
+}
+
+/** Premier message humain de la session (objectif initial, pas seulement la fenêtre récente). */
+async function firstUserText(sid: string): Promise<string> {
+  try {
+    const first = await jget(`/api/session/${sid}/message?limit=20&order=asc`) as { data?: WireMessage[] };
+    const conv = (first.data ?? [])
+      .filter(m => m.type === 'user')
+      .sort((a, b) => (a.time?.created ?? 0) - (b.time?.created ?? 0));
+    return messageText(conv[0] ?? ({ type: 'user' } as WireMessage)).slice(0, 400);
+  } catch { return ''; }
+}
+
+async function digestNew(sid: string, s: CompanionState, force: boolean): Promise<DigestResult | null> {
+  const out = await jget(`/api/session/${sid}/message?limit=30`) as { data?: WireMessage[] };
   const conv = (out.data ?? [])
     .filter(m => m.type === 'user' || m.type === 'assistant')
-    .sort((a, b) => (a.time?.created ?? 0) - (b.time?.created ?? 0));   // ancien → récent, peu importe l'ordre de l'API
+    .sort((a, b) => (a.time?.created ?? 0) - (b.time?.created ?? 0));
   if (!conv.length) return null;
-  // objectif : premier message humain de la session (le tour en cours peut avoir >30 messages)
-  const goal = ((await sessionGoal(sid, s)) || messageText(conv.find(m => m.type === 'user') ?? ({ type: 'user' } as M))).slice(0, 400);
+
+  const lastUserMsg = [...conv].reverse().find(m => m.type === 'user');
+  const lastUser = lastUserMsg
+    ? { id: lastUserMsg.id, text: messageText(lastUserMsg).slice(0, 400) }
+    : undefined;
+
   // du frais : messages apparus depuis la dernière analyse ; premier passage ou force = les 4 derniers
   const idx = s.lastMsgID ? conv.findIndex(m => m.id === s.lastMsgID) : -1;
   let fresh = idx >= 0 ? conv.slice(idx + 1) : conv.slice(-4);
   if (force && !fresh.length) fresh = conv.slice(-4);
-  fresh = fresh.slice(-6);
-  s.lastMsgID = conv[conv.length - 1]?.id ?? s.lastMsgID;
+  fresh = fresh.slice(-MAX_DIGEST_MESSAGES);
   if (!fresh.length) return null;
 
   const parts: string[] = [];
+  const actions: string[] = [];
   for (let i = 0; i < fresh.length; i++) {
     const m = fresh[i];
     let txt = messageText(m);
     let tag = (i === fresh.length - 1 && m.type === 'assistant')
-      ? 'AGENT (DERNIER MESSAGE — état le plus récent du travail)'
-      : (m.type === 'user' ? 'HUMAIN' : 'AGENT');
+      ? 'AGENT (DERNIER MESSAGE, état le plus récent du travail)'
+      : (m.type === 'user' ? 'TOI (message du propriétaire de la session)' : 'AGENT');
     if (!txt && m.type === 'assistant') {
-      // tour en cours : souvent des tool calls sans texte — le raisonnement révèle l'activité
-      const reasoning = m.content?.filter(c => c.type === 'reasoning').map(c => c.text).join(' ') ?? '';
-      if (reasoning) { txt = reasoning.slice(0, 500); tag = 'AGENT (raisonnement en cours — tour pas fini)'; }
+      // tour en cours : souvent des tool calls sans texte, le raisonnement révèle l'activité
+      const reasoning = (m.content ?? [])
+        .filter(c => c.type === 'reasoning')
+        .map(c => c.text ?? '')
+        .join(' ')
+        .replace(/```[\s\S]*?```/g, ' ')
+        .trim();
+      if (reasoning) {
+        txt = reasoning.slice(0, 400);
+        tag = 'AGENT (raisonnement en cours, ne le recopie pas)';
+      }
     }
-    if (!txt) continue;
-    parts.push(`[${tag}] ${txt}`.slice(0, 950));
+    if (txt) parts.push(`[${tag}] ${txt}`.slice(0, 900));
+    for (const c of m.content ?? []) {
+      const line = toolActionLine(c);
+      if (line) actions.push(line);
+    }
   }
+
+  const actionLines = actions.slice(-MAX_ACTIONS);
+  if (actionLines.length) parts.push(`Actions récentes (faits):\n${actionLines.join('\n')}`);
   if (!parts.length) {
-    // digest télescopé : pas un « extrait vide », mais le début d'un tour — dire ce qu'on attend du modèle
-    parts.push('(aucun texte nouveau pour l\u2019instant : le tour vient de démarrer. Ne décrit PAS l\u2019état de l\u2019extrait : résume l\u2019objectif de la tâche et la demande en cours, en tutoyant l\u2019utilisateur.)');
+    parts.push('(aucun texte nouveau pour l’instant : le tour vient de démarrer. Résume l’objectif et ce que l’agent fait, sans décrire l’extrait.)');
   }
-  return parts.join('\n') + `\n(Objectif de la tâche : ${goal || 'inconnu de l\u2019extrait'})`;
+
+  const lastAssistant = [...conv].reverse().find(m => m.type === 'assistant');
+  const lastAssistantText = lastAssistant
+    ? (messageText(lastAssistant)
+      || (lastAssistant.content ?? []).filter(c => c.type === 'reasoning').map(c => c.text ?? '').join(' ').slice(0, 400))
+    : '';
+  const agentAsk = detectHumanQuestion(lastAssistantText);
+
+  const text = parts.join('\n');
+  return {
+    text,
+    hash: createHash('sha1').update(text).digest('hex'),
+    lastMsgID: conv[conv.length - 1]?.id,
+    lastUser,
+    lastAssistantText,
+    agentAsk,
+    actions: actionLines,
+  };
 }
 
 function persistedCompanion(sid: string) { return getCompanion(sid); }
-function rememberCompanion(sid: string, compId: string) { putCompanion(sid, compId); }
+function rememberCompanion(sid: string, compId: string, agent: string) { putCompanion(sid, compId, agent); }
 
 async function ensureCompanion(sid: string, s: CompanionState) {
   if (s.compSession) return s.compSession;
   const known = persistedCompanion(sid);
   const currentV = getAgentVersion();
-  // version du prompt changée ? → on relâche l'ancien compagnon et on en crée un neuf (prompt à jour)
-  if (known && (known.version === null || known.version !== currentV)) {
+  const currentAgent = ensureAgentDefinition(currentV);
+  // prompt changé, ou compagnon créé avec l'ancien nom d'agent (dont le prompt est resté en cache) ?
+  if (known && (known.version !== currentV || known.agent !== currentAgent)) {
     try {
       await jpost('/api/openchamber/sessions/archive', { ids: [known.compId] });
-      logEvent(sid, 'note', 'compagnon déclassé (prompt de l\u2019analyste a changé)');
+      logEvent(sid, 'note', 'compagnon déclassé (prompt de l’analyste a changé)');
     } catch { /* garde le jeton */ }
     s.compSession = undefined;
   } else if (known) {
     s.compSession = known.compId;
     return known.compId;
   }
-  const r = await jpost('/api/session', { parentID: sid, title: 'comp. supervision' });
+  // l'agent est fixé dès la création : l'API send ne l'impose pas toujours aux sessions enfants
+  const r = await jpost('/api/session', { parentID: sid, title: 'comp. supervision', agent: currentAgent });
   const id = (r.data as { data?: { id?: string } })?.data?.id;
   if (!id) throw new Error('session compagnon non créée');
   s.compSession = id;
-  rememberCompanion(sid, id);
-  logEvent(sid, 'note', `compagnon #${id.slice(-6)} (v agent ${currentV ? 'à jour' : '?'})`);
+  rememberCompanion(sid, id, currentAgent);
+  logEvent(sid, 'note', `compagnon #${id.slice(-6)} (${currentAgent})`);
   return id;
 }
 
-async function waitReply(compId: string, sinceMs: number): Promise<string> {
-  const deadline = Date.now() + MAX_WAIT_MS;
+async function waitReply(compId: string, sinceMs: number, timeoutMs = MAX_WAIT_MS): Promise<string> {
+  const deadline = Date.now() + timeoutMs;
   let lastText = '';
   while (Date.now() < deadline) {
     await new Promise(r => setTimeout(r, 2500));
     try {
-      const stt = await jget(`/api/session/${compId}/message?limit=6`) as { data?: Array<{ type: string; time?: { created?: number }; completed?: number; content?: Array<{ type: string; text?: string }> }> };
-      // UNIQUEMENT les réponses postérieures à notre injection (sinon on rattrape la précédente)
+      const stt = await jget(`/api/session/${compId}/message?limit=6`) as {
+        data?: Array<{ type: string; time?: { created?: number }; content?: Array<{ type: string; text?: string }> }>;
+      };
       const replies = (stt.data ?? []).filter(m => m.type === 'assistant' && (m.time?.created ?? 0) >= sinceMs);
       const last = replies[replies.length - 1];
-      const text = last?.content?.filter(c => c.type === 'text').map(c => c.text).join(' ') ?? '';
+      const text = last?.content?.filter(c => c.type === 'text').map(c => c.text ?? '').join(' ') ?? '';
       if (text) {
         lastText = text;
-        // dès que le texte parse en verdict, on s'arrête — le marqueur "complété" arrive en retard
-        if (parseVerdict(text)) return text;
+        // dès que le texte parse en verdict, on s'arrête : le marqueur "complété" arrive en retard
+        if (parseVerdictText(text)) return text;
       }
     } catch { /* réseau : on retente */ }
   }
   return lastText;
 }
 
-function scrubFrench(t: string): string {
-  // pansement jusqu'à ce que le modèle de l'agent apprenne le tutoiement (voir AGENTS.md companión)
-  return t
-    .replace(/l'humain fournit-il d'autres idées/gi, 'As-tu d\u2019autres idées')
-    .replace(/l'humain fournit-il/gi, 'As-tu')
-    .replace(/\bl'humain\b/gi, 'tu')
-    .replace(/Arbitrage utilisateur attendu/gi, 'À toi de trancher');
+async function repairVerdict(compId: string, dir: string | undefined, reasons: string[]): Promise<string> {
+  const prompt = [
+    `Ta réponse précédente ne respecte pas le contrat (${reasons.join(', ')}).`,
+    'Réécris UNIQUEMENT le JSON complet, en français, avec toutes les clés.',
+    'Rappels : summary = ce qui est vrai maintenant pour un lecteur qui n’a pas lu la conversation, 1 à 2 phrases, l’agent à la troisième personne (jamais « tu fais » pour l’agent).',
+    'Aucun identifiant, commit, branche, numéro de document, nom d’outil, fichier, test, pourcentage, backtick, ni « idle », « busy », « extrait », « aucun changement ».',
+    'Décris l’effet concret pour le lecteur, pas le journal de bord du développeur.',
+    '« le compagnon » ne désigne jamais l’agent : écris « l’agent ».',
+    'human_request vide si le signal d’attente est « aucun ». progress peut rester null, le daemon calcule à partir du plan.',
+    'Réponds par le JSON seulement.',
+  ].join('\n');
+  const p = await jpost(`/api/openchamber/sessions/${compId}/send`, {
+    prompt, agent: ensureAgentDefinition(getAgentVersion()), directory: dir,
+  });
+  if (!p.ok) return '';
+  return waitReply(compId, Date.now() - 1500, REPAIR_WAIT_MS);
 }
 
-function parseVerdict(text: string): { resume?: string; termine?: boolean; confiance?: number | null; progress?: number; attend?: string } | null {
-  const m = text.match(/\{[\s\S]*\}/);
-  if (!m) return null;
-  try {
-    const v = JSON.parse(m[0]) as Record<string, unknown>;
-    // clés tolérantes (le modèle glisse parfois des accents : "résumé", "progrès"…)
-    const pick = (...ks: string[]) => { for (const k of ks) if (v[k] != null) return v[k]; return undefined; };
-    const resume = pick('summary', 'resume', 'résumé');
-    const termine = pick('done', 'termine', 'terminé', 'fini');
-    // confiance = null du modèle (ou clé absente) : le compagnon n'a rien à juger ;
-    // l'UI affiche alors les trois pastilles en gris, on ne dégrade plus vers 0
-    const confRaw = pick('confidence', 'confiance');
-    const confiance = confRaw == null ? null : Math.max(0, Math.min(1, Number(confRaw) || 0));
-    const progress = pick('progress', 'progrès', 'avancement');
-    const attend = pick('pending_human', 'attend', 'attente');
-    const note = pick('confidence_reason', 'confidence_note', 'confiance_reason', 'pourquoi');
-    if (typeof resume !== 'string') return null;
-    return {
-      resume: scrubFrench(String(resume)).slice(0, 300),
-      termine: !!termine,
-      confiance,
-      progress: Math.max(0, Math.min(100, Number(progress) || 0)),
-      attend: scrubFrench(typeof attend === 'string' ? attend : '').slice(0, 160),
-      note: typeof note === 'string' ? scrubFrench(note).slice(0, 160) : '',
-    };
-  } catch { return null; }
+function planText(plan: PlanStep[]): string {
+  return plan.length
+    ? plan.map((p, i) => `${i + 1}. [${p.done ? 'x' : ' '}] ${p.step}`).join('\n')
+    : '(aucun plan encore)';
 }
 
-async function analyseOnce(sid: string, title: string, dir?: string, status?: string, force = false) {
+function fallbackSummary(previous: string | null, objective: string): string {
+  const prev = scrubSummary(previous ?? '');
+  if (prev && lintSummary(prev).ok) return prev;
+  return `L’agent travaille sur : ${objective.slice(0, 140)}`;
+}
+
+async function analyseOnce(
+  sid: string,
+  title: string,
+  dir: string | undefined,
+  status: string | undefined,
+  wait: WaitInfo,
+  force = false,
+): Promise<void> {
   const s = get(sid);
   if (s.inFlight) return;
+  if (active >= MAX_CONCURRENT) return;
+  s.inFlight = true;
+  active++;
   try {
-    let digest = await digestNew(sid, s, force);
-    // au kick start (tour qui vient de démarrer), le message peut ne pas être persisté/lu tout de suite :
-    // ré-essayer le digest jusqu'à voir du texte réel (le prompt de l'utilisateur), max ~4 s
-    if (force) {
-      for (let i = 0; i < 5 && digest && !digest.includes('[HUMAIN]') && !digest.includes('[AGENT'); i++) {
-        await new Promise(r => setTimeout(r, 900));
-        digest = await digestNew(sid, s, true);
-      }
-    }
+    const digest = await digestNew(sid, s, force);
     if (!digest) { s.lastRunAt = Date.now(); return; }
-    s.inFlight = true;
+    const busy = status === 'busy';
+
+    const prevTask = getTaskState(sid) as {
+      goal?: string; objective?: string; objective_version?: number;
+      last_user_id?: string; plan?: string; closed_at?: number;
+    } | null;
+    const firstUser = prevTask?.goal ? '' : await firstUserText(sid);
+    const objective = resolveObjective({ prev: prevTask, lastUser: digest.lastUser, firstUser });
+    const prevPlan = parsePlanFromDb(prevTask?.plan);
+
+    // même digest, même statut, pas de nouvel objectif → aucun appel au modèle
+    if (!force && !objective.changed && digest.hash === s.lastDigestHash && s.lastStatus === status) {
+      s.lastMsgID = digest.lastMsgID ?? s.lastMsgID;
+      s.lastRunAt = Date.now();
+      return;
+    }
+    setTaskObjective(sid, {
+      objective: objective.objective,
+      version: objective.version,
+      goal: objective.goal || undefined,
+      lastUserId: objective.lastUserId,
+    });
+    if (objective.changed) {
+      setTaskPlan(sid, []);
+      logEvent(sid, 'note', `nouvel objectif (v${objective.version})`);
+    }
+
+    const previousVerdict = getVerdict(sid) as {
+      resume?: string; confiance?: number | null; progress?: number | null;
+      termine?: number; attend?: string; note?: string; state?: string;
+    } | null;
+
     const compId = await ensureCompanion(sid, s);
+    const planForInjection = objective.changed ? [] : (objective.plan.length ? objective.plan : prevPlan);
+    const needsNewPlan = objective.changed || planForInjection.length === 0;
+    const waitText = wait.waiting
+      ? `${wait.source}: ${wait.ask}`
+      : (digest.agentAsk ? `agent_ask: ${digest.agentAsk}` : 'aucun');
+    const prevText = previousVerdict
+      ? `Verdict précédent (faits, ne le recopie pas) : summary="${scrubSummary(previousVerdict.resume ?? '').slice(0, 200)}" ; state=${previousVerdict.state ?? '?'} ; progress=${previousVerdict.progress ?? 'null'} ; done=${previousVerdict.termine ? 'true' : 'false'} ; attend="${previousVerdict.attend ?? ''}"`
+      : 'Aucun verdict précédent.';
+
     const inject = [
       `Tâche : ${title}`,
-      `Session actuellement : ${status ?? 'idle'}`,
-      s.lastBrief ? `Ton résumé précédent (rappěl des faits; reformule-le toujours en tutoyant directement l'utilisateur, sans le mot « humain ») : ${s.lastBrief}` : '',
-      `Message(s) récent(s) :`,
-      digest,
-      `Rappel: tes textes s'affichent directement à l'utilisateur, en « tu » : « As-tu… », « À toi de… ». Jamais le mot « humain » dans summary/pending_human. Ton JSON doit inclure TOUTES les clés, surtout confidence_reason.`,
+      `Objectif actuel (version ${objective.version}) : ${objective.objective || 'inconnu'}`,
+      `Plan actuel :\n${planText(planForInjection)}`,
+      needsNewPlan
+        ? 'Établis un plan de 3 à 6 étapes vérifiables pour cet objectif.'
+        : 'Garde les mêmes étapes du plan et coche celles qui sont faites.',
+      `Signal d’attente humaine : ${waitText}`,
+      prevText,
+      'Message(s) récent(s) :',
+      digest.text,
+      'Consignes : ton lecteur est le propriétaire humain ; l’agent supervisé n’est pas ton interlocuteur. Raconte le travail à la troisième personne. Si une information te manque, baisse confidence et dis-le dans confidence_reason : ne demande jamais au lecteur de relancer, vérifier ou opérer l’agent. Le JSON doit contenir TOUTES les clés, en français pour les textes.',
     ].filter(Boolean).join('\n\n').slice(0, MAX_INJECT_CHARS);
-    const p = await jpost(`/api/openchamber/sessions/${compId}/send`, { prompt: inject, agent: 'superviseur-analyste', directory: dir });
+
+    const agent = ensureAgentDefinition(getAgentVersion());
+    const p = await jpost(`/api/openchamber/sessions/${compId}/send`, {
+      prompt: inject, agent, directory: dir,
+    });
     if (!p.ok) throw new Error(`prompt compagnon → ${p.status}`);
+
     const reply = await waitReply(compId, Date.now() - 1500);
-    const v = parseVerdict(reply);
-    if (v) {
-      s.lastBrief = v.resume;
-      upsertVerdict(sid, v);
-      logEvent(sid, 'note', `analyste: ${v.resume}`, { confiance: v.confiance, progress: v.progress, termine: v.termine });
-    } else {
-      logEvent(sid, 'note', 'analyste: réponse illisible (gardé l\u2019ancien)');
+    let raw: RawVerdict | null = parseVerdictText(reply);
+    if (!raw) {
+      logEvent(sid, 'note', 'analyste: réponse illisible (gardé l’ancien)');
+      // pas de lastMsgID ni de hash : la reprise doit revoir le même extrait
+      s.lastDigestHash = undefined;
+      s.lastStatus = undefined;
+      return;
     }
+
+    const ctx = {
+      busy,
+      wait,
+      agentAsk: busy ? null : digest.agentAsk,
+      objectiveChanged: objective.changed,
+      objective: objective.objective,
+      previous: {
+        resume: previousVerdict?.resume ?? undefined,
+        progress: previousVerdict?.progress ?? null,
+        termine: previousVerdict?.termine ?? null,
+        state: previousVerdict?.state ?? null,
+        plan: prevPlan,
+        attend: previousVerdict?.attend ?? undefined,
+      },
+    };
+    let norm: NormalizedVerdict = normalizeVerdict(raw, ctx);
+
+    if (shouldRepair(norm.lintReasons)) {
+      logEvent(sid, 'note', `analyste: reprise (${norm.lintReasons.join(', ')})`);
+      const repaired = await repairVerdict(compId, dir, norm.lintReasons);
+      const raw2 = parseVerdictText(repaired);
+      if (raw2) norm = normalizeVerdict(raw2, ctx);
+    }
+
+    // reprise insuffisante : on garde un texte honnête, jamais de bruit à l'écran
+    if (shouldRepair(norm.lintReasons)) {
+      norm.summary = fallbackSummary(previousVerdict?.resume ?? null, objective.objective);
+      norm.note = norm.note || 'Résumé de l’analyste non conforme, ancien résumé conservé.';
+      if (norm.confidence != null) norm.confidence = Math.max(0, norm.confidence - 0.1);
+    }
+
+    if (norm.done) norm.plan = norm.plan.map(p => ({ ...p, done: true }));
+    setTaskPlan(sid, norm.plan);
+    upsertVerdict(sid, {
+      resume: norm.summary,
+      termine: norm.done,
+      confiance: norm.confidence,
+      progress: norm.progress,
+      attend: norm.attend,
+      note: norm.note,
+      state: norm.state,
+      humanSource: norm.humanSource,
+      next: norm.next,
+      objectiveVersion: objective.version,
+    });
+    s.lastDigestHash = digest.hash;
+    s.lastStatus = status;
+    s.lastMsgID = digest.lastMsgID ?? s.lastMsgID;
+    s.failures = 0;
+    logEvent(sid, 'note', `analyste: ${norm.summary}`, {
+      confiance: norm.confidence, progress: norm.progress, termine: norm.done,
+      state: norm.state, source: norm.humanSource, plan: norm.plan.length,
+    });
   } catch (e) {
+    const failures = (s.failures ?? 0) + 1;
+    s.failures = failures;
+    s.lastDigestHash = undefined;
+    s.lastStatus = undefined;
     logEvent(sid, 'note', `analyste: échec ${String(e).slice(0, 80)}`);
+    // une ou deux reprises, pas une boucle : le kick sera reconsumé après l'intervalle
+    if (failures <= 2) pushKick(sid, 'end');
   } finally {
     s.inFlight = false;
+    active = Math.max(0, active - 1);
     s.lastRunAt = Date.now();
   }
 }
 
-/** appelé à chaque tick de flotte : idle → analyse tout de suite ; busy → analyse périodique */
-export function companionTick(sessions: OpenchamberSession[], statusMap: Record<string, { status: string }>): void {
+interface TickSession {
+  id: string;
+  title?: string;
+  parentID?: string;
+  location?: { directory?: string };
+  time?: Record<string, number>;
+}
+
+/**
+ * Appelé à chaque tick de flotte. Le compagnon ne tourne que sur un déclencheur :
+ * kick start/end, migration de prompt, ou période busy. Un digest inchangé est ignoré.
+ */
+export function companionTick(
+  sessions: TickSession[],
+  statusMap: Record<string, { status: string; lastUpdateAt?: number }>,
+  waitingMap: Map<string, WaitInfo> = new Map(),
+): void {
   if (process.env.SUPERVISEUR_COMPANION === 'off') return;
-  for (const sess of sessions) {
-    if (sess.parentID) continue;                      // pas pour les sous-sessions
+  const currentV = getAgentVersion();
+  const currentAgent = ensureAgentDefinition(currentV);
+
+  // Priorité aux compagnons à migrer : sinon deux sessions busy peuvent prendre
+  // tous les créneaux et affamer la migration des sessions au repos.
+  const candidates = sessions.filter(s => !s.parentID && !s.time?.archived && !!statusMap[s.id]);
+  const staleIds = new Set<string>();
+  const stale: TickSession[] = [];
+  const normal: TickSession[] = [];
+  for (const sess of candidates) {
+    const known = getCompanion(sess.id);
+    if (!known || known.version !== currentV || known.agent !== currentAgent) {
+      staleIds.add(sess.id);
+      stale.push(sess);
+    } else {
+      normal.push(sess);
+    }
+  }
+  const ordered = [...stale, ...normal];
+
+  for (const sess of ordered) {
+    if (active >= MAX_CONCURRENT) break;
     const stt = statusMap[sess.id];
-    if (!stt) continue;
     const s = get(sess.id);
-    // kicks par événements (cablés: inbox.enqueued → start ; execution.succeeded/failed/interrupted → end)
-    // NOTE : PAS de déclenchement par turnStartedAt — il varie à chaque sous-exécution (faux « nouveau tour »)
-    const kick = takeKick(sess.id);
-    const verdict = verdictOf(sess.id) as { note?: string; resume?: string; attend?: string } | null;
-    const staleVoice = !!verdict
-      && ((verdict.resume ?? '') + (verdict.attend ?? '')).toLowerCase().includes('humain');
-    const needsNote = !!verdict && !verdict.note;
-    // PAS de déclenchement à vide : un tick sur une session idle immobile ne fait RIEN.
-    const busyPeriodic = stt.status === 'busy' && (s.lastRunAt ?? 0) < Date.now() - PERIOD_MS;
-    const forced = (needsNote || staleVoice) && (s.lastRunAt ?? 0) < Date.now() - 60_000;
-    if (s.inFlight) { if (kick) kicks.set(sess.id, kick); continue; }   // kick conservé : re-consommé après l'analyse
+    if (s.inFlight) continue;
+    // une carte fermée dans le Superviseur ne consomme pas d'analyse tant que la session n'a pas bougé
+    const task = getTaskState(sess.id) as { closed_at?: number } | null;
+    if (task?.closed_at && (stt.lastUpdateAt ?? 0) <= task.closed_at) continue;
+
+    const due = Date.now() - (s.lastRunAt ?? 0) >= MIN_INTERVAL_MS;
+    if (!due) continue;
+
+    const wait = waitingMap.get(sess.id) ?? emptyWait();
+    const stalePrompt = staleIds.has(sess.id);
     const dispatch = (force: boolean) => {
-      void analyseOnce(sess.id, sess.title ?? sess.id.slice(0, 12), sess.location?.directory, stt.status, force);
+      void analyseOnce(sess.id, sess.title ?? sess.id.slice(0, 12), sess.location?.directory, stt.status, wait, force);
     };
-    if (kick?.start) { dispatch(true); continue; }       // prompt reçu → cadrage immédiat
-    if (kick?.end) { dispatch(false); continue; }        // tour fini → analyse de clôture
+
+    const k = takeKick(sess.id);
+    // migration de prompt : une passe par session, espacée, même sans nouveau message
+    if (stalePrompt) {
+      if (Date.now() - (s.lastMigrationAt ?? 0) >= 60_000) {
+        s.lastMigrationAt = Date.now();
+        dispatch(true);
+        continue;
+      }
+      // migration déjà tentée récemment : un kick réel reste prioritaire
+      if (k?.start) { dispatch(true); continue; }
+      if (k?.end) { dispatch(false); continue; }
+      continue;
+    }
+
+    if (k?.start) { dispatch(true); continue; }  // prompt reçu → cadrage immédiat
+    if (k?.end) { dispatch(false); continue; }   // tour fini → analyse de clôture
+    const busyPeriodic = stt.status === 'busy' && Date.now() - (s.lastRunAt ?? 0) >= PERIOD_MS;
     if (busyPeriodic) { dispatch(false); continue; }
-    if (forced) { dispatch(true); continue; }
-    // ici : session idle qui n'a pas bougé — le compagnon ne fait RIEN (c'est le fix anti-relance)
+    // session idle immobile : le compagnon ne fait RIEN (anti-relance)
   }
 }
 

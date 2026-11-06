@@ -16,11 +16,26 @@ export interface OpenchamberSession {
   metadata?: { openchamber?: { work?: { state?: string }, turn?: { durationMs?: number } } };
 }
 import { companionTick, verdictOf } from './companion.mts';
+import type { WaitInfo } from './verdict.mts';
 
 function supOf(id: string): Verdict | undefined {
-  const v = verdictOf(id) as { resume?: string; confiance?: number | null; progress?: number; termine?: number; attend?: string; note?: string; at?: number } | null;
+  const v = verdictOf(id) as {
+    resume?: string; confiance?: number | null; progress?: number | null; termine?: number;
+    attend?: string; note?: string; at?: number; state?: string; human_source?: string; next?: string;
+  } | null;
   if (!v) return undefined;
-  return { resume: v.resume ?? undefined, confiance: v.confiance ?? undefined, progress: v.progress ?? undefined, termine: !!v.termine, attend: v.attend ?? undefined, note: v.note ?? undefined, at: v.at ?? undefined };
+  return {
+    resume: v.resume ?? undefined,
+    confiance: v.confiance ?? undefined,
+    progress: v.progress ?? undefined,
+    termine: !!v.termine,
+    attend: v.attend ?? undefined,
+    note: v.note ?? undefined,
+    at: v.at ?? undefined,
+    state: (v.state as Verdict['state']) ?? undefined,
+    humanSource: (v.human_source as Verdict['humanSource']) ?? undefined,
+    next: v.next ?? undefined,
+  };
 }
 export interface PendingForm {
   id: string; sessionID: string; title?: string;
@@ -36,7 +51,11 @@ export interface FleetRow {
   pendingForms: PendingForm[]; pendingPermissions: unknown[];
 }
 export interface Verdict {
-  resume?: string; confiance?: number; progress?: number; termine?: boolean; attend?: string; note?: string; at?: number;
+  resume?: string; confiance?: number | null; progress?: number | null; termine?: boolean;
+  attend?: string; note?: string; at?: number;
+  state?: 'working' | 'waiting_human' | 'done' | 'blocked';
+  humanSource?: 'question_tool' | 'permission' | 'agent_ask' | 'none';
+  next?: string;
 }
 export interface Fleet {
   at: number; rows: FleetRow[]; concern: string | null;
@@ -149,8 +168,27 @@ async function runPoll(): Promise<void> {
     }
     cachedFleet = buildFleet(status);
     lastGood = Date.now();
+    // l'attente humaine est décidée par les formulaires/permissions réels, pas par le LLM
+    const waitingMap = new Map<string, WaitInfo>();
+    for (const row of cachedFleet.rows) {
+      const form = row.pendingForms[0];
+      const permission = row.pendingPermissions[0];
+      if (form) {
+        waitingMap.set(row.id, {
+          waiting: true,
+          source: 'question_tool',
+          ask: (form.fields?.[0]?.title ?? form.title ?? 'Une question t’attend.').slice(0, 180),
+        });
+      } else if (permission) {
+        waitingMap.set(row.id, {
+          waiting: true,
+          source: 'permission',
+          ask: 'Une permission t’attend.',
+        });
+      }
+    }
     // le compagnon juge les sessions nouvelles (idle) ou périodiquement (busy)
-    companionTick([...sessionsIndex.values()], status.sessions ?? {});
+    companionTick([...sessionsIndex.values()], status.sessions ?? {}, waitingMap);
   } catch {
     /* garde la dernière flotte connue, réessaie au prochain tick */
   }

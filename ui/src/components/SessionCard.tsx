@@ -31,10 +31,14 @@ export function SessionCard({ row, waiting, done, now }: Props) {
   const form = row.pendingForms?.[0];
   const perm = row.pendingPermissions?.[0];
 
-  const showBars = !!row.sup && (row.sup.progress != null || row.sup.confiance != null);
-  const progress = row.sup?.progress ?? 0;
+  const hasProgress = row.sup?.progress != null;
+  const progress = hasProgress ? Math.max(0, Math.min(100, Number(row.sup?.progress))) : 0;
   const rawConf = row.sup?.confiance;
   const conf = rawConf == null ? null : Math.max(0, Math.min(1, rawConf));
+  const showBars = !!row.sup && (hasProgress || conf != null);
+  // une attente n'est affichée que si elle est adossée à un vrai signal (form, permission,
+  // ou question explicite de l'agent) : les anciens verdicts ne polluent plus la carte
+  const attend = row.sup?.attend && (waiting || row.sup.humanSource === 'agent_ask') ? row.sup.attend : '';
 
   const close = () => {
     setMenuOpen(false);
@@ -112,25 +116,31 @@ export function SessionCard({ row, waiting, done, now }: Props) {
       </div>
 
       <div className="mt-[5px] pr-[26px] text-[13.5px] text-muted">{brief}</div>
-      {row.sup?.attend ? (
-        <div className="mt-[3px] pr-[26px] text-[13.5px] text-attend">✋ {row.sup.attend}</div>
+      {attend ? (
+        <div className="mt-[3px] pr-[26px] text-[13.5px] text-attend">✋ {attend}</div>
       ) : null}
 
       {showBars ? (
         <div className="mt-[8px] flex items-center gap-[10px]">
-          <span className="h-[5px] flex-1 overflow-hidden rounded-[3px] bg-track">
-            <span
-              className={cx(
-                'block h-full transition-[width] duration-500',
-                progress > 0 && progress < 66 ? 'bg-amber' : 'bg-green',
-              )}
-              style={{ width: `${progress}%` }}
-            />
-          </span>
+          {hasProgress ? (
+            <span className="h-[5px] flex-1 overflow-hidden rounded-[3px] bg-track">
+              <span
+                className={cx(
+                  'block h-full transition-[width] duration-500',
+                  progress > 0 && progress < 66 ? 'bg-amber' : 'bg-green',
+                )}
+                style={{ width: `${progress}%` }}
+              />
+            </span>
+          ) : (
+            <span className="flex-1" />
+          )}
           <ConfidenceDots conf={conf} note={row.sup?.note} />
-          <span className="w-[34px] text-right text-[12px] font-[650] tabular-nums">
-            {Math.round(progress)}%
-          </span>
+          {hasProgress ? (
+            <span className="w-[34px] text-right text-[12px] font-[650] tabular-nums">
+              {Math.round(progress)}%
+            </span>
+          ) : null}
         </div>
       ) : null}
 
