@@ -77,14 +77,21 @@ function buildFleet(status: StatusPayload): Fleet {
     if (!meta) continue;
     if (meta.time?.archived) continue;
     // les sous-sessions/sous-agents (parentID) ne sont pas des tâches de flotte
-    if (meta.parentID) continue;    const pendingForms = (status.pending?.[id]?.forms ?? []).filter(f => f?.metadata?.kind === 'question');
+    if (meta.parentID) continue;
+    const pendingForms = (status.pending?.[id]?.forms ?? []).filter(f => f?.metadata?.kind === 'question');
     const pendingPermissions = status.pending?.[id]?.permissions ?? [];
-     const row: FleetRow = {
+    // le verdict appartient au tour précédent ? (prompt renvoyé depuis la dernière analyse)
+    // → strip résumé/confiance/attend : la carte repasse en « Réflexion en cours »
+    const supRaw = supOf(id);
+    const sup = (supRaw && s.status === 'busy' && supRaw.at && s.turnStartedAt && supRaw.at < s.turnStartedAt)
+      ? { at: supRaw.at }
+      : supRaw;
+    const row: FleetRow = {
       id,
       title: meta.title ?? id.slice(0, 18),
       status: s.status,
       dir: meta.location?.directory,
-      sup: supOf(id),
+      sup,
       turnStartedAt: s.turnStartedAt,
       lastUpdateAt: s.lastUpdateAt,
       busy: meta?.time?.busy ?? null,

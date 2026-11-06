@@ -57,6 +57,17 @@ async function main() {
   const c1s = (dbR.query("SELECT count(*) c FROM task_log WHERE kind='note' AND session_id = ? AND text LIKE '%analyste:%'").get(sid) as { c: number }).c;
   check('aucune relance à vide pendant 45 s (idle immobile)', c1s - c0s === 0, `Δ=${c1s - c0s}`);
 
+  // 4. un nouveau prompt doit PURGER l'ancien attend/résumé immédiatement (anti-« ✋ collé »)
+  const fleetA = await getJSON(`${BASE}/api/fleet`);
+  const rBefore = (fleetA.rows ?? []).find((r: { id: string }) => r.id === sid);
+  check('verdict présent avant prompt (précondition)', !!rBefore?.sup, JSON.stringify(rBefore?.sup ?? {}).slice(0, 120));
+  await post(`${OC}/api/openchamber/sessions/${sid}/send`, { prompt: 'nouveau tour — réponds OK', directory: DIR });
+  await sleep(5000);
+  const fleetB = await getJSON(`${BASE}/api/fleet`);
+  const rB = (fleetB.rows ?? []).find((r: { id: string }) => r.id === sid);
+  const stripped = !rB?.sup || !rB.sup.attend || (rB.sup.at && rB.turnStartedAt && rB.sup.at >= rB.turnStartedAt);
+  check('attend/résumé purgé au nouveau prompt', !!stripped, JSON.stringify(rB?.sup ?? {}).slice(0, 120));
+
   // cleanup : archive le parent des tests
   await post(`${OC}/api/openchamber/sessions/archive`, { ids: [sid] });
   console.log(`\n${pass} pass, ${fail} fail`);
