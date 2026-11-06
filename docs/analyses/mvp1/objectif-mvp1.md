@@ -2,6 +2,20 @@
 
 > Doc déplacé depuis `design_concept/10-mvp1-objectif.md`. Suite continue dans ce dossier : `spike-integration.md` (constats réels), puis plan d'implémentation.
 
+## 0. État au 2026-11-06 (après les premières tuiles)
+
+| # | Capacité | État | Détail |
+| --- | --- | --- | --- |
+| 1 | Saisie → session | ✖ reporté (choix explicite : en dernier, design de page en évolution) | barre désactivée pour l'instant ; position finale I4 |
+| 2 | Cartes d'état | ◐ | statut vivant, âge, titre, projet — **progression décorative** (35 % fixe), confiance non câblée (todos pas encore branchés) |
+| 3 | Réponse inline | ✔ | questions mono et multi-parts (multiselect, champ libre, Répondre) testées de bout en bout ; **permissions : chemin câblé mais jamais testé** (aucune vraie demande) |
+| 4 | Livraison inline | ✖ | le rendu (graph/table/synthèse) dans la carte n'existe pas |
+| 5 | Clôture | ◐ | endpoint daemon `/api/fleet/done` existe ; **UI sans boutons Terminer / Repartir** |
+| 6 | ↗ OpenChamber | ◐ | ouvre `openchamber-ui://session/{id}` — schéma **deviné, jamais vérifié** (à capturer depuis l'app) |
+| — | SSE instantané | ✖ | le poll 3 s porte tout (tuile planifiée I5) |
+
+Un jalon reste **central et testable tout de suite** : le steer pendant un tour en cours (composer sur carte busy) — l'endpoint répond, mais on n'a jamais envoyé un texte dans une session **effectivement busy**.
+
 ## 1. L'objectif en une phrase
 
 Référence visuelle de l'objectif : `mockups/04-flotte-rendus.html` (la maquette « pas mal intéressante »), validée par Guillaume le 2026-11-06..Adjugé.
