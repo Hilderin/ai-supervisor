@@ -33,6 +33,7 @@ Directives pour tout agent travaillant dans ce repo.
 ### UI (patterns de la page flotte)
 
 - `replaceChildren` **déplace même les nœuds identiques → blur** : ne mettre à jour le DOM que si l'ordre change (`setChildrenIfChanged`), et ne reconstruire une carte que si son « sig » change.
+- Variables d'état dans les templates : ne pas composer un préfixe « : » à deux endroits (double `: :` réel). La variable porte déjà sa ponctuation, le template s'abstient.
 - Le sig d'une carte doit inclure **tout ce qui doit rafRAÎCHIR à l'écran** (statut, id de formulaire, progress, confiance) sinon la carte semble figée (bug 95 % vs 100 %).
 - Pendant une saisie (focus INPUT/TEXTAREA d'une carte), ne jamais reconstruire cette carte.
 - Formulaire de questions : **multi-champs** (q0, q1 → un seul bouton Répondre) ; `type` variable (`string`, `multiselect` → valeur en TABLEAU) ; répondre par objet `{qN: ...}` complet.
