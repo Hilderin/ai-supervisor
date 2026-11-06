@@ -9,8 +9,9 @@ Directives pour tout agent travaillant dans ce repo.
 ## Projet
 
 - Repo de conception puis d'implémentation du **Superviseur** : interface indépendante de supervision des conversations OpenChamber.
-- La phase de conception vit dans `docs/analyses/design_concept/` ; le MVP1 dans `docs/analyses/mvp1/` — lire les README avant toute intervention, reporter les décisions prises (doc 06).
+- La phase de conception vit dans `docs/analyses/design_concept/` ; le MVP1 dans `docs/analyses/mvp1/` : lire les README avant toute intervention, reporter les décisions prises (doc 06).
 - Documents en français.
+- **Rédaction (UI et docs) : ne jamais utiliser de tiret long (—)** ; préférer deux-points, parenthèses ou une phrase courte (introduit après un retour utilisateur sur le tooltip de confiance).
 
 ## Pièges et leçons (maintenance permanente)
 
@@ -18,15 +19,15 @@ Directives pour tout agent travaillant dans ce repo.
 
 ### API OpenCode / OpenChamber (instance réelle)
 
-- L'ordre des messages est **descendant** (plus récent d'abord) : `.slice(-n)` prend les plus anciens — toujours trier sur `time.created` avant usage.
+- L'ordre des messages est **descendant** (plus récent d'abord) : `.slice(-n)` prend les plus anciens: toujours trier sur `time.created` avant usage.
 - Le marqueur `completed` d'un message assistant arrive **en retard** : filtrer sur `completed` pour décider qu'une réponse est lisible = faux négatif. Vérifier que le texte tient debout (p.ex. parse JSON du compagnon).
 - Un tour en cours = souvent des tool calls **sans texte** : pour savoir ce qui se passe, lire la part `reasoning` du dernier assistant.
-- `POST /api/session/:id/prompt` **ignore le champ `agent`** sur la version installée. Pour changer d'agent : `POST /api/openchamber/sessions/:id/send` avec `{prompt, agent, directory}` — directory **requis** (dossier du parent).
+- `POST /api/session/:id/prompt` **ignore le champ `agent`** sur la version installée. Pour changer d'agent : `POST /api/openchamber/sessions/:id/send` avec `{prompt, agent, directory}`: directory **requis** (dossier du parent).
 - Session enfant avec `parentID` = masquée automatiquement de la flotte (filtre `parentID`) → utilisé pour les sessions compagnon.
 - `/api/sessions/status` (OpenChamber) contient des **ids fantômes** (sessions supprimées) → joindre à l'annuaire `/api/session` et filtrer les absents ; les archivées (`time.archived`) sortent de la flotte.
 - Le port local d'OpenChamber n'est **pas fixe** (auto-alloué) : discovery par `ss -tlnp` sur le process `openchamber`, ou `OPENCHAMBER_PORT`.
 - OpenCode server direct = Basic auth détenue par OpenChamber : **toujours passer par OpenChamber**.
-- Suppression de session via proxy : 404 (route introuvable) — archiver plutôt (`POST /api/openchamber/sessions/archive` `{ids:[]}`), en archivant aussi les enfants compagnon.
+- Suppression de session via proxy : 404 (route introuvable): archiver plutôt (`POST /api/openchamber/sessions/archive` `{ids:[]}`), en archivant aussi les enfants compagnon.
 - Les scheduled tasks n'ont **pas d'historique de runs** ; `/api/openchamber/message-search` existe (à tester) ; la mémoire agent = JSON lisible-corrigeable via HTTP.
 
 ### UI (patterns de la page flotte)
@@ -36,7 +37,7 @@ Directives pour tout agent travaillant dans ce repo.
 - Pendant une saisie (focus INPUT/TEXTAREA d'une carte), ne jamais reconstruire cette carte.
 - Formulaire de questions : **multi-champs** (q0, q1 → un seul bouton Répondre) ; `type` variable (`string`, `multiselect` → valeur en TABLEAU) ; répondre par objet `{qN: ...}` complet.
 - JSON des agents : clés **en anglais** (`summary/done/confidence/progress/pending_human/confidence_reason`) + clés toutes déclarées **requises** (les clés optionnelles ne sont pas nourries de façon fiable) ; parser tolérant aux variantes accentuées.
-- Menu contextuel : `position:absolute` exige un ancêtre positionné — `.card { position:relative }` sinon le menu s'ancre à la page.
+- Menu contextuel : `position:absolute` exige un ancêtre positionné: `.card { position:relative }` sinon le menu s'ancre à la page.
 
 ### Compagnon (analyste)
 

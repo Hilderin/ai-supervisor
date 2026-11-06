@@ -2,7 +2,7 @@
 <html lang="fr">
 <head>
 <meta charset="utf-8">
-<title>Superviseur — flotte</title>
+<title>Superviseur (flotte)</title>
 <style>
   :root {
     --bg:#f4f5f4; --card:#fff; --border:#e4e7e4; --text:#1d211e; --muted:#7c847d;
@@ -147,9 +147,9 @@ function cardHTML(row, waiting){
     const conf = row.sup.confiance == null ? null : Math.max(0, Math.min(1, row.sup.confiance));
     const level = conf == null ? 0 : (conf < .35 ? 1 : conf < .7 ? 2 : 3);
     const col = conf == null ? null : (conf < .35 ? '#d95f5f' : conf < .7 ? '#d19a2f' : '#2b9f6a');
-    const note = row.sup.note ? ` — ${esc(row.sup.note)}` : '';
+    const note = row.sup.note ? ` : ${esc(row.sup.note)}` : '';
     const confIcons = conf == null ? '' :
-      `<span class="cdots" data-tip="Confiance ${(conf*100).toFixed(0)} %${note ? ' — ' + esc(note) : ''}">` +
+      `<span class="cdots" data-tip="Confiance ${(conf*100).toFixed(0)} %${note ? ' : ' + esc(note) : ''}">` +
       [1,2,3].map(i => `<i${i <= level ? ` class="on" style="background:${col}"` : ''}></i>`).join('') +
       `</span>`;
     bars = `<div class="bars"><span class="track"><span class="fill${pct != null && pct < 66 && pct > 0 ? ' mid' : ''}" style="width:${pct ?? 0}%"></span></span>` +
