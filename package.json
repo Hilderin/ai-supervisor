@@ -1,0 +1,11 @@
+{
+  "name": "superviseur",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Superviseur : hub d'attention pour les sessions OpenChamber",
+  "scripts": {
+    "start": "bun daemon/src/index.mts",
+    "dev": "bun --watch daemon/src/index.mts"
+  },
+  "engines": { "bun": ">=1.2" }
+}

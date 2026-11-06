@@ -38,6 +38,7 @@ Les 12 douleurs visées (P1-P12) sont listées dans [01](01-probleme-et-vision.m
 | [07-etat-de-l-art-recherche.md](07-etat-de-l-art-recherche.md) | Recherche UX/académique 2025-2026 et implications pour le concept |
 | [08-que-doit-faire-le-superviseur.md](08-que-doit-faire-le-superviseur.md) | Périmètre clarifié : cadre PILOT adapté, composants, extras MVP, hors périmètre |
 | [09-paysage-concurrentiel.md](09-paysage-concurrentiel.md) | Produits et repos GitHub similaires : orchestrateurs, dashboards ; axes couverts / vides |
+| [10-boite-a-idees.md](10-boite-a-idees.md) | Boîte à idées : suggestions en vrac, à creuser ou écarter plus tard |
 | ../mvp1/ | **Dossier MVP1** : [`objectif-mvp1.md`](../mvp1/objectif-mvp1.md) (périmètre, critères) et [`spike-integration.md`](../mvp1/spike-integration.md) (constats réels) |
 
 ## Méthode de cette phase

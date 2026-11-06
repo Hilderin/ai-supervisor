@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Superviseur — flotte</title>
+<style>
+  :root {
+    --bg:#f4f5f4; --card:#fff; --border:#e4e7e4; --text:#1d211e; --muted:#7c847d;
+    --green:#2b9f6a; --green-soft:#e3f2ea; --orange:#d97a2b; --orange-soft:#faeadf; --amber:#d19a2f;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:-apple-system,"Segoe UI",sans-serif; background:var(--bg); color:var(--text); padding:20px 26px; font-size:13.5px; }
+  .hdr { display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; }
+  .brand { display:flex; align-items:center; gap:9px; }
+  .logo { width:26px; height:26px; border-radius:7px; background:var(--green); color:#fff; display:flex; align-items:center; justify-content:center; font-size:13px; }
+  h1 { font-size:15px; font-weight:700; }
+  .live { font-size:11px; color:var(--muted); }
+  .live b { color:var(--green); }
+  .bar { background:var(--card); border:1px solid var(--border); border-radius:10px; }
+  .bar input { width:100%; background:transparent; border:none; outline:none; font-family:inherit; font-size:14px; color:var(--text); padding:12px 14px; }
+  .bar input::placeholder { color:#a5aca5; }
+  .seclabel { display:flex; align-items:center; gap:8px; margin:18px 0 9px; font-size:12px; font-weight:700; letter-spacing:.02em; }
+  .sdot { width:8px; height:8px; border-radius:50%; }
+  .sdot.o { background:var(--orange); } .sdot.g { background:var(--green); }
+  .cnt { background:var(--card); border:1px solid var(--border); border-radius:9px; font-size:10.5px; font-weight:600; padding:1px 8px; color:var(--muted); }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:11px; padding:11px 13px 10px; margin-bottom:9px; }
+  .card.wait { background:#fffaf3; border-color:#eec89a; }
+  .r1 { display:flex; align-items:center; gap:9px; }
+  .dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+  .dot.g { background:var(--green); }
+  .dot.o { background:var(--orange); animation:blink 1.5s infinite; }
+  @keyframes blink { 50% { opacity:.35; } }
+  .title { font-weight:650; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:42%; }
+  .chip { font-size:10.5px; border-radius:9px; padding:2px 9px; white-space:nowrap; flex-shrink:0; }
+  .chip.warn { background:var(--orange); color:#fff; font-weight:600; }
+  .sp { flex:1; }
+  .ocbtn { flex-shrink:0; width:22px; height:22px; display:flex; align-items:center; justify-content:center; border:none; background:transparent; color:var(--muted); border-radius:6px; cursor:pointer; }
+  .ocbtn:hover { color:var(--green); background:var(--green-soft); }
+  .brief { margin-top:5px; font-size:12px; color:var(--muted); }
+  .qbox { margin-top:10px; padding-top:10px; border-top:1px solid var(--border); }
+  .qtext { font-size:13px; line-height:1.45; margin-bottom:9px; }
+  .actions { display:flex; gap:7px; align-items:center; flex-wrap:wrap; }
+  .bin { font-family:inherit; background:var(--green); color:#fff; border:none; border-radius:7px; font-size:12px; font-weight:600; padding:7px 14px; cursor:pointer; white-space:nowrap; }
+  .bin.gh { background:#fff; color:var(--text); border:1px solid var(--border); font-weight:500; }
+  .actions input { flex:1; background:#f7f8f7; border:1px solid var(--border); border-radius:7px; font-family:inherit; font-size:12.5px; color:var(--text); padding:7px 10px; outline:none; min-width:0; }
+  .actions input:focus { border-color:var(--green); }
+  .arrowbtn { background:var(--green); color:#fff; border:none; border-radius:7px; width:30px; height:29px; cursor:pointer; font-size:12px; flex-shrink:0; }
+  #err { display:none; background:var(--orange-soft); color:#b35c17; border-radius:8px; padding:8px 12px; font-size:12px; margin-top:10px; }
+</style>
+</head>
+<body>
+
+<div class="hdr">
+  <div class="brand"><div class="logo">◉</div><h1>Superviseur</h1></div>
+  <div class="live" id="live">connexion…</div>
+</div>
+
+<div class="bar"><input id="bar" placeholder="Ça arrive au prochain jalon : saisir une demande lance une vrai session" disabled></div>
+
+<div class="seclabel"><span class="sdot o"></span>BESOIN DE TON ATTENTION<span class="cnt" id="ca">0</span></div>
+<div id="sa"></div>
+
+<div class="seclabel"><span class="sdot g"></span>EN COURS<span class="cnt" id="cr">0</span></div>
+<div id="sr"></div>
+
+<div id="err"></div>
+
+<script type="module">
+const SVG_OC = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg>';
+const liveEl = document.getElementById('live');
+const sa = document.getElementById('sa'), sr = document.getElementById('sr');
+const ca = document.getElementById('ca'), cr = document.getElementById('cr');
+const errBox = document.getElementById('err');
+
+function esc(s){ return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function fmtAge(ms){
+  if (ms < 0 || !isFinite(ms)) return 'à l\'instant';
+  const s = Math.round(ms/1000);
+  if (s < 10) return 'à l\'instant';
+  if (s < 60) return `il y a ${s} s`;
+  const m = Math.round(s/60); if (m < 60) return `il y a ${m} min`;
+  const h = Math.round(m/60); if (h < 24) return `il y a ${h} h`;
+  return `il y a ${Math.round(h/24)} j`;
+}
+
+function cardHTML(row, waiting){
+  const brief = waiting
+    ? (row.pendingForms?.length ? 'une question t\'attend' : 'une permission t\'attend')
+    : row.status === 'busy'
+      ? 'travaille'
+      : 'tour terminé · ' + fmtAge(Date.now() - (row.lastUpdateAt ?? Date.now()));
+  const dot = waiting ? '<span class="dot o"></span>' : '<span class="dot g"></span>';
+  const chip = waiting ? '<span class="chip warn">attends ta réponse</span>' : '';
+  return `
+    <div class="r1">${dot}<span class="title">${esc(row.title)}</span>${chip}<span class="sp"></span>
+      <button class="ocbtn" data-open="${esc(row.id)}" title="Ouvrir dans OpenChamber">${SVG_OC}</button></div>
+    <div class="brief">${esc(brief)}</div>
+    ${questionBoxHTML(row)}`;
+}
+
+function questionBoxHTML(row){
+  const perm = row.pendingPermissions?.[0];
+  const form = row.pendingForms?.[0];
+  if (perm) {
+    return `<div class="qbox"><div class="qtext">Permission demandée</div>
+      <div class="actions">
+        <button class="bin" data-perm="${esc(perm.id ?? '')}" data-decision="once">Autoriser</button>
+      </div></div>`;
+  }
+  if (!form) return '';
+  const fld = form.fields?.[0];
+  const qt = fld?.description ?? 'Question';
+  let out = `<div class="qbox" data-form="${esc(form.id)}"><div class="qtext">${esc(qt)}</div>`;
+  if (fld?.options?.length) {
+    out += '<div class="actions">';
+    fld.options.forEach(o => { out += `<button class="bin" data-answer="${esc(o.value)}">${esc(o.label)}</button>`; });
+    out += `<input type="text" placeholder="… ou répond autre chose"><button class="arrowbtn" data-send="1">➤</button></div>`;
+  }
+  out += '</div>';
+  return out;
+}
+
+function mount(fleet){
+  const waiting = fleet.rows.filter(r => r.pendingForms?.length || r.pendingPermissions?.length);
+  const others = fleet.rows.filter(r => !(r.pendingForms?.length || r.pendingPermissions?.length));
+  sa.innerHTML = waiting.map(r => `<div class="card wait" data-sid="${esc(r.id)}">${cardHTML(r, true)}</div>`).join('') || '';
+  sr.innerHTML = others.map(r => `<div class="card" data-sid="${esc(r.id)}">${cardHTML(r, false)}</div>`).join('') || '';
+  ca.textContent = String(waiting.length);
+  cr.textContent = String(others.length);
+
+  sa.querySelectorAll('[data-form]').forEach(qbox => {
+    const formId = qbox.dataset.form;
+    const sid = qbox.closest('.card').dataset.sid;
+    const fld = fleet.rows.find(r => r.id === sid)?.pendingForms?.find(f => f.id === formId)?.fields?.[0];
+    qbox.querySelectorAll('[data-answer]').forEach(b => {
+      b.onclick = () => replyForm(sid, formId, fld?.key ?? 'q0', b.dataset.answer);
+    });
+    const inp = qbox.querySelector('input'), send = qbox.querySelector('[data-send]');
+    const free = () => { const v = inp?.value.trim(); if (v) replyForm(sid, formId, fld?.key ?? 'q0', v); };
+    send?.addEventListener('click', free);
+    inp?.addEventListener('keydown', e => { if (e.key === 'Enter') free(); });
+  });
+  sa.querySelectorAll('[data-perm]').forEach(b => {
+    const sid = b.closest('.card').dataset.sid;
+    b.onclick = () => replyPerm(sid, b.dataset.perm, b.dataset.decision);
+  });
+  document.querySelectorAll('.ocbtn[data-open]').forEach(b => {
+    b.onclick = () => { open(`openchamber-ui://session/${b.dataset.open}`); };
+  });
+}
+
+async function replyForm(sid, formId, key, value){
+  await fetch('/api/fleet/reply', { method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ sessionId: sid, formId, fields: [{ key }], answer: { [key]: value } }) });
+  refresh();
+}
+async function replyPerm(sid, requestID, decision){
+  await fetch('/api/fleet/reply', { method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ sessionId: sid, requestID, decision }) });
+  refresh();
+}
+
+let fleetData = null;
+function tick(){
+  if (!fleetData) { liveEl.textContent = 'connexion…'; return; }
+  const age = Date.now() - fleetData.at;
+  liveEl.innerHTML = age < 8000 ? '<b>Live</b>' : 'reconnexion…';
+}
+async function refresh(){
+  try {
+    const res = await fetch('/api/fleet');
+    if (!res.ok) throw new Error(String(res.status));
+    fleetData = await res.json();
+    mount(fleetData);
+    errBox.style.display = 'none';
+  } catch (e) {
+    errBox.style.display = 'block';
+    errBox.textContent = 'daemon injoignable : ' + e;
+  }
+  tick();
+}
+refresh();
+setInterval(refresh, 3000);
+</script>
+
+</body>
+</html>
