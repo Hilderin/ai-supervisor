@@ -65,6 +65,10 @@ export function getCompanion(parentSid: string): string | null {
   const r = db.query('SELECT companion_session_id c FROM companion_map WHERE parent_session_id = ?').get(parentSid) as { c?: string } | undefined;
   return r?.c ?? null;
 }
+export function reopenTaskState(sid: string) {
+  db.query('UPDATE task_state SET closed_at = NULL, closure = NULL WHERE session_id = ?').run(sid);
+  db.query('DELETE FROM task_verdict WHERE session_id = ?').run(sid);
+}
 export function putCompanion(parentSid: string, compId: string) {
   db.query('INSERT INTO companion_map (parent_session_id, companion_session_id, created_at) VALUES (?,?,?) ON CONFLICT(parent_session_id) DO UPDATE SET companion_session_id=excluded.companion_session_id')
     .run(parentSid, compId, Date.now());

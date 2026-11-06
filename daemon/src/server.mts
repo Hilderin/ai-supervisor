@@ -8,7 +8,7 @@ import { dirname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { currentFleet, openchamberUrl, pollOnce, type Fleet } from './fleet.mts';
 import { companionSessionOf } from './companion.mts';
-import { logEvent, upsertTaskState, getTaskState } from './state.mts';
+import { logEvent, upsertTaskState, getTaskState, reopenTaskState } from './state.mts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const uiDir = join(here, '..', '..', 'ui');
@@ -52,7 +52,18 @@ async function handleApi(req: http.IncomingMessage, res: http.ServerResponse, ur
     void pollOnce();
     const enriched = {
       ...fleet,
-      rows: fleet.rows.map(r => ({ ...r, task: getTaskState(r.id) })),
+      rows: fleet.rows
+        .map(r => {
+          const st = getTaskState(r.id) as { closed_at?: number } | null;
+          if (st?.closed_at) {
+            // activité postérieure à la fermeture ? (nouveau prompt dans OpenChamber) → réouverture
+            const last = Math.max(r.lastUpdateAt ?? 0, r.busy ?? 0);
+            if (last > (st.closed_at ?? 0)) reopenTaskState(r.id);
+            else return null;
+          }
+          return ({ ...r, task: getTaskState(r.id) });
+        })
+        .filter(Boolean),
     };
     json(res, 200, enriched);
     return;
@@ -113,23 +124,11 @@ async function handleApi(req: http.IncomingMessage, res: http.ServerResponse, ur
     const sessionId = String(body.sessionId ?? '');
     const note = String(body.note ?? '');
     if (!sessionId) { json(res, 400, { error: 'sessionId requis' }); return; }
-    try {
-      // Archiver dans OpenChamber (avec la conversation compagnon, sinon ça s'accumule)
-      const results: Array<{ id: string; status: number }> = [];
-      for (const target of [sessionId, companionSessionOf(sessionId)].filter(Boolean) as string[]) {
-        const r = await relay('/api/openchamber/sessions/archive', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ids: [target] }),
-        });
-        const rAny = r as { ocStatus?: number };
-        results.push({ id: target.slice(-8), status: rAny.ocStatus ?? 0 });
-      }
-      upsertTaskState(sessionId, { closedAt: Date.now(), closure: 'terminé' });
-      logEvent(sessionId, 'done', note ? 'archivé — ' + note.slice(0, 80) : 'archivé dans OpenChamber', { results });
-      json(res, 200, { ok: true, archived: results });
-    } catch (e) {
-      json(res, 502, { error: String(e) });
-    }
+    // Fermer = retirer du Superviseur. PAS d'archivage : une activité future dans
+    // OpenChamber (nouveau prompt) remet la carte dans la flotte (ouverture à la volée).
+    upsertTaskState(sessionId, { closedAt: Date.now(), closure: 'terminé' });
+    logEvent(sessionId, 'done', note ? 'fermé — ' + note.slice(0, 80) : 'fermé du Superviseur');
+    json(res, 200, { ok: true });
     return;
   }
   json(res, 404, { error: `route inconnue : ${path}` });

@@ -27,9 +27,22 @@
   .card.wait { background:#fffaf3; border-color:#eec89a; }
   .r1 { display:flex; align-items:center; gap:9px; }
   .dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
-  .dot.g { background:var(--green); }
+  .dot.g { background:var(--green); position:relative; }
+  .dot.g::after { content:''; position:absolute; inset:-4px; border-radius:50%; box-shadow:0 0 0 0 rgba(43,159,106,.55); animation:halo 1.6s infinite; }
+  @keyframes halo {
+    0% { box-shadow:0 0 0 0 rgba(43,159,106,.45); }
+    70% { box-shadow:0 0 0 7px rgba(43,159,106,0); }
+    100% { box-shadow:0 0 0 0 rgba(43,159,106,0); }
+  }
+  .dot.a { background:var(--green); opacity:.4; position:relative; }
+  .dot.a::after { display:none; }
   .dot.o { background:var(--orange); animation:blink 1.5s infinite; }
   @keyframes blink { 50% { opacity:.35; } }
+  .kebab { flex-shrink:0; width:22px; height:22px; display:flex; align-items:center; justify-content:center; border:none; background:transparent; color:var(--muted); border-radius:6px; cursor:pointer; font-size:14px; letter-spacing:1px; }
+  .kebab:hover { color:var(--text); background:#f0f2f0; }
+  .menu { position:absolute; top:34px; right:10px; background:var(--card); border:1px solid var(--border); border-radius:8px; box-shadow:0 6px 18px rgba(0,0,0,.10); z-index:10; min-width:190px; overflow:hidden; }
+  .menu button { display:block; width:100%; text-align:left; background:transparent; border:none; font-family:inherit; font-size:12.5px; color:var(--text); padding:9px 12px; cursor:pointer; }
+  .menu button:hover { background:#f0f2f0; }
   .title { font-weight:650; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:42%; }
   .chip { font-size:10.5px; border-radius:9px; padding:2px 9px; white-space:nowrap; flex-shrink:0; }
   .chip.warn { background:var(--orange); color:#fff; font-weight:600; }
@@ -126,7 +139,8 @@ const cards = new Map(); // sid -> {el, sig}
 
 function cardHTML(row, waiting){
   const brief = row.sup?.resume || briefRow(row, waiting);
-  const dot = waiting ? '<span class="dot o"></span>' : '<span class="dot g"></span>';
+  const dot = waiting ? '<span class="dot o"></span>'
+    : row.status === 'busy' ? '<span class="dot g"></span>' : '<span class="dot a"></span>';
   const chip = waiting ? '<span class="chip warn">attends ta réponse</span>' : '';
   const attends = row.sup?.attend ? `<div class="brief" style="color:#b35c17; margin-top:3px;">✋ ${esc(row.sup.attend)}</div>` : '';
   let bars = '';
@@ -144,12 +158,16 @@ function cardHTML(row, waiting){
       `${confIcons}${pct != null ? `<span class="pct">${Math.round(pct)}%</span>` : ''}</div>`;
   }
   const done = row.sup?.termine
-    ? `<div class="donebox"><span style="flex:1"></span><button class="bin" data-done="1">Archiver</button></div>` : '';
+    ? `<div class="donebox"><span style="flex:1"></span><button class="bin" data-done="1">Fermer</button></div>` : '';
   return `
     <div class="r1">${dot}<span class="title">${esc(row.title)}</span>${chip}<span class="sp"></span>${topActions(row)}
+      <button class="kebab" title="Options" data-kebab="1">⋯</button>
       <button class="ocbtn" data-open="${esc(row.id)}" title="Ouvrir dans OpenChamber">${SVG_OC}</button></div>
     <div class="brief">${esc(brief)}</div>${attends}${bars}
-    ${questionBoxHTML(row)}${composerHTML(row)}${done}`;
+    ${questionBoxHTML(row)}${composerHTML(row)}${done}
+    <div class="menu" data-menu style="display:none">
+      <button data-closecard="1">Fermer cette conversation</button>
+    </div>`;
 }
 function composerHTML(row){
   return `<div class="qbox composer" data-compose="${esc(row.id)}">
@@ -250,11 +268,21 @@ function wireCard(el, row){
   const qbox = el.querySelector('[data-form]');
   if (qbox) wireForm(qbox, row);
   const doneBtn = el.querySelector('[data-done]');
-  const close = () => {
+  const closeCard = (why) => {
+    doneSids.add(row.id);
     fetch('/api/fleet/done', { method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ sessionId: row.id, closure: 'terminé' }) }).finally(refresh);
+      body: JSON.stringify({ sessionId: row.id, closure: why }) }).finally(refresh);
   };
-  if (doneBtn) doneBtn.addEventListener('click', () => { doneSids.add(row.id); close(); });
+  if (doneBtn) doneBtn.addEventListener('click', () => closeCard('terminé'));
+  const kebab = el.querySelector('[data-kebab]');
+  const menu = el.querySelector('[data-menu]');
+  if (kebab && menu) {
+    kebab.addEventListener('click', e => { e.stopPropagation(); menu.style.display = menu.style.display === 'none' ? 'block' : 'none'; });
+    menu.querySelector('[data-closecard]')?.addEventListener('click', e => {
+      e.stopPropagation(); menu.style.display = 'none'; closeCard('fermé');
+    });
+    document.addEventListener('click', () => { menu.style.display = 'none'; }, { once: true });
+  }
 }
 
 function wireForm(qbox, row){
