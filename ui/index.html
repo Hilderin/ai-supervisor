@@ -153,36 +153,18 @@ const isDone = (r) =>
   !!r.sup?.termine && !(r.status === 'busy' && r.turnStartedAt && (r.sup.at ?? 0) < r.turnStartedAt);
 
 function cardHTML(row, waiting){
-  const staleTurn = row.status === 'busy' && row.sup && row.turnStartedAt && row.sup.at && (row.sup.at < row.turnStartedAt);
-  const brief = staleTurn ? 'Réflexion en cours…' : (row.sup?.resume || briefRow(row, waiting));
-  const dot = waiting ? '<span class="dot o"></span>'
-    : row.status === 'busy' ? '<span class="dot spin"></span>'
-    : (isDone(row) ? '<span class="dot pale"></span>' : '<span class="dot full"></span>');
-  const chip = waiting ? '<span class="chip warn">attends ta réponse</span>' : '';
-  const attends = row.sup?.attend ? `<div class="brief" style="color:#b35c17; margin-top:3px;">✋ ${esc(row.sup.attend)}</div>` : '';
-  let bars = '';
-  if (row.sup && (row.sup.progress != null || row.sup.confiance != null)) {
-    const pct = row.sup.progress ?? null;
-    const conf = row.sup.confiance == null ? null : Math.max(0, Math.min(1, row.sup.confiance));
-    const level = conf == null ? 0 : (conf < .35 ? 1 : conf < .7 ? 2 : 3);
-    const col = conf == null ? null : (conf < .35 ? '#d95f5f' : conf < .7 ? '#d19a2f' : '#2b9f6a');
-    const note = row.sup.note ? ` : ${esc(row.sup.note)}` : '';
-    const confIcons = conf == null ? '' :
-      `<span class="cdots">` +
-      [1,2,3].map(i => `<i${i <= level ? ` class="on" style="background:${col}"` : ''}></i>`).join('') +
-      `<span class="tipbox"><b>Confiance ${(conf*100).toFixed(0)} %</b>${note ? '<br>' + esc(note) : ''}</span>` +
-      `</span>`;
-    bars = `<div class="bars"><span class="track"><span class="fill${pct != null && pct < 66 && pct > 0 ? ' mid' : ''}" style="width:${pct ?? 0}%"></span></span>` +
-      `${confIcons}${pct != null ? `<span class="pct">${Math.round(pct)}%</span>` : ''}</div>`;
-  }
-  const done = isDone(row)
-    ? `<div class="donebox"><span style="flex:1"></span><button class="bin" data-done="1">Fermer</button></div>` : '';
+  // squelette STABLE : tous les blocs existent, l'état s'applique ensuite via applyState (in-place)
+  const dot = '<span class="dot full"></span>';
   return `
-    <div class="r1">${dot}<span class="title">${esc(row.title)}</span>${chip}<span class="sp"></span>${topActions(row)}
+    <div class="r1">${dot}<span class="title">${esc(row.title)}</span><span class="chip warn" style="display:none">attends ta réponse</span><span class="sp"></span>${topActions(row)}
       <button class="kebab" title="Options" data-kebab="1">⋯</button>
       <button class="ocbtn" data-open="${esc(row.id)}" title="Ouvrir dans OpenChamber">${SVG_OC}</button></div>
-    <div class="brief">${esc(brief)}</div>${attends}${bars}
-    ${questionBoxHTML(row)}${composerHTML(row)}${done}
+    <div class="brief"></div>
+    <div class="brief" data-attends style="display:none"></div>
+    <div class="bars" style="display:none"><span class="track"><span class="fill" style="width:0%"></span></span>
+      <span class="cdots"><i></i><i></i><i></i><span class="tipbox"></span></span><span class="pct"></span></div>
+    ${composerHTML(row)}
+    <div class="donebox" style="display:none"><span style="flex:1"></span><button class="bin" data-done="1">Fermer</button></div>
     <div class="menu" data-menu style="display:none">
       <button data-closecard="1"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M6.6 6.6l10.8 10.8"/></svg>Fermer cette conversation</button>
     </div>`;
@@ -241,67 +223,134 @@ function ensureCard(row, waiting){
   let ent = cards.get(row.id);
   const staleTurn = row.status === 'busy' && row.sup && row.turnStartedAt && row.sup.at && (row.sup.at < row.turnStartedAt);
   const brief = staleTurn ? 'Réflexion en cours…' : (row.sup?.resume || briefRow(row, waiting));
-  const sig = [row.status, waiting ? 'W' : 'R', row.sup?.termine ? 'T' : '', row.sup?.progress ?? '', row.sup?.confiance ?? '', row.pendingForms?.[0]?.id ?? '', row.pendingPermissions?.[0]?.id ?? ''].join('|');
-  if (ent && ent.sig === sig) {
-    const b = ent.el.querySelector('.brief');
-    if (b && b.textContent !== brief) b.textContent = brief;
+  const sig = [row.status, waiting ? 'W' : 'R', isDone(row) ? 'T' : '', row.sup?.progress ?? '', row.sup?.confiance ?? '', row.pendingForms?.[0]?.id ?? '', row.pendingPermissions?.[0]?.id ?? '', staleTurn ? 'stale' : ''].filter(Boolean).join('|');
+  // dépôt existant : mises à jour CHIRURGICALES in-place, jamais d'innerHTML (le focus du composer survit)
+  if (ent) {
+    const ae0 = document.activeElement;
+    const typing = ae0 instanceof HTMLElement && (ae0.tagName === 'INPUT' || ae0.tagName === 'TEXTAREA') && ent.el.contains(ae0);
+    if (!typing) applyState(ent.el, row, waiting, brief);
+    // si l'utilisateur tape dans cette carte, on saute SEULEMENT le bilan (applyState), pas le composer
+    ent.sig = sig;
     return ent;
   }
-  // ne pas écraser une carte sous saisie (focus dans un champ)
-  const ae = document.activeElement;
-  if (ent && ae instanceof HTMLElement && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA') && ent.el.contains(ae) && ent.sig !== '') return ent;
-  if (!ent) cards.set(row.id, ent = { el: document.createElement('div'), sig: '' });
+  cards.set(row.id, ent = { el: document.createElement('div'), sig });
   ent.el.className = 'card' + (waiting ? ' wait' : '') + (isDone(row) ? ' ok' : '');
   ent.el.dataset.sid = row.id;
   ent.el.innerHTML = cardHTML(row, waiting);
-  dbg('rebuild', (row.title||'').slice(0,26) + (waiting ? ' [waiting]' : ''));
-  wireCard(ent.el, row);
-  const b = ent.el.querySelector('.brief');
-  if (b) b.textContent = brief;
-  ent.sig = sig;
+  dbg('créé', (row.title||'').slice(0,26) + (waiting ? ' [waiting]' : ''));
+  applyState(ent.el, row, waiting, brief);
+  wireAll(ent.el, row);
   return ent;
 }
 
-function wireCard(el, row){
+/** mises à jour visuelles in-place d'une carte existante : le composer garde son focus */
+function applyState(el, row, waiting, brief){
+  const staleTurn = row.status === 'busy' && row.sup && row.turnStartedAt && row.sup.at && (row.sup.at < row.turnStartedAt);
+  // 1. état du dot
+  const dot = el.querySelector('.dot');
+  if (dot) {
+    const cls = waiting ? 'dot o' : row.status === 'busy' ? 'dot spin' : (isDone(row) ? 'dot pale' : 'dot full');
+    dot.className = cls;
+  }
+  // 2. chip warn
+  let chip = el.querySelector('.chip.warn');
+  if (waiting && !chip) {
+    chip = document.createElement('span'); chip.className = 'chip warn'; chip.textContent = 'attends ta réponse';
+    el.querySelector('.r1')?.insertBefore(chip, el.querySelector('.sp'));
+  } else if (!waiting && chip) chip.remove();
+  // 3. classe de la carte
+  el.className = 'card' + (waiting ? ' wait' : '') + (isDone(row) ? ' ok' : '');
+  // 4. brief
+  const b = el.querySelector('.brief');
+  if (b && b.textContent !== brief) b.textContent = brief;
+  // 5. attends (✋)
+  let at = el.querySelector('[data-attends]');
+  const attText = row.sup?.attend ?? '';
+  if (attText && !at) {
+    at = document.createElement('div'); at.className = 'brief'; at.setAttribute('data-attends','1');
+    at.style.color = '#b35c17'; at.style.marginTop = '3px';
+    b?.insertAdjacentElement('afterend', at);
+  }
+  if (at) { at.style.display = attText ? '' : 'none'; if (at.textContent !== attText) at.textContent = attText; }
+  // 6. barres (progression + confiance)
+  const bars = el.querySelector('.bars');
+  if (bars) {
+    const show = !!row.sup && (row.sup.progress != null || row.sup.confiance != null);
+    bars.style.display = show ? '' : 'none';
+    if (show) {
+      const fill = bars.querySelector('.fill'), pct = bars.querySelector('.pct'), dots = bars.querySelectorAll('.cdots > i'), tip = bars.querySelector('.tipbox');
+      const p = row.sup.progress ?? 0;
+      if (fill) { fill.style.width = p + '%'; fill.classList.toggle('mid', p > 0 && p < 66); }
+      if (pct) pct.textContent = Math.round(p) + '%';
+      const conf = row.sup.confiance == null ? null : Math.max(0, Math.min(1, row.sup.confiance));
+      const level = conf == null ? 0 : (conf < .35 ? 1 : conf < .7 ? 2 : 3);
+      const col = conf == null ? null : (conf < .35 ? '#d95f5f' : conf < .7 ? '#d19a2f' : '#2b9f6a');
+      dots.forEach((dtk, i) => {
+        if (i < level) { dtk.classList.add('on'); dtk.style.background = col ?? ''; }
+        else { dtk.classList.remove('on'); dtk.style.background = '#dcdedd'; }
+      });
+      if (tip) tip.innerHTML = conf == null ? '' : `<b>Confiance ${(conf * 100).toFixed(0)} %</b>${row.sup.note ? '<br>' + esc(row.sup.note) : ''}`;
+    }
+  }
+  // 7. donebox (Fermer)
+  let dbx = el.querySelector('.donebox');
+  if (dbx) dbx.style.display = isDone(row) ? 'flex' : 'none';
+  // 8. question form (re-render si l'ID de formulaire change; jamais sous saisie)
+  const qbox = el.querySelector('[data-form]');
+  const fid = row.pendingForms?.[0]?.id ?? null;
+  const aeF = document.activeElement;
+  const typingF = aeF instanceof HTMLElement && (aeF.tagName === 'INPUT' || aeF.tagName === 'TEXTAREA') && el.contains(aeF);
+  if (fid && !qbox) {
+    if (!typingF) {
+      el.querySelector('.bars')?.insertAdjacentHTML('afterend', questionBoxHTML(row));
+      wireForm(el.querySelector('[data-form]'), row);
+    }
+  } else if (qbox && (!fid || qbox.dataset.form !== fid)) {
+    if (!typingF) {
+      qbox.remove();
+      if (fid) { el.querySelector('.bars')?.insertAdjacentHTML('afterend', questionBoxHTML(row)); wireForm(el.querySelector('[data-form]'), row); }
+    }
+  }
+}
+
+/** câblage ONE-TIME à la création d'une carte (jamais re-wire: les listeners in-place d'applyState restent) */
+function wireAll(el, row){
   el.querySelector('.ocbtn')?.addEventListener('click', () => open(`openchamber-ui://session/${row.id}`));
   const composer = el.querySelector('.composer');
   if (composer) {
     const ta = composer.querySelector('textarea');
-    if (composerFocusSid === row.id) ta.focus();
-    ta.addEventListener('focus', () => { composerFocusSid = row.id; });
-    ta.addEventListener('blur', () => { if (composerFocusSid === row.id) composerFocusSid = null; });
-    ta.addEventListener('input', () => { grow.call(ta); composer.querySelector('.arrowbtn').classList.toggle('ready', !!ta.value.trim()); });
-    const send = () => {
+    composer.querySelector('.arrowbtn')?.addEventListener('click', () => {
       const v = ta.value.trim(); if (!v) return;
       ta.value = ''; grow.call(ta); ta.blur();
       composer.querySelector('.arrowbtn').classList.remove('ready');
       fetch('/api/fleet/send', { method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ sessionId: row.id, text: v }) }).finally(refresh);
-    };
-    composer.querySelector('.arrowbtn').addEventListener('click', send);
-    ta.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
+    });
+    ta.addEventListener('focus', () => { composerFocusSid = row.id; });
+    ta.addEventListener('blur', () => { if (composerFocusSid === row.id) composerFocusSid = null; });
+    ta.addEventListener('input', () => { grow.call(ta); composer.querySelector('.arrowbtn').classList.toggle('ready', !!ta.value.trim()); });
+    ta.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      const v = ta.value.trim(); if (!v) return;
+      ta.value = ''; grow.call(ta); ta.blur();
+      composer.querySelector('.arrowbtn').classList.remove('ready');
+      fetch('/api/fleet/send', { method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ sessionId: row.id, text: v }) }).finally(refresh);
+    } });
   }
-  const permBtn = el.querySelector('[data-perm]');
-  if (permBtn) permBtn.addEventListener('click', () => {
-    replyPerm(row.id, row.pendingPermissions?.[0]?.id ?? '', 'once');
-  });
-  const qbox = el.querySelector('[data-form]');
-  if (qbox) wireForm(qbox, row);
   const doneBtn = el.querySelector('[data-done]');
-  const closeCard = (why) => {
-    doneSids.add(row.id);
-    fetch('/api/fleet/done', { method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ sessionId: row.id, closure: why }) }).finally(refresh);
-  };
-  if (doneBtn) doneBtn.addEventListener('click', () => closeCard('terminé'));
+  if (doneBtn) doneBtn.addEventListener('click', () => { doneSids.add(row.id); closeCard(row.id); });
   const kebab = el.querySelector('[data-kebab]');
   const menu = el.querySelector('[data-menu]');
   if (kebab && menu) {
     kebab.addEventListener('click', e => { e.stopPropagation(); menu.style.display = menu.style.display === 'none' ? 'block' : 'none'; });
     menu.querySelector('[data-closecard]')?.addEventListener('click', e => {
-      e.stopPropagation(); menu.style.display = 'none'; closeCard('fermé');
+      e.stopPropagation(); menu.style.display = 'none'; doneSids.add(row.id); closeCard(row.id, 'fermé');
     });
   }
+  el.querySelector('[data-perm]')?.addEventListener('click', () => replyPerm(row.id, row.pendingPermissions?.[0]?.id ?? '', 'once'));
+  const qbox = el.querySelector('[data-form]');
+  if (qbox) wireForm(qbox, row);
 }
 
 function wireForm(qbox, row){
