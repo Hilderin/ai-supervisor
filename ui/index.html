@@ -23,7 +23,7 @@
   .sdot { width:8px; height:8px; border-radius:50%; }
   .sdot.o { background:var(--orange); } .sdot.g { background:var(--green); } .sdot.gg { background:var(--green); opacity:.4; }
   .cnt { background:var(--card); border:1px solid var(--border); border-radius:9px; font-size:10.5px; font-weight:600; padding:1px 8px; color:var(--muted); }
-  .card { background:var(--card); border:1px solid var(--border); border-radius:11px; padding:11px 13px 10px; margin-bottom:9px; }
+  .card { position:relative; background:var(--card); border:1px solid var(--border); border-radius:11px; padding:11px 13px 10px; margin-bottom:9px; }
   .card.wait { background:#fffaf3; border-color:#eec89a; }
   .r1 { display:flex; align-items:center; gap:9px; }
   .dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
@@ -40,7 +40,7 @@
   @keyframes blink { 50% { opacity:.35; } }
   .kebab { flex-shrink:0; width:22px; height:22px; display:flex; align-items:center; justify-content:center; border:none; background:transparent; color:var(--muted); border-radius:6px; cursor:pointer; font-size:14px; letter-spacing:1px; }
   .kebab:hover { color:var(--text); background:#f0f2f0; }
-  .menu { position:absolute; top:34px; right:10px; background:var(--card); border:1px solid var(--border); border-radius:8px; box-shadow:0 6px 18px rgba(0,0,0,.10); z-index:10; min-width:190px; overflow:hidden; }
+  .menu { position:absolute; top:36px; right:8px; background:var(--card); border:1px solid var(--border); border-radius:8px; box-shadow:0 6px 18px rgba(0,0,0,.12); z-index:50; min-width:210px; overflow:hidden; }
   .menu button { display:block; width:100%; text-align:left; background:transparent; border:none; font-family:inherit; font-size:12.5px; color:var(--text); padding:9px 12px; cursor:pointer; }
   .menu button:hover { background:#f0f2f0; }
   .title { font-weight:650; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:42%; }
