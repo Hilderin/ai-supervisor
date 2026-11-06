@@ -31,7 +31,43 @@ CREATE TABLE IF NOT EXISTS task_state (
   created_at INTEGER NOT NULL,
   closed_at INTEGER,
   closure TEXT                       -- 'terminé' | 'repart' | null
+);
+CREATE TABLE IF NOT EXISTS task_verdict (
+  session_id TEXT PRIMARY KEY,
+  resume TEXT,
+  confiance REAL,
+  progress INTEGER,
+  termine INTEGER,
+  attend TEXT,
+  at INTEGER
+);
+CREATE TABLE IF NOT EXISTS companion_map (
+  parent_session_id TEXT PRIMARY KEY,
+  companion_session_id TEXT NOT NULL,
+  created_at INTEGER NOT NULL
 );`);
+
+export function getVerdict(sessionId: string) {
+  return db.query('SELECT * FROM task_verdict WHERE session_id = ?').get(sessionId) ?? null;
+}
+export function upsertVerdict(sessionId: string, v: { resume?: string; termine?: boolean; confiance?: number; progress?: number; attend?: string }) {
+  db.query(`INSERT INTO task_verdict (session_id, resume, confiance, progress, termine, attend, at)
+            VALUES (?,?,?,?,?,?,?)
+            ON CONFLICT(session_id) DO UPDATE SET resume=excluded.resume, confiance=excluded.confiance,
+              progress=excluded.progress, termine=excluded.termine, attend=excluded.attend, at=excluded.at`)
+    .run(sessionId, v.resume ?? null, v.confiance ?? null, v.progress ?? null, v.termine ? 1 : 0, v.attend ?? null, Date.now());
+}
+
+export function getCompanion(parentSid: string): string | null {
+  const r = db.query('SELECT companion_session_id c FROM companion_map WHERE parent_session_id = ?').get(parentSid) as { c?: string } | undefined;
+  return r?.c ?? null;
+}
+export function putCompanion(parentSid: string, compId: string) {
+  db.query('INSERT INTO companion_map (parent_session_id, companion_session_id, created_at) VALUES (?,?,?) ON CONFLICT(parent_session_id) DO UPDATE SET companion_session_id=excluded.companion_session_id')
+    .run(parentSid, compId, Date.now());
+}
+
+export function getCompanionOut(parentSid: string): string | null { return getCompanion(parentSid); }
 
 export function logEvent(sessionId: string, kind: string, text: string, meta?: object) {
   db.query('INSERT INTO task_log (session_id, at, kind, text, meta) VALUES (?,?,?,?,?)')

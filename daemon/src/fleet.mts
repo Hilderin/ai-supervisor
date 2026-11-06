@@ -7,12 +7,20 @@
 const POLL_SLOW_MS = 15_000;
 const POLL_FAST_MS = 3_000;
 
+/** les sessions de type quelconque (annuaire) */
 export interface OpenchamberSession {
   id: string; title?: string; agent?: string; parentID?: string;
   projectID?: string; time?: Record<string, number>;
   location?: { directory?: string };
   tokens?: Record<string, number>; outcome?: string;
   metadata?: { openchamber?: { work?: { state?: string }, turn?: { durationMs?: number } } };
+}
+import { companionTick, verdictOf } from './companion.mts';
+
+function supOf(id: string): Verdict | undefined {
+  const v = verdictOf(id) as { resume?: string; confiance?: number; progress?: number; termine?: number; attend?: string; at?: number } | null;
+  if (!v) return undefined;
+  return { resume: v.resume ?? undefined, confiance: v.confiance ?? undefined, progress: v.progress ?? undefined, termine: !!v.termine, attend: v.attend ?? undefined, at: v.at ?? undefined };
 }
 export interface PendingForm {
   id: string; sessionID: string; title?: string;
@@ -22,9 +30,13 @@ export interface PendingForm {
 export interface FleetRow {
   id: string; title: string; status: string;
   dir?: string;
+  sup?: Verdict;
   turnStartedAt?: number; lastUpdateAt?: number;
   busy?: number | null; idle?: number | null;
   pendingForms: PendingForm[]; pendingPermissions: unknown[];
+}
+export interface Verdict {
+  resume?: string; confiance?: number; progress?: number; termine?: boolean; attend?: string; at?: number;
 }
 export interface Fleet {
   at: number; rows: FleetRow[]; concern: string | null;
@@ -64,14 +76,14 @@ function buildFleet(status: StatusPayload): Fleet {
     // fantômes : id connu du statut mais absent de l'annuaire (session supprimée) → on n'affiche pas
     if (!meta) continue;
     // les sous-sessions/sous-agents (parentID) ne sont pas des tâches de flotte
-    if (meta.parentID) continue;
-    const pendingForms = (status.pending?.[id]?.forms ?? []).filter(f => f?.metadata?.kind === 'question');
+    if (meta.parentID) continue;    const pendingForms = (status.pending?.[id]?.forms ?? []).filter(f => f?.metadata?.kind === 'question');
     const pendingPermissions = status.pending?.[id]?.permissions ?? [];
-    const row: FleetRow = {
+     const row: FleetRow = {
       id,
       title: meta.title ?? id.slice(0, 18),
       status: s.status,
       dir: meta.location?.directory,
+      sup: supOf(id),
       turnStartedAt: s.turnStartedAt,
       lastUpdateAt: s.lastUpdateAt,
       busy: meta?.time?.busy ?? null,
@@ -118,6 +130,8 @@ export async function pollOnce(): Promise<void> {
     }
     cachedFleet = buildFleet(status);
     lastGood = Date.now();
+    // le compagnon juge les sessions nouvelles (idle) ou périodiquement (busy)
+    companionTick([...sessionsIndex.values()], status.sessions ?? {});
   } catch {
     /* garde la dernière flotte connue, réessaie au prochain tick */
   }

@@ -21,7 +21,7 @@
   .bar input::placeholder { color:#a5aca5; }
   .seclabel { display:flex; align-items:center; gap:8px; margin:18px 0 9px; font-size:12px; font-weight:700; letter-spacing:.02em; }
   .sdot { width:8px; height:8px; border-radius:50%; }
-  .sdot.o { background:var(--orange); } .sdot.g { background:var(--green); }
+  .sdot.o { background:var(--orange); } .sdot.g { background:var(--green); } .sdot.gg { background:var(--green); opacity:.4; }
   .cnt { background:var(--card); border:1px solid var(--border); border-radius:9px; font-size:10.5px; font-weight:600; padding:1px 8px; color:var(--muted); }
   .card { background:var(--card); border:1px solid var(--border); border-radius:11px; padding:11px 13px 10px; margin-bottom:9px; }
   .card.wait { background:#fffaf3; border-color:#eec89a; }
@@ -36,33 +36,36 @@
   .sp { flex:1; }
   .ocbtn { flex-shrink:0; width:22px; height:22px; display:flex; align-items:center; justify-content:center; border:none; background:transparent; color:var(--muted); border-radius:6px; cursor:pointer; }
   .ocbtn:hover { color:var(--green); background:var(--green-soft); }
-  .brief { margin-top:5px; font-size:12px; color:var(--muted); }
-  .qbox { margin-top:10px; padding-top:10px; border-top:1px solid var(--border); }
-  .composer { display:flex; gap:7px; align-items:flex-end; margin-top:12px; padding-top:10px; border-top:1px solid var(--border); }
-  .formbox [data-fgroup] { margin-bottom:14px; }
-  .formbox .submitrow { margin-top:2px; margin-bottom:4px; }
-  .composer textarea { flex:1; background:#fff; border:1px solid var(--border); border-radius:8px; font-family:inherit; font-size:12.5px; color:var(--text); padding:7px 10px; outline:none; min-width:0; resize:none; max-height:120px; overflow-y:auto; line-height:1.45; }
-  .composer textarea:focus { background:#fff; border-color:#c9cfc9; }
-.composer textarea { overflow-y:hidden; }
-.composer textarea.atmax { overflow-y:auto; }
-  .composer .arrowbtn { background:transparent; color:#b6bcb6; border:none; width:26px; height:26px; cursor:pointer; flex-shrink:0; padding:2px; transition:color .2s; }
-  .composer .arrowbtn.ready { color:var(--green); }
-  .composer .arrowbtn:hover { color:var(--green); }
   .dirb { font-size:10.5px; color:var(--muted); background:#f0f2f0; border-radius:5px; padding:2px 7px; white-space:nowrap; flex-shrink:0; max-width:130px; overflow:hidden; text-overflow:ellipsis; }
-  .qtext { font-size:13px; line-height:1.45; margin-bottom:9px; }
+  .brief { margin-top:5px; font-size:12px; color:var(--muted); padding-right:26px; }
+  .bars { margin-top:8px; display:flex; align-items:center; gap:10px; }
+  .track { height:5px; border-radius:3px; background:#eceeed; flex:1; overflow:hidden; }
+  .fill { height:100%; background:var(--green); transition:width .5s; display:block; }
+  .fill.mid { background:var(--amber); }
+  .cdot { width:7px; height:7px; border-radius:50%; flex-shrink:0; opacity:.85; }
+  .pct { font-size:11px; font-weight:650; width:34px; text-align:right; font-variant-numeric:tabular-nums; }
+  .qbox { margin-top:10px; padding-top:10px; border-top:1px solid var(--border); }
+  .qtext { font-size:13px; line-height:1.45; margin-bottom:8px; }
   .actions { display:flex; gap:7px; align-items:center; }
-  [data-fgroup] { flex-wrap:wrap; }
-  .submitrow { justify-content:flex-end; margin-top:10px; }
+  [data-fgroup] { flex-wrap:wrap; margin-bottom:14px; }
+  .formbox .submitrow { justify-content:flex-end; margin-top:2px; margin-bottom:4px; }
   .bin { font-family:inherit; background:var(--green); color:#fff; border:none; border-radius:7px; font-size:12px; font-weight:600; padding:7px 14px; cursor:pointer; white-space:nowrap; }
   .bin.gh { background:#fff; color:var(--text); border:1px solid var(--border); font-weight:500; }
   .bin.gh.sel { background:var(--green); border-color:var(--green); color:#fff; font-weight:600; }
   .bin.gh.opt:hover { border-color:var(--green); color:var(--green); }
   .bin.gh.sel:hover { color:#fff; }
-  .arrowbtn { background:transparent; color:#b6bcb6; border:none; border-radius:7px; width:28px; height:30px; cursor:pointer; font-size:13px; flex-shrink:0; transition:color .2s; }
+  .actions input, .composer textarea { background:#fff; border:1px solid var(--border); border-radius:8px; font-family:inherit; font-size:12.5px; color:var(--text); padding:7px 10px; outline:none; min-width:0; }
+  .actions input { flex:1 1 220px; min-width:200px; }
+  .composer { display:flex; gap:7px; align-items:flex-end; margin-top:12px; padding-top:10px; border-top:1px solid var(--border); }
+  .composer textarea { flex:1; resize:none; max-height:120px; overflow-y:hidden; line-height:1.45; }
+  .composer textarea.atmax { overflow-y:auto; }
+  .composer textarea:focus { border-color:#c9cfc9; }
+  .composer .arrowbtn { width:26px; height:26px; background:transparent; }
+  .arrowbtn { background:transparent; color:#b6bcb6; border:none; border-radius:7px; width:26px; height:26px; cursor:pointer; flex-shrink:0; padding:2px; transition:color .2s; }
   .arrowbtn.ready { color:var(--green); }
-  .actions input { flex:1 1 220px; background:#f7f8f7; border:1px solid var(--border); border-radius:7px; font-family:inherit; font-size:12.5px; color:var(--text); padding:7px 10px; outline:none; min-width:200px; }
-  .actions input:focus { border-color:var(--green); }
-  .arrowbtn { background:var(--green); color:#fff; border:none; border-radius:7px; width:30px; height:29px; cursor:pointer; font-size:12px; flex-shrink:0; }
+  .arrowbtn:hover { color:var(--green); }
+  .donebox { margin-top:9px; padding-top:9px; border-top:1px solid var(--border); display:flex; gap:7px; align-items:center; }
+  .donebox input { flex:1; background:#fff; border:1px solid var(--border); border-radius:8px; font-family:inherit; font-size:12px; color:var(--text); padding:7px 10px; outline:none; min-width:0; }
   #err { display:none; background:var(--orange-soft); color:#b35c17; border-radius:8px; padding:8px 12px; font-size:12px; margin-top:10px; }
 </style>
 </head>
@@ -73,7 +76,7 @@
   <div class="live" id="live">connexion…</div>
 </div>
 
-<div class="bar"><input id="bar" placeholder="Ça arrive au prochain jalon : saisir une demande lance une vrai session" disabled></div>
+<div class="bar"><input id="bar" placeholder="Création de session : au prochain jalon" disabled></div>
 
 <div class="seclabel"><span class="sdot o"></span>BESOIN DE TON ATTENTION<span class="cnt" id="ca">0</span></div>
 <div id="sa"></div>
@@ -81,13 +84,17 @@
 <div class="seclabel"><span class="sdot g"></span>EN COURS<span class="cnt" id="cr">0</span></div>
 <div id="sr"></div>
 
+<div class="seclabel"><span class="sdot gg"></span>TERMINE (à trancher)<span class="cnt" id="cd">0</span></div>
+<div id="sd"></div>
+
 <div id="err"></div>
 
 <script type="module">
 const SVG_OC = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg>';
+const SVG_SEND = '<svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M3.4 20.4 20.8 12 3.4 3.6 3.3 10l12 2-12 2z"/></svg>';
 const liveEl = document.getElementById('live');
-const sa = document.getElementById('sa'), sr = document.getElementById('sr');
-const ca = document.getElementById('ca'), cr = document.getElementById('cr');
+const sa = document.getElementById('sa'), sr = document.getElementById('sr'), sd = document.getElementById('sd');
+const ca = document.getElementById('ca'), cr = document.getElementById('cr'), cd = document.getElementById('cd');
 const errBox = document.getElementById('err');
 
 function esc(s){ return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
@@ -100,36 +107,63 @@ function fmtAge(ms){
   const h = Math.round(m/60); if (h < 24) return `il y a ${h} h`;
   return `il y a ${Math.round(h/24)} j`;
 }
-
 function topActions(row){
   const dir = row.dir ? row.dir.split('/').pop() ?? row.dir : '';
-  const dirBadge = dir ? `<span class="dirb" title="${esc(row.dir)}">${esc(dir)}</span>` : '';
-  return dirBadge;
+  return dir ? `<span class="dirb" title="${esc(row.dir)}">${esc(dir)}</span>` : '';
+}
+let composerFocusSid = null;
+function briefRow(row, waiting){
+  return waiting
+    ? (row.pendingForms?.length ? 'une question t\u2019attend' : 'une permission t\u2019attend')
+    : row.status === 'busy'
+      ? 'travaille'
+      : 'tour terminé · ' + fmtAge(Date.now() - (row.lastUpdateAt ?? Date.now()));
 }
 
+const cards = new Map(); // sid -> {el, sig}
+
 function cardHTML(row, waiting){
-  const brief = briefRow(row, waiting);
+  const brief = row.sup?.resume || briefRow(row, waiting);
   const dot = waiting ? '<span class="dot o"></span>' : '<span class="dot g"></span>';
   const chip = waiting ? '<span class="chip warn">attends ta réponse</span>' : '';
+  const attends = row.sup?.attend ? `<div class="brief" style="color:#b35c17; margin-top:3px;">✋ ${esc(row.sup.attend)}</div>` : '';
+  let bars = '';
+  if (row.sup && (row.sup.progress != null || row.sup.confiance != null)) {
+    const pct = row.sup.progress ?? null;
+    const conf = row.sup.confiance == null ? null : (row.sup.confiance < .35 ? '#d95f5f' : row.sup.confiance < .7 ? '#d19a2f' : '#2b9f6a');
+    bars = `<div class="bars"><span class="track"><span class="fill${pct != null && pct < 66 && pct > 0 ? ' mid' : ''}" style="width:${pct ?? 0}%"></span></span>` +
+      `${conf ? `<span class="cdot" style="background:${conf}" title="Confiance du compagnon"></span>` : ''}` +
+      `${pct != null ? `<span class="pct">${Math.round(pct)}%</span>` : ''}</div>`;
+  }
+  const done = row.sup?.termine
+    ? `<div class="donebox"><button class="bin gh" data-done="1">Terminer</button>
+        <input type="text" data-repart placeholder="… repartir sur quoi ?"><button class="bin" data-repart-go="1">Repartir ⏎</button></div>` : '';
   return `
     <div class="r1">${dot}<span class="title">${esc(row.title)}</span>${chip}<span class="sp"></span>${topActions(row)}
       <button class="ocbtn" data-open="${esc(row.id)}" title="Ouvrir dans OpenChamber">${SVG_OC}</button></div>
-    <div class="brief">${esc(brief)}</div>
-    ${questionBoxHTML(row)}${composerHTML(row)}`;
+    <div class="brief">${esc(brief)}</div>${attends}${bars}
+    ${questionBoxHTML(row)}${composerHTML(row)}${done}`;
 }
-let composerFocusSid = null;
 function composerHTML(row){
   return `<div class="qbox composer" data-compose="${esc(row.id)}">
-    <textarea placeholder="" rows="1" data-sendto></textarea>
-    <button class="arrowbtn" data-send="1" title="Envoyer"> ${SVG_SEND} </button></div>`;
+    <textarea placeholder="" rows="1"></textarea>
+    <button class="arrowbtn" title="Envoyer">${SVG_SEND}</button></div>`;
 }
-const SVG_SEND = '<svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M3.4 20.4 20.8 12 3.4 3.6 3.3 10l12 2-12 2z"/></svg>';
 function grow(){
-  this.value = this.value.replace(/\r\n/g, '\n');
   const atMax = this.scrollHeight > 120;
   this.classList.toggle('atmax', atMax);
   this.style.height = 'auto';
   this.style.height = (atMax ? 120 : this.scrollHeight + 1) + 'px';
+}
+async function replyForm(sid, formId, answer){
+  await fetch('/api/fleet/reply', { method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ sessionId: sid, formId, answer }) });
+  refresh();
+}
+async function replyPerm(sid, requestID, decision){
+  await fetch('/api/fleet/reply', { method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ sessionId: sid, requestID, decision }) });
+  refresh();
 }
 
 function questionBoxHTML(row){
@@ -138,7 +172,7 @@ function questionBoxHTML(row){
   if (perm) {
     return `<div class="qbox"><div class="qtext">Permission demandée</div>
       <div class="actions">
-        <button class="bin" data-perm="${esc(perm.id ?? '')}" data-decision="once">Autoriser</button>
+        <button class="bin" data-perm="1">Autoriser</button>
       </div></div>`;
   }
   if (!form) return '';
@@ -150,7 +184,7 @@ function questionBoxHTML(row){
     out += `<div class="actions" data-fgroup="${esc(key)}" data-ftype="${esc(f.type || 'string')}">`;
     if (f.options?.length) {
       for (const o of f.options) {
-        out += `<button class="bin gh opt" data-answer="${esc(o.value)}" data-fkey="${esc(key)}">${esc(o.label)}</button>`;
+        out += `<button class="bin gh opt" data-answer="${esc(o.value)}">${esc(o.label)}</button>`;
       }
     }
     out += `<input type="text" data-finput="${esc(key)}" placeholder="… ou répond en texte libre"></div>`;
@@ -160,31 +194,20 @@ function questionBoxHTML(row){
   return out;
 }
 
-function briefRow(row, waiting){
-  return waiting
-    ? (row.pendingForms?.length ? 'une question t\u2019attend' : 'une permission t\u2019attend')
-    : row.status === 'busy'
-      ? 'travaille'
-      : 'tour terminé · ' + fmtAge(Date.now() - (row.lastUpdateAt ?? Date.now()));
-}
-
-const cards = new Map(); // sid -> {el, sig}
-
 function ensureCard(row, waiting){
   let ent = cards.get(row.id);
-  const brief = briefRow(row, waiting);
-  const sig = [row.status, waiting ? 'W' : 'R', row.pendingForms?.[0]?.id ?? '', row.pendingPermissions?.[0]?.id ?? ''].join('|');
+  const brief = row.sup?.resume || briefRow(row, waiting);
+  const sig = [row.status, waiting ? 'W' : 'R', row.sup?.termine ? 'T' : '', row.pendingForms?.[0]?.id ?? '', row.pendingPermissions?.[0]?.id ?? ''].join('|');
   if (ent && ent.sig === sig) {
-    // rien de significatif n'a changé : on ne rafraîchit que l'âge affiché
     const b = ent.el.querySelector('.brief');
-    if (b && b.textContent !== brief) b.textContent = brief;
+    if (b && b.firstChild && b.textContent !== brief) b.textContent = brief;
     return ent;
   }
   // ne pas écraser une carte sous saisie (focus dans un champ)
   const ae = document.activeElement;
-  if (ent && ae instanceof HTMLElement && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA') && ent.el.contains(ae)) return ent;
+  if (ent && ae instanceof HTMLElement && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA') && ent.el.contains(ae) && ent.sig !== '') return ent;
   if (!ent) cards.set(row.id, ent = { el: document.createElement('div'), sig: '' });
-  ent.el.className = 'card' + (waiting ? ' wait' : '');
+  ent.el.className = 'card' + (waiting ? ' wait' : '') + (row.sup?.termine ? ' ok' : '');
   ent.el.dataset.sid = row.id;
   ent.el.innerHTML = cardHTML(row, waiting);
   wireCard(ent.el, row);
@@ -195,28 +218,44 @@ function ensureCard(row, waiting){
 }
 
 function wireCard(el, row){
-  el.querySelector('.ocbtn[data-open]')?.addEventListener('click', () => open(`openchamber-ui://session/${row.id}`));
+  el.querySelector('.ocbtn')?.addEventListener('click', () => open(`openchamber-ui://session/${row.id}`));
   const composer = el.querySelector('.composer');
   if (composer) {
     const ta = composer.querySelector('textarea');
     if (composerFocusSid === row.id) ta.focus();
     ta.addEventListener('focus', () => { composerFocusSid = row.id; });
     ta.addEventListener('blur', () => { if (composerFocusSid === row.id) composerFocusSid = null; });
-    ta.addEventListener('input', () => { grow.call(ta); composer.querySelector('[data-send]').classList.toggle('ready', !!ta.value.trim()); });
+    ta.addEventListener('input', () => { grow.call(ta); composer.querySelector('.arrowbtn').classList.toggle('ready', !!ta.value.trim()); });
     const send = () => {
       const v = ta.value.trim(); if (!v) return;
       ta.value = ''; grow.call(ta); ta.blur();
-      composer.querySelector('[data-send]').classList.remove('ready');
+      composer.querySelector('.arrowbtn').classList.remove('ready');
       fetch('/api/fleet/send', { method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ sessionId: row.id, text: v }) }).finally(refresh);
     };
-    composer.querySelector('[data-send]').addEventListener('click', send);
+    composer.querySelector('.arrowbtn').addEventListener('click', send);
     ta.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
   }
+  const permBtn = el.querySelector('[data-perm]');
+  if (permBtn) permBtn.addEventListener('click', () => {
+    replyPerm(row.id, row.pendingPermissions?.[0]?.id ?? '', 'once');
+  });
   const qbox = el.querySelector('[data-form]');
   if (qbox) wireForm(qbox, row);
-  const permBtn = el.querySelector('[data-perm]');
-  if (permBtn) permBtn.addEventListener('click', () => replyPerm(row.id, permBtn.dataset.perm, 'once'));
+  const doneBtn = el.querySelector('[data-done]');
+  const ri = el.querySelector('[data-repart]'), rg = el.querySelector('[data-repart-go]');
+  const close = (closure, note) => {
+    fetch('/api/fleet/done', { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ sessionId: row.id, closure, note }) }).finally(refresh);
+  };
+  if (doneBtn) doneBtn.addEventListener('click', () => { doneSids.add(row.id); close('terminé'); });
+  if (rg && ri) rg.addEventListener('click', () => {
+    const v = ri.value.trim(); if (!v) return;
+    doneSids.add(row.id); close('repart', v);
+    fetch('/api/fleet/send', { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ sessionId: row.id, text: v }) }).finally(refresh);
+  });
+  ri?.addEventListener('keydown', e => { if (e.key === 'Enter' && ri.value.trim()) { doneSids.add(row.id); close('repart', ri.value.trim()); } });
 }
 
 function wireForm(qbox, row){
@@ -267,31 +306,23 @@ function wireForm(qbox, row){
   qbox.querySelector('[data-submit-all]')?.addEventListener('click', submitAll);
 }
 
+const doneSids = new Set();
+
 function mount(fleet){
-  lastFleet = fleet;
-  const waitingRows = fleet.rows.filter(r => r.pendingForms?.length || r.pendingPermissions?.length);
-  const otherRows = fleet.rows.filter(r => !(r.pendingForms?.length || r.pendingPermissions?.length));
+  const waitingRows = fleet.rows.filter(r => !doneSids.has(r.id) && (r.pendingForms?.length || r.pendingPermissions?.length));
+  const doneRows = fleet.rows.filter(r => r.sup?.termine && !doneSids.has(r.id));
+  const runRows = fleet.rows.filter(r => !doneSids.has(r.id) && !(r.sup?.termine) && !waitingRows.includes(r));
   sa.replaceChildren(...waitingRows.map(r => ensureCard(r, true).el));
-  sr.replaceChildren(...otherRows.map(r => ensureCard(r, false).el));
+  sd.replaceChildren(...doneRows.map(r => ensureCard(r, false).el));
+  sr.replaceChildren(...runRows.map(r => ensureCard(r, false).el));
   const ids = new Set(fleet.rows.map(r => r.id));
   for (const sid of [...cards.keys()]) if (!ids.has(sid)) cards.delete(sid);
   ca.textContent = String(waitingRows.length);
-  cr.textContent = String(otherRows.length);
+  cr.textContent = String(runRows.length);
+  cd.textContent = String(doneRows.length);
 }
 
-async function replyForm(sid, formId, answer){
-  await fetch('/api/fleet/reply', { method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({ sessionId: sid, formId, answer }) });
-  refresh();
-}
-async function replyPerm(sid, requestID, decision){
-  await fetch('/api/fleet/reply', { method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({ sessionId: sid, requestID, decision }) });
-  refresh();
-}
-
-let fleetData = null, lastFleet = null;
-function mountLast(){ if (lastFleet) mount(lastFleet); }
+let fleetData = null;
 function tick(){
   if (!fleetData) { liveEl.textContent = 'connexion…'; return; }
   const age = Date.now() - fleetData.at;

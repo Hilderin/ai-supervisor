@@ -4,12 +4,14 @@
  */
 import { discoverOpenChamberPort } from './discover.mts';
 import { setBase, startPolling, pollOnce, baseOk } from './fleet.mts';
+import { setBase as setCompanionBase } from './companion.mts';
 import { startServer } from './server.mts';
 import { db } from './state.mts';
 
 async function main() {
   const port = await discoverOpenChamberPort();
-  setBase(`http://127.0.0.1:${port}`);
+  const base = `http://127.0.0.1:${port}`;
+  setBase(base); setCompanionBase(base);
   console.log(`[superviseur] OpenChamber découvert sur 127.0.0.1:${port}`);
   startPolling();
   // premier contact avant de servir : si l'instance est morte, on démarre quand même
