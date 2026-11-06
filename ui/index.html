@@ -41,6 +41,8 @@
   .composer { display:flex; gap:7px; align-items:flex-end; border:none; margin-top:2px; padding-top:0; }
   .composer textarea { flex:1; background:#fff; border:1px solid var(--border); border-radius:8px; font-family:inherit; font-size:12.5px; color:var(--text); padding:7px 10px; outline:none; min-width:0; resize:none; max-height:120px; overflow-y:auto; line-height:1.45; }
   .composer textarea:focus { background:#fff; border-color:#c9cfc9; }
+.composer textarea { overflow-y:hidden; }
+.composer textarea.atmax { overflow-y:auto; }
   .composer .arrowbtn { background:transparent; color:#b6bcb6; border:none; width:26px; height:26px; cursor:pointer; flex-shrink:0; padding:2px; transition:color .2s; }
   .composer .arrowbtn.ready { color:var(--green); }
   .composer .arrowbtn:hover { color:var(--green); }
@@ -140,8 +142,11 @@ function wireComposer(){
   });
 }
 function grow(){
+  this.value = this.value.replace(/\r\n/g, '\n');
+  const atMax = this.scrollHeight > 120;
+  this.classList.toggle('atmax', atMax);
   this.style.height = 'auto';
-  this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+  this.style.height = (atMax ? 120 : this.scrollHeight + 1) + 'px';
 }
 
 function questionBoxHTML(row){
