@@ -93,14 +93,15 @@ async function ensureCompanion(sid: string, s: CompanionState) {
   return id;
 }
 
-async function waitReply(compId: string): Promise<string> {
+async function waitReply(compId: string, sinceMs: number): Promise<string> {
   const deadline = Date.now() + MAX_WAIT_MS;
   let lastText = '';
   while (Date.now() < deadline) {
     await new Promise(r => setTimeout(r, 2500));
     try {
-      const stt = await jget(`/api/session/${compId}/message?limit=3`) as { data?: Array<{ type: string; completed?: number; content?: Array<{ type: string; text?: string }> }> };
-      const replies = (stt.data ?? []).filter(m => m.type === 'assistant');
+      const stt = await jget(`/api/session/${compId}/message?limit=6`) as { data?: Array<{ type: string; time?: { created?: number }; completed?: number; content?: Array<{ type: string; text?: string }> }> };
+      // UNIQUEMENT les réponses postérieures à notre injection (sinon on rattrape la précédente)
+      const replies = (stt.data ?? []).filter(m => m.type === 'assistant' && (m.time?.created ?? 0) >= sinceMs);
       const last = replies[replies.length - 1];
       const text = last?.content?.filter(c => c.type === 'text').map(c => c.text).join(' ') ?? '';
       if (text) {
@@ -113,11 +114,20 @@ async function waitReply(compId: string): Promise<string> {
   return lastText;
 }
 
+function scrubFrench(t: string): string {
+  // pansement jusqu'à ce que le modèle de l'agent apprenne le tutoiement (voir AGENTS.md companión)
+  return t
+    .replace(/l'humain fournit-il d'autres idées/gi, 'As-tu d\u2019autres idées')
+    .replace(/l'humain fournit-il/gi, 'As-tu')
+    .replace(/\bl'humain\b/gi, 'tu')
+    .replace(/Arbitrage utilisateur attendu/gi, 'À toi de trancher');
+}
+
 function parseVerdict(text: string): { resume?: string; termine?: boolean; confiance?: number; progress?: number; attend?: string } | null {
   const m = text.match(/\{[\s\S]*\}/);
   if (!m) return null;
   try {
-    let v = JSON.parse(m[0]) as Record<string, unknown>;
+    const v = JSON.parse(m[0]) as Record<string, unknown>;
     // clés tolérantes (le modèle glisse parfois des accents : "résumé", "progrès"…)
     const pick = (...ks: string[]) => { for (const k of ks) if (v[k] != null) return v[k]; return undefined; };
     const resume = pick('summary', 'resume', 'résumé');
@@ -128,12 +138,12 @@ function parseVerdict(text: string): { resume?: string; termine?: boolean; confi
     const note = pick('confidence_reason', 'confidence_note', 'confiance_reason', 'pourquoi');
     if (typeof resume !== 'string') return null;
     return {
-      resume: String(resume).slice(0, 300),
+      resume: scrubFrench(String(resume)).slice(0, 300),
       termine: !!termine,
       confiance: Math.max(0, Math.min(1, Number(confiance) || 0)),
       progress: Math.max(0, Math.min(100, Number(progress) || 0)),
-      attend: typeof attend === 'string' ? attend.slice(0, 160) : '',
-      note: typeof note === 'string' ? note.slice(0, 160) : '',
+      attend: scrubFrench(typeof attend === 'string' ? attend : '').slice(0, 160),
+      note: typeof note === 'string' ? scrubFrench(note).slice(0, 160) : '',
     };
   } catch { return null; }
 }
@@ -149,14 +159,14 @@ async function analyseOnce(sid: string, title: string, dir?: string, status?: st
     const inject = [
       `Tâche : ${title}`,
       `Session actuellement : ${status ?? 'idle'}`,
-      s.lastBrief ? `Ton dernier résumé : ${s.lastBrief}` : '',
+      s.lastBrief ? `Ton résumé précédent (rappěl des faits; reformule-le toujours en tutoyant directement l'utilisateur, sans le mot « humain ») : ${s.lastBrief}` : '',
       `Message(s) récent(s) :`,
       digest,
-      `Rappel : ton JSON doit inclure TOUTES les clés, surtout confidence_reason (ta justification, une phrase).`,
+      `Rappel: tes textes s'affichent directement à l'utilisateur, en « tu » : « As-tu… », « À toi de… ». Jamais le mot « humain » dans summary/pending_human. Ton JSON doit inclure TOUTES les clés, surtout confidence_reason.`,
     ].filter(Boolean).join('\n\n').slice(0, MAX_INJECT_CHARS);
     const p = await jpost(`/api/openchamber/sessions/${compId}/send`, { prompt: inject, agent: 'superviseur-analyste', directory: dir });
     if (!p.ok) throw new Error(`prompt compagnon → ${p.status}`);
-    const reply = await waitReply(compId);
+    const reply = await waitReply(compId, Date.now() - 1500);
     const v = parseVerdict(reply);
     if (v) {
       s.lastBrief = v.resume;
@@ -181,13 +191,15 @@ export function companionTick(sessions: OpenchamberSession[], statusMap: Record<
     const stt = statusMap[sess.id];
     if (!stt) continue;
     const s = get(sess.id);
-    const verdict = verdictOf(sess.id) as { note?: string } | null;
+    const verdict = verdictOf(sess.id) as { note?: string; resume?: string; attend?: string } | null;
+    const staleVoice = !!verdict
+      && ((verdict.resume ?? '') + (verdict.attend ?? '')).toLowerCase().includes('humain');
     const needsNote = !!verdict && !verdict.note;
     const due = stt.status === 'idle'
       || (stt.status === 'busy' && (s.lastRunAt ?? 0) < Date.now() - PERIOD_MS)
-      || (needsNote && (s.lastRunAt ?? 0) < Date.now() - 60_000);
+      || ((needsNote || staleVoice) && (s.lastRunAt ?? 0) < Date.now() - 60_000);
     if (s.inFlight || !due) continue;
-    void analyseOnce(sess.id, sess.title ?? sess.id.slice(0, 12), sess.location?.directory, stt.status, needsNote);
+    void analyseOnce(sess.id, sess.title ?? sess.id.slice(0, 12), sess.location?.directory, stt.status, needsNote || staleVoice);
   }
 }
 
