@@ -35,9 +35,10 @@
   .dot.pale { background:var(--green); opacity:.35; position:relative; }
   .kebab { flex-shrink:0; width:22px; height:22px; display:flex; align-items:center; justify-content:center; border:none; background:transparent; color:var(--muted); border-radius:6px; cursor:pointer; font-size:14px; letter-spacing:1px; }
   .kebab:hover { color:var(--text); background:#f0f2f0; }
-  .menu { position:absolute; top:36px; right:8px; background:var(--card); border:1px solid var(--border); border-radius:8px; box-shadow:0 6px 18px rgba(0,0,0,.12); z-index:50; min-width:210px; overflow:hidden; }
-  .menu button { display:block; width:100%; text-align:left; background:transparent; border:none; font-family:inherit; font-size:13.5px; color:var(--text); padding:9px 12px; cursor:pointer; }
+  .menu { position:absolute; top:36px; right:8px; background:var(--card); border:1px solid var(--border); border-radius:8px; box-shadow:0 6px 18px rgba(0,0,0,.12); z-index:50; min-width:230px; overflow:hidden; }
+  .menu button { display:flex; gap:8px; align-items:center; width:100%; text-align:left; background:transparent; border:none; font-family:inherit; font-size:13.5px; color:var(--text); padding:9px 12px; cursor:pointer; }
   .menu button:hover { background:#f0f2f0; }
+  .menu svg { flex-shrink:0; opacity:.65; }
   .title { font-weight:650; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:42%; }
   .chip { font-size:11.5px; border-radius:9px; padding:2px 9px; white-space:nowrap; flex-shrink:0; }
   .chip.warn { background:var(--orange); color:#fff; font-weight:600; }
@@ -163,7 +164,7 @@ function cardHTML(row, waiting){
     <div class="brief">${esc(brief)}</div>${attends}${bars}
     ${questionBoxHTML(row)}${composerHTML(row)}${done}
     <div class="menu" data-menu style="display:none">
-      <button data-closecard="1">Fermer cette conversation</button>
+      <button data-closecard="1"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M6.6 6.6l10.8 10.8"/></svg>Fermer cette conversation</button>
     </div>`;
 }
 function composerHTML(row){
@@ -278,7 +279,6 @@ function wireCard(el, row){
     menu.querySelector('[data-closecard]')?.addEventListener('click', e => {
       e.stopPropagation(); menu.style.display = 'none'; closeCard('fermé');
     });
-    document.addEventListener('click', () => { menu.style.display = 'none'; }, { once: true });
   }
 }
 
@@ -374,6 +374,10 @@ async function refresh(){
   tick();
 }
 refresh();
+// un seul listener global : tout clic ailleurs referme les menus ouverts sur la page
+document.addEventListener('click', () => {
+  document.querySelectorAll('[data-menu]').forEach(m => { m.style.display = 'none'; });
+});
 setInterval(refresh, 3000);
 </script>
 
