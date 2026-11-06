@@ -129,7 +129,7 @@ function buildFleet(status: StatusPayload): Fleet {
   return { at: Date.now(), rows, concern };
 }
 
-export async function pollOnce(): Promise<void> {
+async function runPoll(): Promise<void> {
   try {
     const [status, sessions] = await Promise.all([
       jget('/api/sessions/status') as Promise<StatusPayload>,
@@ -154,6 +154,30 @@ export async function pollOnce(): Promise<void> {
   } catch {
     /* garde la dernière flotte connue, réessaie au prochain tick */
   }
+}
+
+/**
+ * Un seul poll à la fois : GET /api/fleet, l'intervalle 3 s et les événements SSE
+ * peuvent déclencher plusieurs cycles concurrents. Deux cycles qui se croisent
+ * pouvaient publier des snapshots dans le désordre (même session avec deux états,
+ * titre qui change, cartes fantômes). Les demandes concurrentes sont coalescées.
+ */
+let pollInFlight: Promise<void> | null = null;
+let pollQueued = false;
+
+export function pollOnce(): Promise<void> {
+  if (pollInFlight) {
+    pollQueued = true;
+    return pollInFlight;
+  }
+  pollInFlight = runPoll().finally(() => {
+    pollInFlight = null;
+    if (pollQueued) {
+      pollQueued = false;
+      void pollOnce();
+    }
+  });
+  return pollInFlight;
 }
 
 export function baseOk(): boolean { return base !== '' && lastGood > 0; }

@@ -65,27 +65,35 @@ function sendReplyPath(sessionId: string, form?: { id?: string }, requestID?: st
   throw new Error('ni formID ni requestID');
 }
 
+/** Flotte enrichie (état local des tâches) : même vue pour GET /api/fleet et le SSE. */
+function enrichedFleet(): Fleet {
+  const fleet = currentFleet();
+  return {
+    ...fleet,
+    rows: fleet.rows.flatMap((r) => {
+      const st = getTaskState(r.id) as { closed_at?: number } | null;
+      if (st?.closed_at) {
+        // activité postérieure à la fermeture ? (nouveau prompt dans OpenChamber) → réouverture
+        const last = Math.max(r.lastUpdateAt ?? 0, r.busy ?? 0);
+        if (last > (st.closed_at ?? 0)) {
+          reopenTaskState(r.id);
+          return [{ ...r, task: getTaskState(r.id) }];
+        }
+        return [];
+      }
+      return [{ ...r, task: st }];
+    }),
+  };
+}
+
 async function handleApi(req: http.IncomingMessage, res: http.ServerResponse, url: URL): Promise<void> {
   const path = url.pathname;
   if (path === '/api/fleet' && req.method === 'GET') {
-    const fleet: Fleet = currentFleet();
+    // même enrichissement que le SSE : sinon les cartes fermées côté daemon
+    // réapparaissent à chaque frame SSE et disparaissent au poll suivant (flicker)
+    const fleet = enrichedFleet();
     void pollOnce();
-    const enriched = {
-      ...fleet,
-      rows: fleet.rows
-        .map(r => {
-          const st = getTaskState(r.id) as { closed_at?: number } | null;
-          if (st?.closed_at) {
-            // activité postérieure à la fermeture ? (nouveau prompt dans OpenChamber) → réouverture
-            const last = Math.max(r.lastUpdateAt ?? 0, r.busy ?? 0);
-            if (last > (st.closed_at ?? 0)) reopenTaskState(r.id);
-            else return null;
-          }
-          return ({ ...r, task: getTaskState(r.id) });
-        })
-        .filter(Boolean),
-    };
-    json(res, 200, enriched);
+    json(res, 200, fleet);
     return;
   }
   if (path === '/api/fleet/reply' && req.method === 'POST') {
@@ -152,9 +160,9 @@ async function handleApi(req: http.IncomingMessage, res: http.ServerResponse, ur
     return;
   }
   if (path === '/api/fleet/stream' && req.method === 'GET') {
-    // SSE : pousse la flotte dès qu'elle est rafraîchie (les événements OpenChamber déclenchent un poll immédiat)
+    // SSE : pousse la flotte enrichie, identique à GET /api/fleet (pas de cartes fermées)
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
-    const send = () => { try { res.write(`data: ${JSON.stringify(currentFleet())}\n\n`); } catch { /* client parti */ } };
+    const send = () => { try { res.write(`data: ${JSON.stringify(enrichedFleet())}\n\n`); } catch { /* client parti */ } };
     send();
     const t = setInterval(send, 500);
     req.on('close', () => clearInterval(t));
