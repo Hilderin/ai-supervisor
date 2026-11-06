@@ -20,6 +20,7 @@ interface CompanionState {
   lastRunAt?: number;
   lastBrief?: string;
   turnStartSeen?: boolean;
+  lastTurnStart?: number;
 }
 const st = new Map<string, CompanionState>();
 const get = (sid: string) => {
@@ -191,15 +192,22 @@ export function companionTick(sessions: OpenchamberSession[], statusMap: Record<
     const stt = statusMap[sess.id];
     if (!stt) continue;
     const s = get(sess.id);
+    // nouveau tour détecté (l'utilisateur a envoyé un prompt) : analyse immédiate du cadrage
+    const turnStart = statusMap[sess.id] ? (stt as { turnStartedAt?: number }).turnStartedAt : undefined;
+    const newTurn = turnStart != null && s.lastTurnStart !== turnStart
+      && stt.status === 'busy'
+      && (s.lastRunAt ?? 0) < Date.now() - 15_000;
+    if (turnStart != null) s.lastTurnStart = turnStart;
     const verdict = verdictOf(sess.id) as { note?: string; resume?: string; attend?: string } | null;
     const staleVoice = !!verdict
       && ((verdict.resume ?? '') + (verdict.attend ?? '')).toLowerCase().includes('humain');
     const needsNote = !!verdict && !verdict.note;
-    const due = stt.status === 'idle'
+    const due = newTurn
+      || stt.status === 'idle'
       || (stt.status === 'busy' && (s.lastRunAt ?? 0) < Date.now() - PERIOD_MS)
       || ((needsNote || staleVoice) && (s.lastRunAt ?? 0) < Date.now() - 60_000);
     if (s.inFlight || !due) continue;
-    void analyseOnce(sess.id, sess.title ?? sess.id.slice(0, 12), sess.location?.directory, stt.status, needsNote || staleVoice);
+    void analyseOnce(sess.id, sess.title ?? sess.id.slice(0, 12), sess.location?.directory, stt.status, newTurn || needsNote || staleVoice);
   }
 }
 
