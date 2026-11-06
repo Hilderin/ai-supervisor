@@ -128,6 +128,7 @@ function wireComposer(){
     const send = () => {
       const v = ta.value.trim(); if (!v) return;
       ta.value = ''; grow.call(ta);
+      ta.blur();
       q.querySelector('[data-send]').classList.remove('ready');
       fetch('/api/fleet/send', { method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ sessionId: sid, text: v }) }).finally(refresh);
@@ -167,10 +168,11 @@ function questionBoxHTML(row){
 
 function mount(fleet){
   lastFleet = fleet;
-  // ne pas écraser l'UI pendant que l'utilisateur tape (focus + draft)
-  const typing = document.activeElement instanceof HTMLElement
-    && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')
-    && document.activeElement.value !== '';
+  // ne pas écraser l'UI tant que le focus est dans un champ de carte (brouillon en frappe)
+  const ae = document.activeElement;
+  const typing = ae instanceof HTMLElement
+    && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')
+    && ae.closest('.card');
   if (typing && fleetData) return;
   const waiting = fleet.rows.filter(r => r.pendingForms?.length || r.pendingPermissions?.length);
   const others = fleet.rows.filter(r => !(r.pendingForms?.length || r.pendingPermissions?.length));
