@@ -135,12 +135,16 @@ function briefRow(row, waiting){
 
 const cards = new Map(); // sid -> {el, sig}
 
+  // la tâche est vraiment TERMINE seulement si son verdict est postérieur au tour actuel
+  const isDone = (r: { status?: string; sup?: { termine?: boolean; at?: number }; turnStartedAt?: number }) =>
+    !!r.sup?.termine && !(r.status === 'busy' && r.turnStartedAt && (r.sup.at ?? 0) < r.turnStartedAt);
+
 function cardHTML(row, waiting){
   const staleTurn = row.status === 'busy' && row.sup && row.turnStartedAt && row.sup.at && (row.sup.at < row.turnStartedAt);
   const brief = staleTurn ? 'Réflexion en cours…' : (row.sup?.resume || briefRow(row, waiting));
   const dot = waiting ? '<span class="dot o"></span>'
     : row.status === 'busy' ? '<span class="dot spin"></span>'
-    : (row.sup?.termine ? '<span class="dot pale"></span>' : '<span class="dot full"></span>');
+    : (isDone(row) ? '<span class="dot pale"></span>' : '<span class="dot full"></span>');
   const chip = waiting ? '<span class="chip warn">attends ta réponse</span>' : '';
   const attends = row.sup?.attend ? `<div class="brief" style="color:#b35c17; margin-top:3px;">✋ ${esc(row.sup.attend)}</div>` : '';
   let bars = '';
@@ -158,7 +162,7 @@ function cardHTML(row, waiting){
     bars = `<div class="bars"><span class="track"><span class="fill${pct != null && pct < 66 && pct > 0 ? ' mid' : ''}" style="width:${pct ?? 0}%"></span></span>` +
       `${confIcons}${pct != null ? `<span class="pct">${Math.round(pct)}%</span>` : ''}</div>`;
   }
-  const done = row.sup?.termine
+  const done = isDone(row)
     ? `<div class="donebox"><span style="flex:1"></span><button class="bin" data-done="1">Fermer</button></div>` : '';
   return `
     <div class="r1">${dot}<span class="title">${esc(row.title)}</span>${chip}<span class="sp"></span>${topActions(row)}
@@ -234,7 +238,7 @@ function ensureCard(row, waiting){
   const ae = document.activeElement;
   if (ent && ae instanceof HTMLElement && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA') && ent.el.contains(ae) && ent.sig !== '') return ent;
   if (!ent) cards.set(row.id, ent = { el: document.createElement('div'), sig: '' });
-  ent.el.className = 'card' + (waiting ? ' wait' : '') + (row.sup?.termine ? ' ok' : '');
+  ent.el.className = 'card' + (waiting ? ' wait' : '') + (isDone(row) ? ' ok' : '');
   ent.el.dataset.sid = row.id;
   ent.el.innerHTML = cardHTML(row, waiting);
   wireCard(ent.el, row);
@@ -340,8 +344,8 @@ let lastFleet = null;
 function mount(fleet){
   lastFleet = fleet;
   const waitingRows = fleet.rows.filter(r => !doneSids.has(r.id) && (r.pendingForms?.length || r.pendingPermissions?.length));
-  const doneRows = fleet.rows.filter(r => r.sup?.termine && !doneSids.has(r.id));
-  const runRows = fleet.rows.filter(r => !doneSids.has(r.id) && !(r.sup?.termine) && !waitingRows.includes(r));
+  const doneRows = fleet.rows.filter(r => isDone(r) && !doneSids.has(r.id));
+  const runRows = fleet.rows.filter(r => !doneSids.has(r.id) && !isDone(r) && !waitingRows.includes(r));
   setChildrenIfChanged(sa, waitingRows.map(r => ensureCard(r, true).el));
   setChildrenIfChanged(sd, doneRows.map(r => ensureCard(r, false).el));
   setChildrenIfChanged(sr, runRows.map(r => ensureCard(r, false).el));
