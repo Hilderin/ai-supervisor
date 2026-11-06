@@ -5,6 +5,8 @@
  * Le verdict n'est qu'un SIGNAL : la clôture reste un geste humain (doc 03).
  */
 import { logEvent, upsertVerdict, getVerdict, getCompanion, putCompanion } from './state.mts';
+import { takeKick } from './kicks.mts';
+import { getAgentVersion } from './state.mts';
 
 let base = '';
 export function setBase(b: string) { base = b.replace(/\/$/, ''); }
@@ -19,8 +21,6 @@ interface CompanionState {
   lastMsgID?: string;
   lastRunAt?: number;
   lastBrief?: string;
-  turnStartSeen?: boolean;
-  lastTurnStart?: number;
 }
 const st = new Map<string, CompanionState>();
 const get = (sid: string) => {
@@ -88,13 +88,24 @@ function rememberCompanion(sid: string, compId: string) { putCompanion(sid, comp
 async function ensureCompanion(sid: string, s: CompanionState) {
   if (s.compSession) return s.compSession;
   const known = persistedCompanion(sid);
-  if (known) { s.compSession = known; return known; }
+  const currentV = getAgentVersion();
+  // version du prompt changée ? → on relâche l'ancien compagnon et on en crée un neuf (prompt à jour)
+  if (known && known.version !== null && known.version !== currentV) {
+    try {
+      await jpost('/api/openchamber/sessions/archive', { ids: [known.compId] });
+      logEvent(sid, 'note', 'compagnon déclassé (prompt de l\u2019analyste a changé)');
+    } catch { /* garde le jeton */ }
+    s.compSession = undefined;
+  } else if (known) {
+    s.compSession = known.compId;
+    return known.compId;
+  }
   const r = await jpost('/api/session', { parentID: sid, title: 'comp. supervision' });
   const id = (r.data as { data?: { id?: string } })?.data?.id;
   if (!id) throw new Error('session compagnon non créée');
   s.compSession = id;
   rememberCompanion(sid, id);
-  logEvent(sid, 'note', `compagnon #${id.slice(-6)}`);
+  logEvent(sid, 'note', `compagnon #${id.slice(-6)} (v agent ${currentV ? 'à jour' : '?'})`);
   return id;
 }
 
@@ -196,22 +207,25 @@ export function companionTick(sessions: OpenchamberSession[], statusMap: Record<
     const stt = statusMap[sess.id];
     if (!stt) continue;
     const s = get(sess.id);
-    // nouveau tour détecté (l'utilisateur a envoyé un prompt) : analyse immédiate du cadrage
-    const turnStart = statusMap[sess.id] ? (stt as { turnStartedAt?: number }).turnStartedAt : undefined;
-    const newTurn = turnStart != null && s.lastTurnStart !== turnStart
-      && stt.status === 'busy'
-      && (s.lastRunAt ?? 0) < Date.now() - 15_000;
-    if (turnStart != null) s.lastTurnStart = turnStart;
+    // kicks par événements (cablés: inbox.enqueued → start ; execution.succeeded/failed/interrupted → end)
+    // NOTE : PAS de déclenchement par turnStartedAt — il varie à chaque sous-exécution (faux « nouveau tour »)
+    const kick = takeKick(sess.id);
     const verdict = verdictOf(sess.id) as { note?: string; resume?: string; attend?: string } | null;
     const staleVoice = !!verdict
       && ((verdict.resume ?? '') + (verdict.attend ?? '')).toLowerCase().includes('humain');
     const needsNote = !!verdict && !verdict.note;
-    const due = newTurn
-      || stt.status === 'idle'
-      || (stt.status === 'busy' && (s.lastRunAt ?? 0) < Date.now() - PERIOD_MS)
-      || ((needsNote || staleVoice) && (s.lastRunAt ?? 0) < Date.now() - 60_000);
-    if (s.inFlight || !due) continue;
-    void analyseOnce(sess.id, sess.title ?? sess.id.slice(0, 12), sess.location?.directory, stt.status, newTurn || needsNote || staleVoice);
+    // PAS de déclenchement à vide : un tick sur une session idle immobile ne fait RIEN.
+    const busyPeriodic = stt.status === 'busy' && (s.lastRunAt ?? 0) < Date.now() - PERIOD_MS;
+    const forced = (needsNote || staleVoice) && (s.lastRunAt ?? 0) < Date.now() - 60_000;
+    if (s.inFlight) { if (kick) kicks.set(sess.id, kick); continue; }   // kick conservé : re-consommé après l'analyse
+    const dispatch = (force: boolean) => {
+      void analyseOnce(sess.id, sess.title ?? sess.id.slice(0, 12), sess.location?.directory, stt.status, force);
+    };
+    if (kick?.start) { dispatch(true); continue; }       // prompt reçu → cadrage immédiat
+    if (kick?.end) { dispatch(false); continue; }        // tour fini → analyse de clôture
+    if (busyPeriodic) { dispatch(false); continue; }
+    if (forced) { dispatch(true); continue; }
+    // ici : session idle qui n'a pas bougé — le compagnon ne fait RIEN (c'est le fix anti-relance)
   }
 }
 

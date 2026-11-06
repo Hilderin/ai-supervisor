@@ -42,13 +42,24 @@ CREATE TABLE IF NOT EXISTS task_verdict (
   note TEXT,
   at INTEGER
 );
-CREATE INDEX IF NOT EXISTS idx_task_verdict_at ON task_verdict(at);
 CREATE TABLE IF NOT EXISTS companion_map (
   parent_session_id TEXT PRIMARY KEY,
   companion_session_id TEXT NOT NULL,
+  version INTEGER,
   created_at INTEGER NOT NULL
-);`);
-try { db.exec('ALTER TABLE task_verdict ADD COLUMN note TEXT'); } catch { /* colonne déjà présente (base existante) */ }
+);
+`);
+try { db.exec('ALTER TABLE task_verdict ADD COLUMN note TEXT'); } catch { /* colonne déjà présente */ }
+try { db.exec('ALTER TABLE companion_map ADD COLUMN version INTEGER'); } catch { /* colonne déjà présente */ }
+
+/** version du prompt de l'agent analyste : si elle change, tous les comps sont relâchés (recréés avec le prompt à jour) */
+import { statSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+const agentMD = join(dirname(fileURLToPath(import.meta.url)), '..', 'agent', 'superviseur-analyste.md');
+export function getAgentVersion(): number {
+  try { return statSync(agentMD).mtimeMs; } catch { return 0; }
+}
 
 export function getVerdict(sessionId: string) {
   return db.query('SELECT * FROM task_verdict WHERE session_id = ?').get(sessionId) ?? null;
@@ -61,9 +72,14 @@ export function upsertVerdict(sessionId: string, v: { resume?: string; termine?:
     .run(sessionId, v.resume ?? null, v.confiance ?? null, v.progress ?? null, v.termine ? 1 : 0, v.attend ?? null, v.note ?? null, Date.now());
 }
 
-export function getCompanion(parentSid: string): string | null {
-  const r = db.query('SELECT companion_session_id c FROM companion_map WHERE parent_session_id = ?').get(parentSid) as { c?: string } | undefined;
-  return r?.c ?? null;
+export function getCompanion(parentSid: string): { compId: string; version: number | null } | null {
+  const r = db.query('SELECT companion_session_id c, version v FROM companion_map WHERE parent_session_id = ?').get(parentSid) as { c: string; v: number | null } | undefined;
+  return r ? { compId: r.c, version: r.v } : null;
+}
+export function putCompanion(parentSid: string, compId: string) {
+  const version = getAgentVersion();
+  db.query('INSERT INTO companion_map (parent_session_id, companion_session_id, version, created_at) VALUES (?,?,?,?) ON CONFLICT(parent_session_id) DO UPDATE SET companion_session_id=excluded.companion_session_id, version=excluded.version')
+    .run(parentSid, compId, version, Date.now());
 }
 export function reopenTaskState(sid: string) {
   db.query('UPDATE task_state SET closed_at = NULL, closure = NULL WHERE session_id = ?').run(sid);

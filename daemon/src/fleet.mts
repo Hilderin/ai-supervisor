@@ -141,11 +141,14 @@ export async function pollOnce(): Promise<void> {
 export function baseOk(): boolean { return base !== '' && lastGood > 0; }
 
 /* --- SSE : l'événement pousse un poll immédiat (le poll 3 s reste le filet) --- */
+import { ingestEvent } from './kicks.mts';
+
 let sseBusy = false;          // reconnexion déjà planifiée
 let pollDebounce: ReturnType<typeof setTimeout> | null = null;
 
-function onEventLine(type: string) {
-  const relevant = /^(session\.|permission\.|form\.|project\.|workspace\.)/.test(type);
+function onEventLine(type: string, data: Record<string, unknown>) {
+  ingestEvent({ type, data });
+  const relevant = /^(session\.|permission\.|form\.|project\.|workspace\.|message\.)/.test(type);
   if (!relevant) return;
   if (pollDebounce) return;
   pollDebounce = setTimeout(() => { pollDebounce = null; void pollOnce(); }, 250);
@@ -169,7 +172,10 @@ export function startEventStream(): void {
         while ((i = buf.indexOf('\n')) >= 0) {
           const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
           if (!line.startsWith('data: ')) continue;
-          try { onEventLine(String((JSON.parse(line.slice(6)) as { type?: string }).type)); } catch { /* frame partielle */ }
+          try {
+            const frame = JSON.parse(line.slice(6)) as { type?: string; data?: Record<string, unknown> };
+            onEventLine(String(frame.type), frame.data ?? {});
+          } catch { /* frame partielle */ }
         }
       }
     } catch { /* fin de stream : reconnexion plus bas */ }
