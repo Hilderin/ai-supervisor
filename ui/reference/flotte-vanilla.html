@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Superviseur (flotte)</title>
+<style>
+  :root {
+    --bg:#f4f5f4; --card:#fff; --border:#e4e7e4; --text:#1d211e; --muted:#7c847d;
+    --green:#2b9f6a; --green-soft:#e3f2ea; --orange:#d97a2b; --orange-soft:#faeadf; --amber:#d19a2f;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:-apple-system,"Segoe UI",sans-serif; background:var(--bg); color:var(--text); padding:20px 26px; font-size:14.5px; }
+  .hdr { display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; }
+  .brand { display:flex; align-items:center; gap:9px; }
+  .logo { width:26px; height:26px; border-radius:7px; background:var(--green); color:#fff; display:flex; align-items:center; justify-content:center; font-size:13px; }
+  h1 { font-size:16px; font-weight:700; }
+  .live { font-size:12px; color:var(--muted); }
+  .live b { color:var(--green); }
+  .bar { background:var(--card); border:1px solid var(--border); border-radius:10px; }
+  .bar input { width:100%; background:transparent; border:none; outline:none; font-family:inherit; font-size:14px; color:var(--text); padding:12px 14px; }
+  .bar input::placeholder { color:#a5aca5; }
+  .seclabel { display:flex; align-items:center; gap:8px; margin:18px 0 9px; font-size:13px; font-weight:700; letter-spacing:.02em; }
+  .sdot { width:8px; height:8px; border-radius:50%; }
+  .sdot.o { background:var(--orange); } .sdot.g { background:var(--green); } .sdot.gg { background:var(--green); opacity:.4; }
+  .cnt { background:var(--card); border:1px solid var(--border); border-radius:9px; font-size:11px; font-weight:600; padding:1px 8px; color:var(--muted); }
+  .card { position:relative; background:var(--card); border:1px solid var(--border); border-radius:11px; padding:11px 13px 10px; margin-bottom:9px; }
+  .card.wait { background:#fffaf3; border-color:#eec89a; }
+  .r1 { display:flex; align-items:center; gap:9px; }
+  .dot { width:10px; height:10px; border-radius:50%; flex-shrink:0; }
+  .dot.spin { border:2px solid var(--green); border-top-color:transparent; border-right-color:transparent; border-radius:50%; animation:spin .9s linear infinite; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  .dot.o { background:var(--orange); animation:blink 1.5s infinite; }
+  @keyframes blink { 50% { opacity:.35; } }
+  .dot.full { background:var(--green); opacity:1; }
+  .dot.pale { background:var(--green); opacity:.35; position:relative; }
+  .kebab { flex-shrink:0; width:22px; height:22px; display:flex; align-items:center; justify-content:center; border:none; background:transparent; color:var(--muted); border-radius:6px; cursor:pointer; font-size:14px; letter-spacing:1px; }
+  .kebab:hover { color:var(--text); background:#f0f2f0; }
+  .menu { position:absolute; top:36px; right:8px; background:var(--card); border:1px solid var(--border); border-radius:8px; box-shadow:0 6px 18px rgba(0,0,0,.12); z-index:50; min-width:230px; overflow:hidden; }
+  .menu button { display:flex; gap:8px; align-items:center; width:100%; text-align:left; background:transparent; border:none; font-family:inherit; font-size:13.5px; color:var(--text); padding:9px 12px; cursor:pointer; }
+  .menu button:hover { background:#f0f2f0; }
+  .menu svg { flex-shrink:0; opacity:.65; }
+  .title { font-weight:650; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:42%; }
+  .chip { font-size:11.5px; border-radius:9px; padding:2px 9px; white-space:nowrap; flex-shrink:0; }
+  .chip.warn { background:var(--orange); color:#fff; font-weight:600; }
+  .sp { flex:1; }
+  .ocbtn { flex-shrink:0; width:22px; height:22px; display:flex; align-items:center; justify-content:center; border:none; background:transparent; color:var(--muted); border-radius:6px; cursor:pointer; }
+  .ocbtn:hover { color:var(--green); background:var(--green-soft); }
+  .dirb { font-size:11px; color:var(--muted); background:#f0f2f0; border-radius:5px; padding:2px 7px; white-space:nowrap; flex-shrink:0; max-width:130px; overflow:hidden; text-overflow:ellipsis; }
+  .brief { margin-top:5px; font-size:13.5px; color:var(--muted); padding-right:26px; }
+  .bars { margin-top:8px; display:flex; align-items:center; gap:10px; }
+  .track { height:5px; border-radius:3px; background:#eceeed; flex:1; overflow:hidden; }
+  .fill { height:100%; background:var(--green); transition:width .5s; display:block; }
+  .fill.mid { background:var(--amber); }
+  .cdot { width:7px; height:7px; border-radius:50%; flex-shrink:0; opacity:.85; }
+  .cdots { display:flex; gap:3px; align-items:center; flex-shrink:0; position:relative; cursor:help; padding:4px; }
+  .cdots i { width:7px; height:7px; border-radius:50%; background:#dcdedd; display:block; }
+  .tipbox { display:none; position:absolute; bottom:18px; right:-6px; background:#20241f; color:#fff; font-size:12.5px; padding:9px 11px; border-radius:9px; z-index:70; text-align:left; line-height:1.5; max-width:300px; overflow-wrap:anywhere; box-shadow:0 8px 22px rgba(0,0,0,.22); }
+  .cdots:hover .tipbox { display:block; }
+  .pct { font-size:12px; font-weight:650; width:34px; text-align:right; font-variant-numeric:tabular-nums; }
+  .qbox { margin-top:10px; padding-top:10px; border-top:1px solid var(--border); }
+  .qtext { font-size:14px; line-height:1.45; margin-bottom:8px; }
+  .actions { display:flex; gap:7px; align-items:center; }
+  [data-fgroup] { flex-wrap:wrap; margin-bottom:14px; }
+  .formbox .submitrow { justify-content:flex-end; margin-top:2px; margin-bottom:4px; }
+  .bin { font-family:inherit; background:var(--green); color:#fff; border:none; border-radius:7px; font-size:13px; font-weight:600; padding:7px 14px; cursor:pointer; white-space:nowrap; }
+  .bin.gh { background:#fff; color:var(--text); border:1px solid var(--border); font-weight:500; }
+  .bin.gh.sel { background:var(--green); border-color:var(--green); color:#fff; font-weight:600; }
+  .bin.gh.opt:hover { border-color:var(--green); color:var(--green); }
+  .bin.gh.sel:hover { color:#fff; }
+  .actions input, .composer textarea { background:#fff; border:1px solid var(--border); border-radius:8px; font-family:inherit; font-size:13.5px; color:var(--text); padding:7px 10px; outline:none; min-width:0; }
+  .actions input { flex:1 1 220px; min-width:200px; }
+  .composer { display:flex; gap:7px; align-items:flex-end; margin-top:12px; padding-top:10px; border-top:1px solid var(--border); }
+  .composer textarea { flex:1; resize:none; max-height:120px; overflow-y:hidden; line-height:1.45; font-size:14px; }
+  .composer textarea.atmax { overflow-y:auto; }
+  .composer textarea:focus { border-color:#c9cfc9; }
+  .composer .arrowbtn { width:26px; height:26px; background:transparent; }
+  .arrowbtn { background:transparent; color:#b6bcb6; border:none; border-radius:7px; width:26px; height:26px; cursor:pointer; flex-shrink:0; padding:2px; transition:color .2s; }
+  .arrowbtn.ready { color:var(--green); }
+  .arrowbtn:hover { color:var(--green); }
+  .donebox { margin-top:9px; padding-top:9px; border-top:1px solid var(--border); display:flex; gap:7px; align-items:center; }
+  .donebox input { flex:1; background:#fff; border:1px solid var(--border); border-radius:8px; font-family:inherit; font-size:13.5px; color:var(--text); padding:7px 10px; outline:none; min-width:0; }
+  #err { display:none; background:var(--orange-soft); color:#b35c17; border-radius:8px; padding:8px 12px; font-size:12px; margin-top:10px; }
+</style>
+</head>
+<body>
+
+<div class="hdr">
+  <div class="brand"><div class="logo">◉</div><h1>Superviseur</h1></div>
+  <div class="live" id="live">connexion…</div>
+</div>
+
+<div class="bar"><input id="bar" placeholder="Création de session : au prochain jalon" disabled></div>
+
+<div class="seclabel"><span class="sdot o"></span>BESOIN DE TON ATTENTION<span class="cnt" id="ca">0</span></div>
+<div id="sa"></div>
+
+<div class="seclabel"><span class="sdot g"></span>EN COURS<span class="cnt" id="cr">0</span></div>
+<div id="sr"></div>
+
+<div class="seclabel"><span class="sdot gg"></span>TERMINÉ<span class="cnt" id="cd">0</span></div>
+<div id="sd"></div>
+
+<div id="err"></div>
+<div id="dbg" style="display:none; font-family:monospace; font-size:11px; color:#5d6577; margin-top:14px; max-height:200px; overflow-y:auto;"></div>
+
+<script type="module">
+const SVG_OC = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg>';
+const SVG_SEND = '<svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M3.4 20.4 20.8 12 3.4 3.6 3.3 10l12 2-12 2z"/></svg>';
+const liveEl = document.getElementById('live');
+const sa = document.getElementById('sa'), sr = document.getElementById('sr'), sd = document.getElementById('sd');
+const ca = document.getElementById('ca'), cr = document.getElementById('cr'), cd = document.getElementById('cd');
+const errBox = document.getElementById('err');
+
+function esc(s){ return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function fmtAge(ms){
+  if (ms < 0 || !isFinite(ms)) return 'à l\'instant';
+  const s = Math.round(ms/1000);
+  if (s < 10) return 'à l\'instant';
+  if (s < 60) return `il y a ${s} s`;
+  const m = Math.round(s/60); if (m < 60) return `il y a ${m} min`;
+  const h = Math.round(m/60); if (h < 24) return `il y a ${h} h`;
+  return `il y a ${Math.round(h/24)} j`;
+}
+function topActions(row){
+  const dir = row.dir ? row.dir.split('/').pop() ?? row.dir : '';
+  return dir ? `<span class="dirb" title="${esc(row.dir)}">${esc(dir)}</span>` : '';
+}
+let composerFocusSid = null;
+function briefRow(row, waiting){
+  return waiting
+    ? (row.pendingForms?.length ? 'une question t\u2019attend' : 'une permission t\u2019attend')
+    : row.status === 'busy'
+      ? 'travaille'
+      : 'tour terminé · ' + fmtAge(Date.now() - (row.lastUpdateAt ?? Date.now()));
+}
+
+const cards = new Map(); // sid -> {el, sig}
+
+// debug DOM : ?debug=1 -> panneau qui journalise reconstructions/mouvements de cartes
+const DBG = location.search.includes('debug');
+const DBG0 = Date.now();
+const dbgLines = [];
+function dbg(tag, msg){
+  if (!DBG) return;
+  dbgLines.unshift(`+${((Date.now()-DBG0)/1000).toFixed(1)}s ${tag} ${esc(msg||'')}`);
+  dbgLines.length = 24;
+  const el = document.getElementById('dbg');
+  if (el) el.innerHTML = dbgLines.join('<br>');
+}
+
+  // la tâche est vraiment TERMINE seulement si son verdict est postérieur au tour actuel
+const isDone = (r) =>
+  !!r.sup?.termine && !(r.status === 'busy' && r.turnStartedAt && (r.sup.at ?? 0) < r.turnStartedAt);
+
+function cardHTML(row, waiting){
+  // squelette STABLE : tous les blocs existent, l'état s'applique ensuite via applyState (in-place)
+  const dot = '<span class="dot full"></span>';
+  return `
+    <div class="r1">${dot}<span class="title">${esc(row.title)}</span><span class="chip warn" style="display:none">attends ta réponse</span><span class="sp"></span>${topActions(row)}
+      <button class="kebab" title="Options" data-kebab="1">⋯</button>
+      <button class="ocbtn" data-open="${esc(row.id)}" title="Ouvrir dans OpenChamber">${SVG_OC}</button></div>
+    <div class="brief"></div>
+    <div class="brief" data-attends style="display:none"></div>
+    <div class="bars" style="display:none"><span class="track"><span class="fill" style="width:0%"></span></span>
+      <span class="cdots"><i></i><i></i><i></i><span class="tipbox"></span></span><span class="pct"></span></div>
+    ${composerHTML(row)}
+    <div class="donebox" style="display:none"><span style="flex:1"></span><button class="bin" data-done="1">Fermer</button></div>
+    <div class="menu" data-menu style="display:none">
+      <button data-closecard="1"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M6.6 6.6l10.8 10.8"/></svg>Fermer cette conversation</button>
+    </div>`;
+}
+function composerHTML(row){
+  return `<div class="qbox composer" data-compose="${esc(row.id)}">
+    <textarea placeholder="" rows="1"></textarea>
+    <button class="arrowbtn" title="Envoyer">${SVG_SEND}</button></div>`;
+}
+function grow(){
+  const atMax = this.scrollHeight > 120;
+  this.classList.toggle('atmax', atMax);
+  this.style.height = 'auto';
+  this.style.height = (atMax ? 120 : this.scrollHeight + 1) + 'px';
+}
+async function replyForm(sid, formId, answer){
+  await fetch('/api/fleet/reply', { method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ sessionId: sid, formId, answer }) });
+  refresh();
+}
+async function replyPerm(sid, requestID, decision){
+  await fetch('/api/fleet/reply', { method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ sessionId: sid, requestID, decision }) });
+  refresh();
+}
+
+function questionBoxHTML(row){
+  const perm = row.pendingPermissions?.[0];
+  const form = row.pendingForms?.[0];
+  if (perm) {
+    return `<div class="qbox"><div class="qtext">Permission demandée</div>
+      <div class="actions">
+        <button class="bin" data-perm="1">Autoriser</button>
+      </div></div>`;
+  }
+  if (!form) return '';
+  const fields = form.fields ?? [];
+  let out = `<div class="qbox formbox" data-form="${esc(form.id)}">`;
+  for (const f of fields) {
+    const key = f.key ?? 'q0';
+    if (f.description || f.title) out += `<div class="qtext">${esc(f.description ?? f.title)}</div>`;
+    out += `<div class="actions" data-fgroup="${esc(key)}" data-ftype="${esc(f.type || 'string')}">`;
+    if (f.options?.length) {
+      for (const o of f.options) {
+        out += `<button class="bin gh opt" data-answer="${esc(o.value)}">${esc(o.label)}</button>`;
+      }
+    }
+    out += `<input type="text" data-finput="${esc(key)}" placeholder="… ou répond en texte libre"></div>`;
+  }
+  out += `<div class="actions submitrow"><button class="bin" data-submit-all="1">Répondre</button></div>`;
+  out += '</div>';
+  return out;
+}
+
+function ensureCard(row, waiting){
+  let ent = cards.get(row.id);
+  const staleTurn = row.status === 'busy' && row.sup && row.turnStartedAt && row.sup.at && (row.sup.at < row.turnStartedAt);
+  const brief = staleTurn ? 'Réflexion en cours…' : (row.sup?.resume || briefRow(row, waiting));
+  const sig = [row.status, waiting ? 'W' : 'R', isDone(row) ? 'T' : '', row.sup?.progress ?? '', row.sup?.confiance ?? '', row.pendingForms?.[0]?.id ?? '', row.pendingPermissions?.[0]?.id ?? '', staleTurn ? 'stale' : ''].filter(Boolean).join('|');
+  // dépôt existant : mises à jour CHIRURGICALES in-place, jamais d'innerHTML (le focus du composer survit)
+  if (ent) {
+    const ae0 = document.activeElement;
+    const typing = ae0 instanceof HTMLElement && (ae0.tagName === 'INPUT' || ae0.tagName === 'TEXTAREA') && ent.el.contains(ae0);
+    if (!typing) applyState(ent.el, row, waiting, brief);
+    // si l'utilisateur tape dans cette carte, on saute SEULEMENT le bilan (applyState), pas le composer
+    ent.sig = sig;
+    return ent;
+  }
+  cards.set(row.id, ent = { el: document.createElement('div'), sig });
+  ent.el.className = 'card' + (waiting ? ' wait' : '') + (isDone(row) ? ' ok' : '');
+  ent.el.dataset.sid = row.id;
+  ent.el.innerHTML = cardHTML(row, waiting);
+  dbg('créé', (row.title||'').slice(0,26) + (waiting ? ' [waiting]' : ''));
+  applyState(ent.el, row, waiting, brief);
+  wireAll(ent.el, row);
+  return ent;
+}
+
+/** mises à jour visuelles in-place d'une carte existante : le composer garde son focus */
+function applyState(el, row, waiting, brief){
+  const staleTurn = row.status === 'busy' && row.sup && row.turnStartedAt && row.sup.at && (row.sup.at < row.turnStartedAt);
+  // 1. état du dot
+  const dot = el.querySelector('.dot');
+  if (dot) {
+    const cls = waiting ? 'dot o' : row.status === 'busy' ? 'dot spin' : (isDone(row) ? 'dot pale' : 'dot full');
+    dot.className = cls;
+  }
+  // 2. chip warn
+  let chip = el.querySelector('.chip.warn');
+  if (waiting && !chip) {
+    chip = document.createElement('span'); chip.className = 'chip warn'; chip.textContent = 'attends ta réponse';
+    el.querySelector('.r1')?.insertBefore(chip, el.querySelector('.sp'));
+  } else if (!waiting && chip) chip.remove();
+  // 3. classe de la carte
+  el.className = 'card' + (waiting ? ' wait' : '') + (isDone(row) ? ' ok' : '');
+  // 4. brief
+  const b = el.querySelector('.brief');
+  if (b && b.textContent !== brief) b.textContent = brief;
+  // 5. attends (✋)
+  let at = el.querySelector('[data-attends]');
+  const attText = row.sup?.attend ?? '';
+  if (attText && !at) {
+    at = document.createElement('div'); at.className = 'brief'; at.setAttribute('data-attends','1');
+    at.style.color = '#b35c17'; at.style.marginTop = '3px';
+    b?.insertAdjacentElement('afterend', at);
+  }
+  if (at) { at.style.display = attText ? '' : 'none'; if (at.textContent !== attText) at.textContent = attText; }
+  // 6. barres (progression + confiance)
+  const bars = el.querySelector('.bars');
+  if (bars) {
+    const show = !!row.sup && (row.sup.progress != null || row.sup.confiance != null);
+    bars.style.display = show ? '' : 'none';
+    if (show) {
+      const fill = bars.querySelector('.fill'), pct = bars.querySelector('.pct'), dots = bars.querySelectorAll('.cdots > i'), tip = bars.querySelector('.tipbox');
+      const p = row.sup.progress ?? 0;
+      if (fill) { fill.style.width = p + '%'; fill.classList.toggle('mid', p > 0 && p < 66); }
+      if (pct) pct.textContent = Math.round(p) + '%';
+      const conf = row.sup.confiance == null ? null : Math.max(0, Math.min(1, row.sup.confiance));
+      const level = conf == null ? 0 : (conf < .35 ? 1 : conf < .7 ? 2 : 3);
+      const col = conf == null ? null : (conf < .35 ? '#d95f5f' : conf < .7 ? '#d19a2f' : '#2b9f6a');
+      dots.forEach((dtk, i) => {
+        if (i < level) { dtk.classList.add('on'); dtk.style.background = col ?? ''; }
+        else { dtk.classList.remove('on'); dtk.style.background = '#dcdedd'; }
+      });
+      if (tip) tip.innerHTML = conf == null ? '' : `<b>Confiance ${(conf * 100).toFixed(0)} %</b>${row.sup.note ? '<br>' + esc(row.sup.note) : ''}`;
+    }
+  }
+  // 7. donebox (Fermer)
+  let dbx = el.querySelector('.donebox');
+  if (dbx) dbx.style.display = isDone(row) ? 'flex' : 'none';
+  // 8. question form (re-render si l'ID de formulaire change; jamais sous saisie)
+  const qbox = el.querySelector('[data-form]');
+  const fid = row.pendingForms?.[0]?.id ?? null;
+  const aeF = document.activeElement;
+  const typingF = aeF instanceof HTMLElement && (aeF.tagName === 'INPUT' || aeF.tagName === 'TEXTAREA') && el.contains(aeF);
+  if (fid && !qbox) {
+    if (!typingF) {
+      el.querySelector('.bars')?.insertAdjacentHTML('afterend', questionBoxHTML(row));
+      wireForm(el.querySelector('[data-form]'), row);
+    }
+  } else if (qbox && (!fid || qbox.dataset.form !== fid)) {
+    if (!typingF) {
+      qbox.remove();
+      if (fid) { el.querySelector('.bars')?.insertAdjacentHTML('afterend', questionBoxHTML(row)); wireForm(el.querySelector('[data-form]'), row); }
+    }
+  }
+}
+
+/** câblage ONE-TIME à la création d'une carte (jamais re-wire: les listeners in-place d'applyState restent) */
+function wireAll(el, row){
+  el.querySelector('.ocbtn')?.addEventListener('click', () => open(`openchamber-ui://session/${row.id}`));
+  const composer = el.querySelector('.composer');
+  if (composer) {
+    const ta = composer.querySelector('textarea');
+    composer.querySelector('.arrowbtn')?.addEventListener('click', () => {
+      const v = ta.value.trim(); if (!v) return;
+      ta.value = ''; grow.call(ta); ta.blur();
+      composer.querySelector('.arrowbtn').classList.remove('ready');
+      fetch('/api/fleet/send', { method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ sessionId: row.id, text: v }) }).finally(refresh);
+    });
+    ta.addEventListener('focus', () => { composerFocusSid = row.id; });
+    ta.addEventListener('blur', () => { if (composerFocusSid === row.id) composerFocusSid = null; });
+    ta.addEventListener('input', () => { grow.call(ta); composer.querySelector('.arrowbtn').classList.toggle('ready', !!ta.value.trim()); });
+    ta.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      const v = ta.value.trim(); if (!v) return;
+      ta.value = ''; grow.call(ta); ta.blur();
+      composer.querySelector('.arrowbtn').classList.remove('ready');
+      fetch('/api/fleet/send', { method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ sessionId: row.id, text: v }) }).finally(refresh);
+    } });
+  }
+  const doneBtn = el.querySelector('[data-done]');
+  if (doneBtn) doneBtn.addEventListener('click', () => { doneSids.add(row.id); closeCard(row.id); });
+  const kebab = el.querySelector('[data-kebab]');
+  const menu = el.querySelector('[data-menu]');
+  if (kebab && menu) {
+    kebab.addEventListener('click', e => { e.stopPropagation(); menu.style.display = menu.style.display === 'none' ? 'block' : 'none'; });
+    menu.querySelector('[data-closecard]')?.addEventListener('click', e => {
+      e.stopPropagation(); menu.style.display = 'none'; doneSids.add(row.id); closeCard(row.id, 'fermé');
+    });
+  }
+  el.querySelector('[data-perm]')?.addEventListener('click', () => replyPerm(row.id, row.pendingPermissions?.[0]?.id ?? '', 'once'));
+  const qbox = el.querySelector('[data-form]');
+  if (qbox) wireForm(qbox, row);
+}
+
+function wireForm(qbox, row){
+  const form = row.pendingForms?.[0];
+  if (!form) return;
+  const fields = form.fields ?? [];
+  const choice = {};
+  const ftOf = k => fields.find(f => f.key === k);
+  const pack = (f, v) => (f.type === 'multiselect' ? (Array.isArray(v) ? v : [v]) : v);
+  const inpValue = k => qbox.querySelector(`[data-finput="${k}"]`)?.value.trim() ?? '';
+  const submitAll = () => {
+    try {
+      const answer = {};
+      for (const f of fields) {
+        const key = f.key ?? 'q0';
+        if (choice[key] != null) {
+          if (f.type === 'multiselect' && Array.isArray(choice[key]) && choice[key].length === 0) {
+            const v = inpValue(key); if (v) answer[key] = [v];
+          } else answer[key] = choice[key];
+        } else {
+          const v = inpValue(key);
+          if (v) answer[key] = pack(f, v);
+        }
+      }
+      if (Object.keys(answer).length) replyForm(row.id, form.id, answer);
+    } catch (e) { console.error('[submitAll]', e); }
+  };
+  qbox.querySelectorAll('[data-fgroup]').forEach(group => {
+    const key = group.dataset.fgroup;
+    const f = ftOf(key) ?? { key, type: group.dataset.ftype };
+    const isMultiType = f.type === 'multiselect';
+    group.querySelectorAll('button.opt').forEach(b => {
+      b.addEventListener('click', () => {
+        if (isMultiType) {
+          choice[key] = choice[key] ?? [];
+          const i = choice[key].indexOf(b.dataset.answer);
+          if (i >= 0) { choice[key].splice(i, 1); b.classList.remove('sel'); }
+          else { choice[key].push(b.dataset.answer); b.classList.add('sel'); }
+        } else {
+          choice[key] = b.dataset.answer;
+          group.querySelectorAll('button.opt').forEach(x => x.classList.remove('sel'));
+          b.classList.add('sel');
+        }
+      });
+    });
+    group.querySelector('input')?.addEventListener('keydown', e => { if (e.key === 'Enter') submitAll(); });
+  });
+  qbox.querySelector('[data-submit-all]')?.addEventListener('click', submitAll);
+}
+
+const doneSids = new Set();
+let lastFleet = null;
+
+function mount(fleet){
+  lastFleet = fleet;
+  const waitingRows = fleet.rows.filter(r => !doneSids.has(r.id) && (r.pendingForms?.length || r.pendingPermissions?.length));
+  const doneRows = fleet.rows.filter(r => isDone(r) && !doneSids.has(r.id));
+  const runRows = fleet.rows.filter(r => !doneSids.has(r.id) && !isDone(r) && !waitingRows.includes(r));
+  setChildrenIfChanged(sa, waitingRows.map(r => ensureCard(r, true).el));
+  setChildrenIfChanged(sd, doneRows.map(r => ensureCard(r, false).el));
+  setChildrenIfChanged(sr, runRows.map(r => ensureCard(r, false).el));
+  const ids = new Set(fleet.rows.map(r => r.id));
+  for (const sid of [...cards.keys()]) if (!ids.has(sid)) cards.delete(sid);
+  ca.textContent = String(waitingRows.length);
+  cr.textContent = String(runRows.length);
+  cd.textContent = String(doneRows.length);
+}
+/** replaceChildren déplace même les nœuds identiques → blur. On ne touche au DOM que si l'ordre change. */
+function setChildrenIfChanged(container, els){
+  const cur = Array.from(container.children);
+  if (cur.length === els.length && cur.every((n, i) => n === els[i])) return;
+  dbg('move', container.id + ' (' + els.length + ' cartes)');
+  container.replaceChildren(...els);
+}
+
+let fleetData = null;
+function tick(){
+  if (!fleetData) { liveEl.textContent = 'connexion…'; return; }
+  const age = Date.now() - fleetData.at;
+  liveEl.innerHTML = age < 8000 ? '<b>Live</b>' : 'reconnexion…';
+}
+async function refresh(){
+  try {
+    const res = await fetch('/api/fleet');
+    if (!res.ok) throw new Error(String(res.status));
+    fleetData = await res.json();
+    mount(fleetData);
+    errBox.style.display = 'none';
+  } catch (e) {
+    errBox.style.display = 'block';
+    errBox.textContent = 'daemon injoignable : ' + e;
+  }
+  tick();
+}
+if (DBG) document.getElementById('dbg').style.display = 'block';
+if (DBG) {
+  const genel = el => { const sid = el.closest('[data-sid]')?.dataset.sid ?? ''; const title = el.closest('.card')?.querySelector('.title')?.textContent?.slice(0,22) ?? '?'; return sid.slice(-6) + ' ' + title; };
+  const mo = new MutationObserver(muts => {
+    for (const mm of muts) {
+      const el = mm.target instanceof Element ? mm.target : null;
+      if (mm.attributeName === 'class' && el && el.classList.contains('card')) {
+        dbg('flap', genel(el) + (el.classList.contains('wait') ? ' [WAIT on]' : ' [wait off]'));
+      }
+    }
+  });
+  mo.observe(document.getElementById('sa'), { subtree:true, attributes:true, attributeFilter:['class'] });
+  mo.observe(document.getElementById('sr'), { subtree:true, attributes:true, attributeFilter:['class'] });
+  // contenu de .brief modifié (le flash du message attend):
+  const mox = new MutationObserver(muts => {
+    for (const mm of muts) {
+      const el = mm.target instanceof Element ? el0(mm.target) : null;
+      if (el && el.classList.contains('kit')) dbg('briefflip', genel(el) + ' ▶ ' + el.textContent.slice(0,40));
+    }
+  });
+  const el0 = el => el;
+  mox.observe(document.getElementById('sr'), { subtree:true, characterData:true });
+}
+refresh();
+setInterval(refresh, 3000);        // filet de sécurité : normalement le stream SSE pousse en continu
+function connectStream(){
+  try {
+    const es = new EventSource('/api/fleet/stream');
+    es.onmessage = ev => { fleetData = JSON.parse(ev.data); mount(fleetData); tick(); };
+  } catch { /* le poll 3 s reste le filet */ }
+}
+connectStream();
+// un seul listener global : tout clic ailleurs referme les menus ouverts sur la page
+document.addEventListener('click', () => {
+  document.querySelectorAll('[data-menu]').forEach(m => { m.style.display = 'none'; });
+});
+</script>
+
+</body>
+</html>

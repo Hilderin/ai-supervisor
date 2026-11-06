@@ -1,0 +1,61 @@
+@import "tailwindcss";
+
+/*
+ * Jetons visuels de la maquette validée (ui/reference/flotte-vanilla.html).
+ * Les composants n'utilisent que ces jetons pour rester pixel-identiques.
+ */
+@theme {
+  --font-sans: -apple-system, "Segoe UI", sans-serif;
+
+  --color-bg: #f4f5f4;
+  --color-card: #ffffff;
+  --color-border: #e4e7e4;
+  --color-text: #1d211e;
+  --color-muted: #7c847d;
+  --color-green: #2b9f6a;
+  --color-green-soft: #e3f2ea;
+  --color-orange: #d97a2b;
+  --color-orange-soft: #faeadf;
+  --color-amber: #d19a2f;
+  --color-danger: #d95f5f;
+  --color-wait: #fffaf3;
+  --color-wait-border: #eec89a;
+  --color-track: #eceeed;
+  --color-dot-off: #dcdedd;
+  --color-placeholder: #a5aca5;
+  --color-hover: #f0f2f0;
+  --color-ink: #20241f;
+  --color-attend: #b35c17;
+  --color-arrow: #b6bcb6;
+
+  --animate-dot-spin: dot-spin 0.9s linear infinite;
+  --animate-dot-blink: dot-blink 1.5s infinite;
+
+  @keyframes dot-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  @keyframes dot-blink {
+    50% {
+      opacity: 0.35;
+    }
+  }
+}
+
+@layer base {
+  html {
+    background-color: var(--color-bg);
+  }
+
+  body {
+    background-color: var(--color-bg);
+    color: var(--color-text);
+    font-family: var(--font-sans);
+    font-size: 14.5px;
+    /* la maquette n'a pas de line-height global : Tailwind met 1.5, on rétablit normal */
+    line-height: normal;
+    padding: 20px 26px;
+  }
+}
