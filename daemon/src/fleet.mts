@@ -59,13 +59,15 @@ function buildFleet(status: StatusPayload): Fleet {
   let concern: string | null = null;
   for (const [id, s] of Object.entries(status.sessions ?? {})) {
     const meta = sessionsIndex.get(id);
+    // fantômes : id connu du statut mais absent de l'annuaire (session supprimée) → on n'affiche pas
+    if (!meta) continue;
     // les sous-sessions/sous-agents (parentID) ne sont pas des tâches de flotte
-    if (meta?.parentID) continue;
+    if (meta.parentID) continue;
     const pendingForms = (status.pending?.[id]?.forms ?? []).filter(f => f?.metadata?.kind === 'question');
     const pendingPermissions = status.pending?.[id]?.permissions ?? [];
     const row: FleetRow = {
       id,
-      title: meta?.title ?? id.slice(0, 18),
+      title: meta.title ?? id.slice(0, 18),
       status: s.status,
       turnStartedAt: s.turnStartedAt,
       lastUpdateAt: s.lastUpdateAt,
@@ -101,6 +103,15 @@ export async function pollOnce(): Promise<void> {
     ]);
     if (Array.isArray(sessions?.data)) {
       sessionsIndex = new Map(sessions.data.map(s => [s.id, s]));
+    }
+    // un id inconnu de l'annuaire ? (fantôme du statut, ou session trop récente pour
+    // l'annuaire du cycle — 15 s) on re-tire l'annuaire immédiatement avant de bâtir.
+    const unknown = Object.keys(status.sessions ?? {}).some(id => !sessionsIndex.has(id));
+    if (unknown) {
+      try {
+        const fresh = await jget('/api/session') as { data?: OpenchamberSession[] };
+        if (Array.isArray(fresh?.data)) sessionsIndex = new Map(fresh.data.map(s => [s.id, s]));
+      } catch { /* garde l'ancien annuaire */ }
     }
     cachedFleet = buildFleet(status);
     lastGood = Date.now();
