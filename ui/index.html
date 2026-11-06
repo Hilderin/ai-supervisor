@@ -43,6 +43,8 @@
   .fill { height:100%; background:var(--green); transition:width .5s; display:block; }
   .fill.mid { background:var(--amber); }
   .cdot { width:7px; height:7px; border-radius:50%; flex-shrink:0; opacity:.85; }
+  .cdots { display:flex; gap:3px; align-items:center; flex-shrink:0; }
+  .cdots i { width:7px; height:7px; height:7px; border-radius:50%; background:#dcdedd; display:block; }
   .pct { font-size:11px; font-weight:650; width:34px; text-align:right; font-variant-numeric:tabular-nums; }
   .qbox { margin-top:10px; padding-top:10px; border-top:1px solid var(--border); }
   .qtext { font-size:13px; line-height:1.45; margin-bottom:8px; }
@@ -130,10 +132,16 @@ function cardHTML(row, waiting){
   let bars = '';
   if (row.sup && (row.sup.progress != null || row.sup.confiance != null)) {
     const pct = row.sup.progress ?? null;
-    const conf = row.sup.confiance == null ? null : (row.sup.confiance < .35 ? '#d95f5f' : row.sup.confiance < .7 ? '#d19a2f' : '#2b9f6a');
+    const conf = row.sup.confiance == null ? null : Math.max(0, Math.min(1, row.sup.confiance));
+    const level = conf == null ? 0 : (conf < .35 ? 1 : conf < .7 ? 2 : 3);
+    const col = conf == null ? null : (conf < .35 ? '#d95f5f' : conf < .7 ? '#d19a2f' : '#2b9f6a');
+    const note = row.sup.note ? ` — ${esc(row.sup.note)}` : '';
+    const confIcons = conf == null ? '' :
+      `<span class="cdots" title="Confiance ${(conf*100).toFixed(0)}%${note}">` +
+      [1,2,3].map(i => `<i${i <= level ? ` class="on" style="background:${col}"` : ''}></i>`).join('') +
+      `</span>`;
     bars = `<div class="bars"><span class="track"><span class="fill${pct != null && pct < 66 && pct > 0 ? ' mid' : ''}" style="width:${pct ?? 0}%"></span></span>` +
-      `${conf ? `<span class="cdot" style="background:${conf}" title="Confiance du compagnon"></span>` : ''}` +
-      `${pct != null ? `<span class="pct">${Math.round(pct)}%</span>` : ''}</div>`;
+      `${confIcons}${pct != null ? `<span class="pct">${Math.round(pct)}%</span>` : ''}</div>`;
   }
   const done = row.sup?.termine
     ? `<div class="donebox"><span style="flex:1"></span><button class="bin" data-done="1">Archiver</button></div>` : '';
@@ -241,6 +249,7 @@ function wireCard(el, row){
   });
   const qbox = el.querySelector('[data-form]');
   if (qbox) wireForm(qbox, row);
+  const doneBtn = el.querySelector('[data-done]');
   const close = () => {
     fetch('/api/fleet/done', { method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ sessionId: row.id, closure: 'terminé' }) }).finally(refresh);
@@ -297,6 +306,7 @@ function wireForm(qbox, row){
 }
 
 const doneSids = new Set();
+let lastFleet = null;
 
 function mount(fleet){
   lastFleet = fleet;

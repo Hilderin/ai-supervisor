@@ -39,23 +39,26 @@ CREATE TABLE IF NOT EXISTS task_verdict (
   progress INTEGER,
   termine INTEGER,
   attend TEXT,
+  note TEXT,
   at INTEGER
 );
+CREATE INDEX IF NOT EXISTS idx_task_verdict_at ON task_verdict(at);
 CREATE TABLE IF NOT EXISTS companion_map (
   parent_session_id TEXT PRIMARY KEY,
   companion_session_id TEXT NOT NULL,
   created_at INTEGER NOT NULL
 );`);
+try { db.exec('ALTER TABLE task_verdict ADD COLUMN note TEXT'); } catch { /* colonne déjà présente (base existante) */ }
 
 export function getVerdict(sessionId: string) {
   return db.query('SELECT * FROM task_verdict WHERE session_id = ?').get(sessionId) ?? null;
 }
-export function upsertVerdict(sessionId: string, v: { resume?: string; termine?: boolean; confiance?: number; progress?: number; attend?: string }) {
-  db.query(`INSERT INTO task_verdict (session_id, resume, confiance, progress, termine, attend, at)
-            VALUES (?,?,?,?,?,?,?)
+export function upsertVerdict(sessionId: string, v: { resume?: string; termine?: boolean; confiance?: number; progress?: number; attend?: string; note?: string }) {
+  db.query(`INSERT INTO task_verdict (session_id, resume, confiance, progress, termine, attend, note, at)
+            VALUES (?,?,?,?,?,?,?,?)
             ON CONFLICT(session_id) DO UPDATE SET resume=excluded.resume, confiance=excluded.confiance,
-              progress=excluded.progress, termine=excluded.termine, attend=excluded.attend, at=excluded.at`)
-    .run(sessionId, v.resume ?? null, v.confiance ?? null, v.progress ?? null, v.termine ? 1 : 0, v.attend ?? null, Date.now());
+              progress=excluded.progress, termine=excluded.termine, attend=excluded.attend, note=excluded.note, at=excluded.at`)
+    .run(sessionId, v.resume ?? null, v.confiance ?? null, v.progress ?? null, v.termine ? 1 : 0, v.attend ?? null, v.note ?? null, Date.now());
 }
 
 export function getCompanion(parentSid: string): string | null {

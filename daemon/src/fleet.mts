@@ -18,9 +18,9 @@ export interface OpenchamberSession {
 import { companionTick, verdictOf } from './companion.mts';
 
 function supOf(id: string): Verdict | undefined {
-  const v = verdictOf(id) as { resume?: string; confiance?: number; progress?: number; termine?: number; attend?: string; at?: number } | null;
+  const v = verdictOf(id) as { resume?: string; confiance?: number; progress?: number; termine?: number; attend?: string; note?: string; at?: number } | null;
   if (!v) return undefined;
-  return { resume: v.resume ?? undefined, confiance: v.confiance ?? undefined, progress: v.progress ?? undefined, termine: !!v.termine, attend: v.attend ?? undefined, at: v.at ?? undefined };
+  return { resume: v.resume ?? undefined, confiance: v.confiance ?? undefined, progress: v.progress ?? undefined, termine: !!v.termine, attend: v.attend ?? undefined, note: v.note ?? undefined, at: v.at ?? undefined };
 }
 export interface PendingForm {
   id: string; sessionID: string; title?: string;
@@ -36,7 +36,7 @@ export interface FleetRow {
   pendingForms: PendingForm[]; pendingPermissions: unknown[];
 }
 export interface Verdict {
-  resume?: string; confiance?: number; progress?: number; termine?: boolean; attend?: string; at?: number;
+  resume?: string; confiance?: number; progress?: number; termine?: boolean; attend?: string; note?: string; at?: number;
 }
 export interface Fleet {
   at: number; rows: FleetRow[]; concern: string | null;

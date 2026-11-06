@@ -124,6 +124,7 @@ function parseVerdict(text: string): { resume?: string; termine?: boolean; confi
     const confiance = pick('confidence', 'confiance');
     const progress = pick('progress', 'progrès', 'avancement');
     const attend = pick('pending_human', 'attend', 'attente');
+    const note = pick('confidence_note', 'confidence_why', 'note');
     if (typeof resume !== 'string') return null;
     return {
       resume: String(resume).slice(0, 300),
@@ -131,6 +132,7 @@ function parseVerdict(text: string): { resume?: string; termine?: boolean; confi
       confiance: Math.max(0, Math.min(1, Number(confiance) || 0)),
       progress: Math.max(0, Math.min(100, Number(progress) || 0)),
       attend: typeof attend === 'string' ? attend.slice(0, 160) : '',
+      note: typeof note === 'string' ? note.slice(0, 160) : '',
     };
   } catch { return null; }
 }
@@ -177,8 +179,10 @@ export function companionTick(sessions: OpenchamberSession[], statusMap: Record<
     const stt = statusMap[sess.id];
     if (!stt) continue;
     const s = get(sess.id);
+    const verdict = verdictOf(sess.id) as { note?: string } | null;
     const due = stt.status === 'idle'
-      || (stt.status === 'busy' && (s.lastRunAt ?? 0) < Date.now() - PERIOD_MS);
+      || (stt.status === 'busy' && (s.lastRunAt ?? 0) < Date.now() - PERIOD_MS)
+      || (!!verdict && !verdict.note && (s.lastRunAt ?? 0) < Date.now() - 60_000);
     if (s.inFlight || !due) continue;
     void analyseOnce(sess.id, sess.title ?? sess.id.slice(0, 12), sess.location?.directory, stt.status);
   }
