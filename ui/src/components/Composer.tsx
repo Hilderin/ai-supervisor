@@ -5,16 +5,10 @@ import { INPUT } from '../lib/ui';
 import { useFleetStore } from '../store/fleetStore';
 import { SendIcon } from './Icons';
 
-interface Props {
-  sessionId: string;
-  /** variante carte : une ligne fixe, sans auto-grow, pour ne jamais déplacer les voisines */
-  compact?: boolean;
-}
-
 const MAX_HEIGHT = 120;
 
-/** Composer auto-grow (inspecteur) ou compact d'une ligne (carte) : Enter envoie. */
-export function Composer({ sessionId, compact = false }: Props) {
+/** Composer du détail : auto-grow (plafond 120 px), Entrée envoie. */
+export function Composer({ sessionId }: { sessionId: string }) {
   const text = useFleetStore((s) => s.drafts[sessionId] ?? '');
   const setDraft = useFleetStore((s) => s.setDraft);
   const clearDraft = useFleetStore((s) => s.clearDraft);
@@ -23,7 +17,6 @@ export function Composer({ sessionId, compact = false }: Props) {
   const [atMax, setAtMax] = useState(false);
 
   useLayoutEffect(() => {
-    if (compact) return;
     const ta = ref.current;
     if (!ta) return;
     // au premier rendu à vide, laisser la hauteur auto (comme la maquette) ;
@@ -33,7 +26,7 @@ export function Composer({ sessionId, compact = false }: Props) {
     setAtMax(isMax);
     ta.style.height = 'auto';
     ta.style.height = `${isMax ? MAX_HEIGHT : ta.scrollHeight + 1}px`;
-  }, [text, compact]);
+  }, [text]);
 
   const send = () => {
     const value = text.trim();
@@ -48,11 +41,7 @@ export function Composer({ sessionId, compact = false }: Props) {
       data-composer
       onClick={(e) => e.stopPropagation()}
       onPointerDown={(e) => e.stopPropagation()}
-      className={
-        compact
-          ? 'flex h-[34px] items-center gap-[7px] border-t border-border pt-[5px]'
-          : 'mt-[12px] flex items-end gap-[7px] border-t border-border pt-[10px]'
-      }
+      className="mt-[12px] flex items-end gap-[7px] border-t border-border pt-[10px]"
     >
       <textarea
         ref={ref}
@@ -69,15 +58,11 @@ export function Composer({ sessionId, compact = false }: Props) {
             send();
           }
         }}
-        className={
-          compact
-            ? 'h-[26px] min-w-0 flex-1 resize-none overflow-y-auto rounded-[6px] border border-border bg-white px-[8px] py-[3px] font-[inherit] text-[13px] leading-[1.35] text-text outline-none placeholder:text-placeholder focus:border-[#c9cfc9]'
-            : cx(
-                INPUT,
-                'max-h-[120px] flex-1 resize-none text-[14px] leading-[1.45] focus:border-[#c9cfc9]',
-                atMax ? 'overflow-y-auto' : 'overflow-y-hidden',
-              )
-        }
+        className={cx(
+          INPUT,
+          'max-h-[120px] flex-1 resize-none text-[14px] leading-[1.45] focus:border-[#c9cfc9]',
+          atMax ? 'overflow-y-auto' : 'overflow-y-hidden',
+        )}
       />
       <button
         type="button"

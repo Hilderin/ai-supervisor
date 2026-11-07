@@ -8,7 +8,6 @@ import { BUSY_BRIEF, briefRow, isStaleTurn, planLabel } from '../lib/fleet';
 import { useFleetStore } from '../store/fleetStore';
 import type { FleetRow } from '../types';
 import { CardStateIcon } from './CardStateIcon';
-import { Composer } from './Composer';
 import { ConfidenceDots } from './ConfidenceDots';
 import { DeliveryBlock } from './DeliveryBlock';
 import { CloseConversationIcon, OpenChamberIcon } from './Icons';
@@ -27,8 +26,9 @@ const CARD_BTN =
   'flex h-[24px] shrink-0 cursor-pointer items-center justify-center rounded-[6px] px-[9px] text-[11.5px] font-semibold';
 
 /**
- * Carte à hauteur fixe. Toutes les zones sont réservées dans tous les états :
- * l'état ne change que l'icône, le contenu interne et l'action du pied.
+ * Carte à hauteur fixe, sans composer : l'écriture à une tâche passe par le
+ * détail. Toutes les zones sont réservées dans tous les états : l'état ne
+ * change que l'icône, le contenu interne et l'action du pied.
  */
 export function SessionCard({ row, state, selected, flash, now, onOpen }: Props) {
   const closeSession = useFleetStore((s) => s.closeSession);
@@ -154,7 +154,7 @@ export function SessionCard({ row, state, selected, flash, now, onOpen }: Props)
         }
       }}
       className={cx(
-        'relative grid h-[232px] w-full min-w-0 cursor-pointer grid-cols-1 grid-rows-[24px_minmax(0,1fr)_34px_30px] gap-[8px] overflow-hidden rounded-[11px] border px-[13px] pb-[10px] pt-[11px] outline-none',
+        'relative grid h-[190px] w-full min-w-0 cursor-pointer grid-cols-1 grid-rows-[24px_minmax(0,1fr)_30px] gap-[8px] overflow-hidden rounded-[11px] border px-[13px] pb-[10px] pt-[11px] outline-none',
         waiting ? 'border-wait-border border-l-[3px] border-l-orange bg-wait' : 'border-border bg-card',
         flash ? 'ring-2 ring-inset ring-orange/60' : selected ? 'ring-2 ring-inset ring-green/40' : '',
       )}
@@ -207,14 +207,6 @@ export function SessionCard({ row, state, selected, flash, now, onOpen }: Props)
             {detail}
           </div>
         ) : null}
-      </div>
-
-      <div
-        className="min-h-0 min-w-0"
-        onClick={(e) => e.stopPropagation()}
-        onPointerDown={(e) => e.stopPropagation()}
-      >
-        <Composer sessionId={row.id} compact />
       </div>
 
       <div
@@ -283,7 +275,7 @@ export function SessionCard({ row, state, selected, flash, now, onOpen }: Props)
       </div>
 
       {closeError ? (
-        <div className="absolute inset-x-[13px] bottom-[46px] z-20 rounded-[6px] border border-border bg-white px-[8px] py-[4px] text-[11px] text-danger shadow">
+        <div className="absolute inset-x-[13px] bottom-[40px] z-20 rounded-[6px] border border-border bg-white px-[8px] py-[4px] text-[11px] text-danger shadow">
           {closeError}
         </div>
       ) : null}

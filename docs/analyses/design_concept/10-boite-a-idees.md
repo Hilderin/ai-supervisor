@@ -13,17 +13,24 @@ Les sections ci-dessous sont dans cet ordre.
 | 1 | Le superviseur fixe l'objectif, et peut stopper ou rediriger un agent qui dérape | Protège du travail qui part dans la mauvaise direction, né d'un cas réel : c'est la raison d'être du Superviseur (porter l'attention) | moyen |
 | 2 | Ordre des cartes figé : les nouvelles en bas, rien ne bouge sous le curseur | L'instabilité de l'écran empêche de lire la flotte pendant qu'on travaille ; bénéfice quotidien pour un coût faible | faible |
 | 3 | Une ligne « action en cours » : ce que l'agent fait vraiment, tout de suite | Répond au doute « est-ce que ça avance ? » dès les premières secondes, sans attendre l'analyse du compagnon | faible à moyen |
-| 4 | Envoyer des instructions pendant qu'une tâche travaille | Capacité de pilotage centrale (queue, direct, fork, btw), mais dépend de ce que l'API permet réellement | moyen à élevé |
-| 5 | Objectif courant affiché sur la carte, en plus du résumé | Complète les rangs 1 et 3 : savoir où va la carte, pas seulement ce qu'elle fait ; un champ à ajouter | faible |
-| 6 | Numéroter les tâches, avec un préfixe par projet | Une référence stable pour suivre et désigner une tâche (« reprends la 42 ») alors que le titre change ; peu coûteux et utile partout (carte, chat, notifications) | faible |
-| 7 | Notifications desktop + badge d'attention sur l'icône | Le Superviseur doit venir vers l'utilisateur quand il n'est pas devant ; sans ça, tout le reste suppose l'œil sur la fenêtre | moyen |
-| 8 | Chemins de fichiers et URL cliquables dans les résultats | Aller du résultat au fichier sans copier-coller ; s'appuie sur le rendu existant de la livraison et sur `/api/fleet/asset` | faible à moyen |
-| 9 | Pinner des conversations / indiquer une priorité | Triage quand la flotte grossit ; secondaire tant que l'ordre des cartes n'est pas stabilisé | faible à moyen |
-| 10 | Always on top + une UI qui tient dans un coin | Définit le mode d'usage (patch d'écran) ; à faire une fois les signaux essentiels arrêtés | moyen |
-| 11 | Date et heure de la dernière activité sur une conversation | Petit signal complémentaire (session vivante ou morte), peu coûteux, non bloquant | faible |
-| 12 | Un chat permanent, à droite ? (le « poste de commandement » conversationnel) | Gros pari d'architecture, à trancher après les signaux de base : il peut réorienter toute l'UI | élevé |
-| 13 | Markdown dans l'affichage (hors livraison) | Lisibilité de ce qu'écrivent les agents partout (brief, questions, tooltips), pour un coût faible ; c'est du confort, pas du pilotage | faible |
-| 14 | Un petit bouton config dans la conversation | Confort (modèle et agent à chaud), le plus simple ; n'a d'intérêt qu'une fois le pilotage en place | faible |
+| 4 | Voir une erreur de session sur la carte (et le retry qui suit) | Un tour qui échoue et réessaie ressemble à un tour qui avance : sans signal, on confond erreur et lenteur ; l'événement d'échec arrive déjà au daemon, il est simplement jeté | faible à moyen |
+| 5 | Envoyer des instructions pendant qu'une tâche travaille | Capacité de pilotage centrale (queue, direct, fork, btw), mais dépend de ce que l'API permet réellement | moyen à élevé |
+| 6 | Un tool « dire à l'utilisateur » : informer sans arrêter le travail | Complète le canal utilisateur → tâche (rang 5) par le sens inverse : la tâche peut répondre ou signaler au fil du tour, sans tour ni question bloquante ; le récepteur existe déjà (le chat sait afficher), c'est la sortie qui manque | faible à moyen |
+| 7 | Mettre à jour une étape du plan sans réécrire la liste | Répare un signal déjà affiché qui ment : la barre reste vide puis saute à 100 % ; une barre fausse coûte plus qu'une ligne absente | moyen |
+| 8 | Objectif courant affiché sur la carte, en plus du résumé | Complète les rangs 1 et 3 : savoir où va la carte, pas seulement ce qu'elle fait ; un champ à ajouter | faible |
+| 9 | Numéroter les tâches, avec un préfixe par projet | Une référence stable pour suivre et désigner une tâche (« reprends la 42 ») alors que le titre change ; peu coûteux et utile partout (carte, chat, notifications) | faible |
+| 10 | Notifications desktop + badge d'attention sur l'icône | Le Superviseur doit venir vers l'utilisateur quand il n'est pas devant ; sans ça, tout le reste suppose l'œil sur la fenêtre | moyen |
+| 11 | Chemins de fichiers et URL cliquables dans les résultats | Aller du résultat au fichier sans copier-coller ; s'appuie sur le rendu existant de la livraison et sur `/api/fleet/asset` | faible à moyen |
+| 12 | Pinner des conversations / indiquer une priorité | Triage quand la flotte grossit ; secondaire tant que l'ordre des cartes n'est pas stabilisé | faible à moyen |
+| 13 | Always on top + une UI qui tient dans un coin | Définit le mode d'usage (patch d'écran) ; à faire une fois les signaux essentiels arrêtés | moyen |
+| 14 | Date et heure de la dernière activité sur une conversation | Petit signal complémentaire (session vivante ou morte), peu coûteux, non bloquant | faible |
+| 15 | Un chat permanent, à droite ? (le « poste de commandement » conversationnel) | Gros pari d'architecture, à trancher après les signaux de base : il peut réorienter toute l'UI | élevé |
+| 16 | Markdown dans l'affichage (hors livraison) | Lisibilité de ce qu'écrivent les agents partout (brief, questions, tooltips), pour un coût faible ; c'est du confort, pas du pilotage | faible |
+| 17 | Un petit bouton config dans la conversation | Confort (modèle et agent à chaud), le plus simple ; n'a d'intérêt qu'une fois le pilotage en place | faible |
+| 18 | Changer de modèle facilement : dans le chat et pour les tâches | Le modèle est un levier de coût et de qualité invisible aujourd'hui ; le paramètre existe déjà côté outil, il manque le geste et une UI courte | faible à moyen |
+| 19 | Coller des images dans le chat et les cartes | Le presse-papiers est le chemin le plus court pour montrer une maquette, une erreur ou un rendu cassé ; confort réel, mais secondaire face au pilotage | faible à moyen |
+
+État au 2026-11-07 : rangs 2, 7 et 15 faits ; rang 3 couvert autrement (étape courante du plan). Ces idées restent listées avec leur note de clôture ; les autres sont ouvertes.
 
 ## Idées
 
@@ -62,6 +69,8 @@ Sous-question soulevée le même jour, à trancher : **faut-il supprimer les sec
 - interaction avec la liste fermée (`closed`) et avec le filtre des sessions enfant : un retrait ne doit pas faire glisser toutes les cartes vers le haut ;
 - cohérence SSE / GET : l'ordre figé doit être porté par un état persistant de l'UI, sinon chaque snapshot reconstruit depuis `fleet.rows` réintroduit le tri du daemon.
 
+> Fait le 2026-11-07 : l'ordre vit côté UI (`ui/src/lib/order.ts`, persisté sous `superviseur.fleet.order.v1`, avec une grâce de 2 min pour une disparition brève), un changement d'état ne déplace plus une carte et les nouvelles prennent le rang suivant. Les sections sont conservées.
+
 ### Une ligne « action en cours » : ce que l'agent fait vraiment, tout de suite
 
 Discussion du 6 nov : au démarrage d'un tour, il se passe un moment avant que la carte ne montre qu'il avance. Le compagnon n'analyse qu'à idle + 5 min, et un tour qui commence par des tool calls n'a pas encore de texte ; en attendant, la carte affiche « Réflexion en cours… » (cas `isStaleTurn`) ou le résumé du tour précédent, et on ne sait pas si la tâche démarre, patine ou est déjà partie ailleurs.
@@ -84,6 +93,31 @@ Constat sur le code actuel :
 
 Lien : états et signaux du doc 03, idée « objectif courant affiché sur la carte » (plus bas) : même emplacement, même souci de ne pas transformer la carte en mur de texte.
 
+> Fait autrement le 2026-11-07 : pas de ligne de tool call. Le plan est toujours présent (`todowrite`), et la carte affiche l'étape courante (`Étape : <texte>`, l'étape `in_progress`, à défaut la première `pending`, dans `SessionCard.tsx`) : le doute « est-ce que ça avance ? » est couvert par la progression du plan, et la piste du dernier tool call n'est pas retenue.
+
+### Voir une erreur de session sur la carte (et le retry qui suit)
+
+Discussion du 7 nov : quand une requête au LLM échoue, OpenChamber va réessayer tout seul, mais le Superviseur n'affiche rien : la carte reste « en cours », avec son brief habituel. Une tâche qui réessaie ressemble à une tâche qui travaille ; on ne sait ni qu'un problème existe, ni s'il faut intervenir (stopper, relancer), ni quand la prochaine tentative aura lieu.
+
+Demande : un état d'erreur distinct de « en cours » au niveau de la carte (et du chat) : une mention courte, visible d'un coup d'œil (« erreur, nouvelle tentative »), et le détail en tooltip (message, numéro de tentative, temps restant si OpenChamber l'annonce).
+
+Constat sur le code actuel :
+
+- l'événement SSE `session.execution.failed` arrive déjà au daemon, mais ne sert qu'à fermer le cycle du compagnon (`daemon/src/kicks.mts`) : l'échec n'est jamais retenu pour la flotte ;
+- `FleetRow` n'a pas de champ d'erreur : la carte n'a rien à afficher tant que la ligne de flotte ne porte pas l'info ;
+- les deux états d'erreur du chat (`sendError`, `refreshError`) parlent du superviseur lui-même, pas des tâches qu'il surveille.
+
+À creuser avant d'implémenter :
+
+- **ce que l'événement expose** : le payload de `session.execution.failed` (message, code), et si OpenChamber annonce ses tentatives et leur programmation quelque part ; s'il n'expose rien, commencer par « le dernier tour a échoué », sans prétendre connaître le plan de retry ;
+- **états** : une mention sur la carte existante plutôt qu'une quatrième section ; l'erreur peut toucher une carte « en cours » comme une carte au repos (le tour a échoué, la session est idle en attente du retry) ;
+- **faux signal de réflexion** : un tour en retry ne produit pas de tool call, donc la carte passe vite en « Réflexion en cours… » ; la mention d'erreur doit remplacer ce faux plutôt que cohabiter ;
+- **fin du retry** : quand la reprise réussit, la carte revient à l'état normal sans bandeau résiduel ; en cas d'échec répété, épaisser la mention plutôt que la répéter à l'identique ;
+- **anti-flicker** : l'état change plus souvent que done/running ; le garder hors du sig pendant ses oscillations, ou le passer à l'hystérésis de `placement.ts` ;
+- **sortie** : l'erreur est le moment où le superviseur veut agir ; lier la mention aux gestes du rang 1 (stop, message direct) pour éviter un signal sans action.
+
+Lien : idée « une ligne action en cours » (la ligne peut porter la mention quand il n'y a pas de tool call), doc 03 (états et signaux), leçons sig et hystérésis dans `ui/src/lib/placement.ts`.
+
 ### Envoyer des instructions pendant qu'une tâche travaille
 
 Comme le fait OpenChamber : pouvoir envoyer un message à une session **même quand sa tâche est en cours d'exécution**, sans attendre qu'elle se termine ou qu'elle pose une question.
@@ -101,6 +135,62 @@ Implications à creuser :
 - Comment représenter la file d'attente d'une session (les messages en attente sont-ils visibles ? annulables ? réordonnables ?).
 - Ce que l'API OpenCode server / OpenChamber permet réellement pour injecter un message dans une session active (voir doc 05).
 - Lien avec le concept de « débloquer » du doc 04 : le send direct est le cas général de « répondre à une question bloquante ».
+
+### Un tool « dire à l'utilisateur » : informer sans arrêter le travail
+
+Discussion du 7 nov : pour informer l'utilisateur, une tâche n'a que la question bloquante (le tool question, qui met la carte en attente d'un choix) ou le texte final de son tour (la livraison). Si l'utilisateur pose une question pendant un tour, la réponse attend la fin du travail ; si l'agent découvre quelque chose d'utile en route, il doit soit interrompre son ordre de priorité pour en parler, soit attendre d'avoir terminé. Un tool léger, un aparté, remplirait le trou : répondre ou signaler une information utile sans arrêter le travail.
+
+Demande : un tool disponible dans les sessions de travail qui pousse une information courte vers le superviseur : un aparté sur la carte (« la tâche dit : ... ») et un message dans le chat du superviseur, sans créer de tour, sans bloquer, et sans toucher au plan.
+
+Constat sur le code actuel :
+
+- les sorties existantes : le texte final (livraison, en fin de tour), le tool question (bloquant, attend un choix humain), ou l'analyse du compagnon (différée, idle puis 5 min) : rien entre les deux ;
+- le daemon lit déjà les tool parts des messages de la session de travail (le plan vient du part `todowrite`, `daemon/src/todos.mts`) : un tool part « dire » peut être lu de la même façon, sans nouveau réseau ni authentification ;
+- le plugin global SuperviseurTodoList (`daemon/plugin/superviseur-todolist`, référencé dans `opencode.jsonc`) est le précédent pour outiller toutes les sessions de tâches avec des tools directs (sans codemode) ;
+- le sens inverse existe : le chat sait envoyer à une tâche pendant son tour (mode file, message-queue) ; il n'y a juste pas de trace d'un mode où l'agent répond sans tour.
+
+À creuser avant d'implémenter :
+
+- **nom et charge** : un aparté par information, texte court (une à trois phrases, markdown inline au plus) ; un aparté n'est pas un log d'exécution ;
+- **chemin de lecture** : tool part lu passivement par le daemon (gratuit, résiste à l'indisponibilité de l'instance) contre un POST du plugin vers le daemon (temps réel, mais auth et réseau) ; commencer passif : quelques secondes de latence de poll suffisent ;
+- **affichage** : aparté d'une ligne sur la carte (les derniers d'abord, dans le sig de la carte) et message « la tâche X dit » dans le chat ; la livraison reste le résultat du tour, l'aparté reste l'information en route ;
+- **pas de retour** : l'aparté ne doit jamais repartir dans la session (ni file d'attente, ni direct), sinon chaque aparté crée un tour ; écriture hors session, comme les métadonnées ;
+- **anti-spam** : une limite d'apartés par tour (2 ou 3) et un clamp sur la carte, sinon le canal devient un mur ; l'historique complet reste lisible dans le chat ;
+- **prompt** : une consigne courte dans les agents (signaler par aparté quand l'information n'a pas besoin de réponse), le tool question restant réservé aux véritables choix ;
+- **relation avec l'analyse** : le compagnon reformule après coup ; donner l'aparté en matière première plutôt que de répéter son contenu en double dans le résumé.
+
+Lien : idée « envoyer des instructions pendant qu'une tâche travaille » (l'autre sens du canal, les modes d'envoi), leçon « Livraison inline » dans `AGENTS.md` (le dernier texte assistant n'est pas la réponse), doc [mvp1/chat-superviseur.md](../mvp1/chat-superviseur.md), `daemon/src/todos.mts` pour la lecture des tool parts.
+
+### Mettre à jour une étape du plan sans réécrire toute la liste
+
+Discussion du 6 nov : la progression d'une carte est calculée depuis le dernier `todowrite` de la session de travail. Or cet outil remplace la liste entière : pour cocher une étape, le modèle doit recopier toutes les autres. Le geste est cher, donc les modèles le repoussent et n'écrivent le plan qu'une fois le travail fini : la barre reste vide pendant le tour, puis saute à 100 %.
+
+Ce n'est pas un oubli de consigne : le prompt de démarrage dit déjà « marque `in_progress` quand tu commences une étape et `completed` quand elle est finie », mais dans la même phrase que « Remplace la liste complète à chaque changement ». La consigne et l'outil se contredisent, et c'est l'outil qui gagne.
+
+Demande, en deux volets :
+
+- **un outil d'update partiel** : passer l'étape (index ou id) et son nouvel état, sans renvoyer la liste ; la liste stockée reste l'unique source, l'outil la modifie sur place ;
+- **un prompt cohérent** : garder la mise à jour au fil de l'eau, retirer l'obligation de tout réécrire, et dire qu'une étape se marque `in_progress` avant d'être commencée, pas après.
+
+Constat sur le code actuel :
+
+- le plugin vit dans un dépôt séparé (`OpenCodeTodoList/opencode-plugin`) et n'expose que `todowrite` (remplacement complet) et `todoread` ;
+- `daemon/src/todos.mts` ne reconnaît que le nom `todowrite` (`isTodoTool`) : un nouvel outil doit y être lu aussi, sinon la barre reste vide malgré les mises à jour ;
+- le daemon garde le dernier événement d'une fenêtre de 80 messages : le contrat « dernier plan connu » doit survivre à deux noms d'outils ;
+- `composePrompt` (`daemon/src/tools.mts`) porte déjà la consigne de progression, couplée à « remplace la liste complète ».
+
+À creuser avant d'implémenter :
+
+- **contrat de l'outil** : index stable ou id d'étape ? Un index se décale dès qu'une étape est insérée ou supprimée ; un id oblige à le stocker et à le rendre à la lecture ;
+- **métadonnées** : le tool part `todoupdate` doit exposer la liste complète résultante (`state.metadata.todos`), pour que le daemon n'ait pas à rejouer un état partiel et garde sa règle « plan identique, progression qui ne baisse pas » ;
+- **compatibilité** : garder `todowrite` pour créer ou remplacer un plan, ajouter `todoupdate` pour les changements d'état ; les sessions en cours et l'historique restent lisibles ;
+- **coût d'appel** : l'update partiel doit être visiblement moins cher qu'un `todowrite` complet, sinon le modèle revient à l'ancien geste ;
+- **erreur lisible** : un index ou un id inconnu produit une erreur explicite, pas un plan inchangé ;
+- **petites tâches** : ne pas transformer chaque tour en cérémonie ; le plan reste de 3 à 6 étapes, et rien à afficher quand il n'y a pas de plan.
+
+Lien : idée « une ligne action en cours » (même besoin de signal à chaud), leçon « Todo list de tâche » dans `AGENTS.md`, `daemon/src/todos.mts` pour la lecture, `daemon/src/tools.mts` pour le prompt.
+
+> Fait le 2026-11-07, sous le nom **SuperviseurTodoList** (`daemon/plugin/superviseur-todolist`, référencé dans `~/.config/opencode/opencode.jsonc`) : le plugin expose un `todoupdate` par numéro, transactionnel (état inconnu ou numéro hors bornes refusés, sans réécrire la liste), et chaque tool part porte la liste complète. Côté daemon, `composePrompt` demande désormais la mise à jour par numéro (`todoupdate`) plutôt que le remplacement complet ; les numéros restent l'index du tableau, rien de persistant de plus côté daemon.
 
 ### Objectif courant affiché sur la carte, en plus du résumé
 
@@ -219,7 +309,7 @@ Ce que cette idée réduirait ou changerait :
 
 Questions à trancher plus tard : ce chat est-il un agent distinct (quel modèle ?) ou une session OpenChamber ordinaire ? Sécurité du MCP de supervision (l'assistant peut tout faire ? confirmation humaine pour les actions d'écriture ?).
 
-> Approfondi et tranché le 2026-11-06 : le chat est retenu, mais comme **surface d'orchestration** à gauche, pas comme chat de tâche. Voir [mvp1/chat-superviseur.md](../mvp1/chat-superviseur.md).
+> Approfondi, tranché le 2026-11-06 et livré : le chat est retenu comme **surface d'orchestration**, finalement **à gauche** de la flotte, et non comme chat de tâche. Voir [mvp1/chat-superviseur.md](../mvp1/chat-superviseur.md).
 
 ### Markdown dans l'affichage (hors livraison)
 
@@ -254,3 +344,54 @@ Dans l'en-tête d'une conversation (sans doute à côté du modèle/agent affich
 - **l'agent** (ex. changer `build` pour un `plan`, ou brancher un agent spécialisé).
 
 À creuser : le changement s'applique-t-il immédiatement (au prochain tour de la session) ou seulement nouvel envoi ? Faut-il une confirmation avant de basculer ? Comment signaler dans l'historique qu'un changement de modèle/agent a eu lieu (traçabilité des échanges) ?
+
+### Changer de modèle facilement : dans le chat et pour les tâches
+
+Discussion du 7 nov : le modèle devient un choix de pilotage (un modèle fort pour réfléchir, un modèle rapide et bon marché pour les petites tâches), mais le Superviseur ne permet pas de le choisir : tout est régi par défaut de la session, invisible, et le changer suppose de ressortir de l'interface.
+
+Demande, trois endroits :
+
+- **dans le chat du superviseur** : un sélecteur court près du composer (quelques modèles favoris, la valeur courante marquée), ou une commande simple (« passe sur ... » vers un modèle précis) que l'orchestrateur applique à sa propre session ;
+- **à la création d'une tâche** : un champ modèle au moment du lancement, avec un défaut par projet (reprendre le modèle de la tâche précédente) ; le paramètre existe déjà côté outil (`start_task` accepte `model`), il n'a pas d'UI ;
+- **sur la carte d'une session lancée** : c'est le terrain de l'idée « un petit bouton config » (au-dessus) ; les deux idées se rejoignent là.
+
+Constat sur le code actuel :
+
+- le message du chat part avec le modèle courant de la session : la file d'attente exige un `sendConfig` (`providerID`, `modelID`) lu dans les métadonnées de la session (`sendConfigOf`, `daemon/src/supervisor.mts`) ; la variante y est déjà prévue (`variant`) ;
+- `start_task` accepte un modèle (`args.model`, `daemon/src/tools.mts`) et le stocke dans le task brief : l'orchestrateur peut le passer quand on le nomme, mais rien ne le propose dans le chat ;
+- le daemon n'a pas de liste de modèles : le catalogue viendrait de l'API OpenCode/OpenChamber, à réduire en favoris pour éviter un sélecteur démesuré.
+
+À creuser avant d'implémenter :
+
+- **ce que l'API permet** : changer le modèle d'une session existante (au prochain tour ? par message ?) ou seulement à la création ; c'est la même question que l'idée « config dans la conversation », à trancher une fois pour les deux ;
+- **chat : un état explicite** : le sélecteur du chat porte la session du superviseur, donc un changement s'applique aux conversations suivantes ; afficher le modèle courant choisi (et la variante), pas seulement un réglage fugitif du composer ;
+- **modèle + variante** : proposer le couple (modèle, variante), sinon on change de modèle sans pouvoir choisir « thinking » ou sa variante rapide ;
+- **visibilité** : montrer le modèle en usage sur la carte et dans le chat ; sans ça, on ne sait pas ce que le geste a changé ;
+- **défaillance** : un modèle indisponible ne doit pas laisser la tâche sans tour ; s'aligner sur l'idée « voir une erreur de session » (mention, nouvelle tentative) ;
+- **coût** : un modèle plus fort coûte plus cher ; une mention du modèle courant suffit à rendre le choix éclairé, sans tableau de consommation pour l'instant.
+
+Lien : idée « un petit bouton config dans la conversation » (le changement sur une carte lancée), `daemon/src/supervisor.mts` (`sendConfigOf`), leçon « File d'attente OpenChamber » dans `AGENTS.md` (`sendConfig` obligatoire), doc [mvp1/chat-superviseur.md](../mvp1/chat-superviseur.md) pour le composer.
+
+### Coller des images dans le chat et les cartes
+
+Discussion du 6 nov : on colle souvent une capture dans une conversation (maquette, message d'erreur, rendu cassé), et le Superviseur n'accepte aujourd'hui que du texte. Il faut d'abord enregistrer le fichier, le nommer, puis demander à l'agent de l'ouvrir : un aller-retour pour une information que le presse-papiers portait déjà.
+
+Demande : un collage direct (Ctrl+V) dans la zone de saisie du chat superviseur et dans le composer d'une carte, avec un aperçu avant l'envoi (vignette, nom, poids), la possibilité de retirer la pièce jointe, et l'envoi de l'image avec le texte dans le même message.
+
+Constat sur le code actuel :
+
+- les deux composers sont des `textarea` qui n'envoient qu'une chaîne (le texte du prompt) : aucun champ de pièce jointe ;
+- le chat affiche le markdown via `ChatMarkdown`, qui masque volontairement les images (`img: () => null`) : une image collée ne serait pas visible dans la conversation ;
+- la livraison a déjà le chemin pour les images locales (`/api/fleet/asset`, raster seulement, 10 Mo), mais c'est une lecture de fichier existant, pas un envoi depuis l'UI.
+
+À creuser avant d'implémenter :
+
+- **où vit l'image** : un fichier sur disque (dossier du chat ou de la session, puis route asset) ou une data URL dans le message ? Le fichier évite de gonfler l'historique et réutilise la validation existante ;
+- **ce que l'API accepte** : vérifier qu'un message OpenCode peut porter une part image, et que la file d'attente (`/api/message-queue`) transporte aussi la pièce jointe, sinon un collage pendant un tour busy est perdu ;
+- **formats et limites** : png, jpeg, webp, gif, taille maximale, et un message clair quand l'image est refusée ;
+- **gestes** : collage et glisser-déposer, plus un bouton trombone quand le presse-papiers n'est pas accessible ;
+- **affichage** : vignette dans le message, clic pour agrandir, jamais de HTML brut ; une image refusée affiche un texte, pas une icône cassée ;
+- **capture sans nom** : le presse-papiers fournit souvent l'image seule ; prévoir un nom généré et un texte facultatif ;
+- **brouillon** : la pièce jointe doit survivre à un changement de section de carte, comme le texte (le brouillon vit déjà dans le store).
+
+Lien : leçons « Images locales de la livraison » et « Rendu openchamber_render » dans `AGENTS.md`, idée « chemins de fichiers et URL cliquables » (même route asset), doc [mvp1/chat-superviseur.md](../mvp1/chat-superviseur.md) pour le composer du chat.

@@ -111,6 +111,7 @@ La stabilité ne doit pas coûter les trois valeurs du projet.
 1. **L'attention est la ressource rare** (README du design concept, doc 03). Aujourd'hui, la remontée en section est le signal principal. Si on fige les positions, il faut la remplacer, pas la supprimer : barre fixe en haut, badge, liseré, bouton « Suivante ». C'est un prérequis, pas un bonus.
 2. **La livraison inline est une décision du 2026-11-06** (`design_concept/06-questions-ouvertes.md`, ligne « La livraison se rend INLINE dans la carte »). La recommandation garde un **aperçu inline borné** et déplace le **complet** dans l'inspecteur. C'est un compromis à assumer explicitement : on ne revient pas à « lire le résultat seulement dans OpenChamber », on ajoute un clic pour le détail long.
 3. **Un geste minimum** (phare du projet). Le composer reste dans la carte sur une ligne, pour envoyer une consigne sans ouvrir l'inspecteur. Les questions et permissions, qui demandent une saisie ou une confirmation, passent par l'inspecteur : un clic de plus, mais une surface adaptée au formulaire.
+   - **Mise à jour 2026-11-07** : ce geste minimum est retiré à la demande du propriétaire, le panneau de détail servant à l'écriture : plus de composer dans la carte, la consigne passe par un clic (ouverture du détail) puis son composer. La carte passe de 232 à 190 px, l'écran montre plus de cartes. Détails : [implementation-ui-react.md](implementation-ui-react.md), §13.
 
 Le MVP1 est le contrat (`objectif-mvp1.md`). Cette note ne change ni les routes, ni le contrat `Fleet`, ni le compagnon : elle ne change que l'ordre d'affichage et la géométrie côté UI. Le tri du daemon peut rester en place, l'UI l'ignore ; on pourra le simplifier plus tard, sans que ce soit nécessaire au correctif.
 
@@ -131,7 +132,7 @@ Chaque tâche est une ligne de hauteur fixe (environ 64 à 72 px) : point d'éta
 
 ### Option B : carte à hauteur constante, aperçu inline borné, détail en inspecteur (recommandée)
 
-Une seule liste, ordre d'arrivée fixe. Chaque carte occupe exactement la même hauteur (environ 232 px, à ajuster), avec des zones réservées :
+Une seule liste, ordre d'arrivée fixe. Chaque carte occupe exactement la même hauteur (environ 232 px, à ajuster ; **fixée à 190 px le 2026-11-07**, sans rang de composer), avec des zones réservées :
 
 - en-tête : point d'état, titre, badge d'attention, menu, ouvrir ;
 - corps : brief sur 2 lignes et une zone de contenu fixe (question, activité, ou aperçu de résultat) ;
@@ -300,6 +301,7 @@ Une seule surface de détail, sous forme de **colonne de droite** plutôt qu'une
 - **Ouverture** : clic sur la carte (hors boutons et composer) ou `Entrée` quand la carte a le focus ; boutons `Répondre` et `Détail` du pied.
 - **Forme** : colonne de largeur réglable (plafond 680 px, largeur persistée dans le stockage local, ajustable par une poignée entre la liste et le détail, comme le chat). La colonne existe seulement quand une tâche est sélectionnée : elle se ferme par sa croix, par `Échap` ou quand la sélection disparaît. Sous 1100 px, elle devient une feuille pleine largeur qui couvre la liste, comme une vue détail.
 - **Contenu** : en-tête (état, titre, ouvrir, croix), puis une **ligne d'état** qui porte la barre de progression (plus longue), le compteur d'étapes (avec popup du plan) et la confiance ; puis le brief complet, l'attention, le **résultat complet déplié d'office** (markdown + rendu, pas de `Voir plus` à cliquer d'abord), la question ou la permission ; puis **le composer collé en bas du panneau, sans titre** ; puis le pied d'actions, tout en bas (`Terminé` vert dès que la tâche n'est pas `busy`, `Fermer le détail`).
+- **Mise à jour 2026-11-07** : le compteur d'étapes de la ligne d'état est remplacé par une **section « Plan » toujours visible**, sous le résumé (désormais encadré et titré) et au-dessus du résultat ; la barre de progression du détail et son compteur sont retirés (redondants avec le badge du plan). Implémentation et décisions : [implementation-ui-react.md](implementation-ui-react.md), §12.
 - **Cadre** : plus de marge de page : les colonnes collent aux bords de l'écran ; les marges internes (carte, corps du détail, composer) sont conservées pour garder une lecture possible.
 - **Fermeture** : croix, `Échap`. Le focus revient à la carte, qui n'a pas bougé.
 - **Sélection** : la carte sélectionnée garde un anneau intérieur (jamais rogné par les bords du panneau).

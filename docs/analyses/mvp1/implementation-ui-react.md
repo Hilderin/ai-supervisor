@@ -137,7 +137,7 @@ Le bloc est mémoïsé : les re-rendus 1 s / 2 s de la carte ne relancent ni la 
 - **Question** : un bloc par champ, options (mono ou multiselect) et champ libre, un seul bouton « Répondre ».
 - **Permission** : « Permission demandée » + bouton « Autoriser » (`decision: once`).
 - **Résultat** : bloc de livraison sur les cartes TERMINÉ et au repos (texte markdown + rendu `openchamber_render`), aperçu replié, jamais sur une carte busy ou en attente.
-- **Composer** : hauteur auto jusqu'à 120 px, Enter envoie, Shift+Enter saute une ligne, flèche verte dès qu'il y a du texte. Dans le chat de supervision, la hauteur est aussi réglable à la souris (poignée au-dessus du champ, 34 à 360 px, mémorisée) ; le composer reste actif pendant un tour, le texte part alors dans la file d'attente OpenChamber.
+- **Composer** : retiré des cartes le 2026-11-07 (demande du propriétaire, voir §13) : l'écriture à une tâche passe par le détail. Le composer du détail garde hauteur auto jusqu'à 120 px, Entrée envoie, Maj+Entrée saute une ligne, flèche verte dès qu'il y a du texte. Dans le chat de supervision, la hauteur est aussi réglable à la souris (poignée au-dessus du champ, 34 à 360 px, mémorisée) ; le composer reste actif pendant un tour, le texte part alors dans la file d'attente OpenChamber.
 - **Fermer** : la donebox et le menu kebab appellent `POST /api/fleet/done` puis masquent la carte. Une activité ultérieure dans OpenChamber la rouvre (règle du daemon).
 - **Ouvrir** : `openchamber-ui://session/{id}` dans un nouvel onglet, comme la maquette.
 
@@ -211,3 +211,29 @@ Le chat de gauche remplace la barre de saisie du haut. Il vit dans `~/.supervise
 La file est celle d'OpenChamber : elle exige le modèle de la session (`providerID`, `modelID`) et survit à la fermeture de l'onglet. Le daemon reprend ces valeurs de `/api/session/:id`. Le retour en arrière est un `stage` puis un `commit` immédiat, après un `abort` si un tour est en cours.
 
 Le détail du contrat, du plugin, du trust du dossier et des tests est dans [chat-superviseur.md](chat-superviseur.md) et [chat-superviseur-tests.md](chat-superviseur-tests.md). `bun test daemon/test ui/src` couvre 110 tests ; les campagnes Playwright ont validé C1 à C17.
+
+## 12. Section Plan dans le détail (implémentée le 2026-11-07)
+
+Le compteur d'étapes cliquable (bulle `PlanPopover`) a été remplacé, dans le panneau de détail, par une section « Plan » toujours visible : le plan se lit sans clic sur un compteur.
+
+- Ordre dans le corps défilant : **résumé** (encadré titré « Résumé », note « ✋ ») → **Plan** → livraison → question / permission. La barre de progression et le compteur sous le plan ont été retirés le 2026-11-07 (information redondante avec le badge du plan) : la ligne d'état du haut ne porte plus que l'état, le dossier et la confiance, et le repli sans plan est une ligne discrète (`N %` du compagnon, sinon « pas de plan »).
+- En-tête de section : titre « Plan », nombre d'étapes, badge d'état et chevron ; le clic bascule le dépliage. Le badge affiche `réalisé/total` dès qu'une étape a démarré, `à faire` tant que rien n'a commencé (jamais `0/N`, règle partagée avec `planLabel`), en vert quand le plan est complet.
+- Défaut d'ouverture (`planDefaultOpen`) : déplié quand la tâche est `busy` ou `waiting`, replié quand elle est `done` ou `idle` (travail fini). Sans préférence manuelle, le défaut suit l'état en continu : une tâche qui se termine se replie d'elle-même.
+- Préférence manuelle par carte : un clic mémorise le choix dans une carte module (`Map<sessionId, boolean>`) qui prime sur le défaut tant que la page vit ; elle disparaît au rechargement et quand le panneau pointe un autre id de session.
+- Étapes : liste numérotée partagée `PlanSteps` (rendu extrait de `PlanPopover`), donc identique dans la bulle des cartes : état visuel (✓ finie, ● en cours, ○ à faire), numéro, texte. Hauteur plafonnée à 240 px avec défilement, comme dans la bulle.
+- `SessionCard` ne change pas : la carte garde sa hauteur constante et son compteur cliquable en portail.
+
+Tests : `ui/src/components/PlanSection.test.tsx` (défauts par état, badge « à faire », étapes numérotées) et `ui/src/components/TaskInspector.test.tsx` (encadré « Résumé », absence de barre et de compteur, repli sans plan). `bun run build:ui` avant de relancer le daemon (le 404 explicite de `/fleet` sans build reste d'actualité).
+
+Conséquence sur la note de conception : la ligne d'état décrite dans [panneau-taches-stable.md](panneau-taches-stable.md) §5.7 (compteur d'étapes porté par la ligne d'état du haut, puis barre de progression plus bas) est remplacée par cette section ; la progression vit désormais uniquement dans le badge du plan.
+
+## 13. Composer des cartes retiré (2026-11-07)
+
+À la demande du propriétaire : le champ « Écrire à cette tâche » et son bouton d'envoi quittent les cartes du milieu, parce que le panneau de détail sert exactement à ça.
+
+- La carte perd son rang de composer : la grille passe de quatre rangées (en-tête, corps, composer, pied) à trois (en-tête, corps, pied), et la hauteur fixe de 232 px à **190 px** (le corps du résumé garde sa taille, le gain vient du rang composer et d'un écart de grille). La même page affiche donc plus de cartes.
+- `Composer.tsx` est simplifié : la variante carte (une ligne fixe, sans auto-grow) est supprimée, il ne reste que la variante du détail (auto-grow plafonné à 120 px). Le brouillon (`drafts` du store) continue de suivre la session, donc un texte commencé dans le détail y survit.
+- La carte reste cliquable sur sa totalité (hors boutons) : ouvrir le détail est devenu le seul moyen d'envoyer une instruction. Le geste « écrire sans ouvrir le détail » (note de conception §2.4, « geste minimum ») est remplacé par un clic de plus, assumé.
+- Les boutons du pied ne changent pas : `Répondre` (attente), `Détail` (busy), `Terminé` (fini). Le clic d'ouverture du détail reste un clic sur le corps de la carte : voir le piège noté dans AGENTS.md sur le second bouton du pied, qui clôture sur une carte « fini, à valider ».
+
+Tests : `ui/src/components/SessionCard.test.tsx` (plus de `textarea` sur la carte, hauteur et grille à trois rangées). Vérifié en direct sur la flotte : aucune zone de saisie dans les cartes, en-tête à en-tête d'environ 199 px.

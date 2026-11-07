@@ -4,7 +4,7 @@ import type { CardState } from '../lib/cardState';
 import { cardStateLabel } from '../lib/cardState';
 import { closeQuestionOf, closeTask } from '../lib/closeTask';
 import { cx } from '../lib/cx';
-import { briefRow, dirName, planLabel } from '../lib/fleet';
+import { briefRow, dirName } from '../lib/fleet';
 import { BTN_GHOST, BTN_PRIMARY } from '../lib/ui';
 import { useFleetStore } from '../store/fleetStore';
 import type { FleetRow } from '../types';
@@ -13,7 +13,7 @@ import { Composer } from './Composer';
 import { ConfidenceDots } from './ConfidenceDots';
 import { DeliveryBlock } from './DeliveryBlock';
 import { OpenChamberIcon } from './Icons';
-import { PlanPopover } from './PlanPopover';
+import { PlanSection } from './PlanSection';
 import { QuestionBox } from './QuestionBox';
 
 interface Props {
@@ -48,10 +48,8 @@ export function TaskInspector({ row, state, now, onClose }: Props) {
     : '';
   const dir = dirName(row.dir);
 
-  const hasProgress = row.sup?.progress != null || !!row.todo;
-  const progress = row.sup?.progress != null ? Math.max(0, Math.min(100, Number(row.sup.progress))) : 0;
   const todoSteps = row.todo?.steps ?? [];
-  const progressLabel = planLabel(row.todo, done, progress);
+  const progress = row.sup?.progress != null ? Math.max(0, Math.min(100, Number(row.sup.progress))) : null;
   const rawConf = row.sup?.confiance;
   const conf = rawConf == null ? null : Math.max(0, Math.min(1, rawConf));
 
@@ -129,38 +127,28 @@ export function TaskInspector({ row, state, now, onClose }: Props) {
           <span className="flex-1" />
           <ConfidenceDots conf={conf} note={row.sup?.note} />
         </div>
-        <div className="flex min-w-0 items-center gap-[8px]">
-          <span className="h-[5px] min-w-[48px] max-w-[220px] flex-1 overflow-hidden rounded-[3px] bg-track">
-            {hasProgress ? (
-              <span
-                className={cx(
-                  'block h-full transition-[width] duration-500',
-                  progress > 0 && progress < 66 ? 'bg-amber' : 'bg-green',
-                )}
-                style={{ width: `${progress}%` }}
-              />
-            ) : null}
-          </span>
-          {hasProgress ? (
-            todoSteps.length ? (
-              <PlanPopover
-                label={progressLabel}
-                steps={todoSteps}
-                done={row.todo?.done ?? 0}
-                total={row.todo?.total ?? 0}
-              />
-            ) : (
-              <span className="shrink-0 text-[12px] font-[650] tabular-nums">{progressLabel}</span>
-            )
-          ) : (
-            <span className="shrink-0 text-[11.5px] text-muted">pas de plan</span>
-          )}
-        </div>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-[14px] pb-[12px] pt-[10px]">
-        <div className="whitespace-pre-wrap text-[13.5px] leading-[1.45] text-text">{brief}</div>
+        <div className="rounded-[9px] border border-border bg-render px-[12px] py-[10px]">
+          <div className="mb-[6px] text-[12px] font-semibold text-muted">Résumé</div>
+          <div className="whitespace-pre-wrap text-[13.5px] leading-[1.45] text-text">{brief}</div>
+        </div>
         {attend ? <div className="mt-[4px] text-[13px] text-attend">✋ {attend}</div> : null}
+
+        {todoSteps.length ? (
+          <PlanSection
+            sessionId={row.id}
+            state={state}
+            steps={todoSteps}
+            done={row.todo?.done ?? 0}
+            total={row.todo?.total ?? 0}
+          />
+        ) : (
+          <div className="mt-[12px] text-[11.5px] text-muted">
+            {progress != null ? `${Math.round(progress)} %` : 'pas de plan'}
+          </div>
+        )}
 
         <DeliveryBlock
           sessionId={row.id}

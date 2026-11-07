@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { cx } from '../lib/cx';
 import type { TodoStep } from '../types';
+import { PlanSteps } from './PlanSection';
 
 interface Props {
   label: string;
@@ -109,34 +109,9 @@ export function PlanPopover({ label, steps, done, total }: Props) {
                   {done}/{total}
                 </span>
               </div>
-              <ol className="flex max-h-[240px] flex-col gap-[5px] overflow-y-auto">
-                {steps.map((step, i) => (
-                  <li key={i} className="flex items-start gap-[7px] text-[12px] leading-[1.35]">
-                    <span
-                      aria-hidden="true"
-                      className={cx(
-                        'mt-[1px] w-[11px] shrink-0 text-center',
-                        step.status === 'completed'
-                          ? 'text-green'
-                          : step.status === 'in_progress'
-                            ? 'text-amber'
-                            : 'text-placeholder',
-                      )}
-                    >
-                      {step.status === 'completed' ? '✓' : step.status === 'in_progress' ? '●' : '○'}
-                    </span>
-                    <span className="mt-[1px] shrink-0 tabular-nums text-muted">{i + 1}.</span>
-                    <span
-                      className={cx(
-                        'min-w-0',
-                        step.status === 'completed' ? 'text-muted line-through' : 'text-text',
-                      )}
-                    >
-                      {step.text}
-                    </span>
-                  </li>
-                ))}
-              </ol>
+              <div className="max-h-[240px] overflow-y-auto">
+                <PlanSteps steps={steps} />
+              </div>
             </div>,
             document.body,
           )
