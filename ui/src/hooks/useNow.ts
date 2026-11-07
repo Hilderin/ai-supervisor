@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 
-/** Horloge partagée pour les âges (« il y a 12 s ») et l'indicateur Live. */
+/** Horloge partagée pour les âges (« il y a 12 s ») de la flotte. */
 export function useNow(intervalMs = 1000): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {

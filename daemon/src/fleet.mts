@@ -16,6 +16,9 @@ export interface OpenchamberSession {
   metadata?: { openchamber?: { work?: { state?: string }, turn?: { durationMs?: number } } };
 }
 import { companionTick, verdictOf } from './companion.mts';
+import { getSupervisorSession } from './state.mts';
+import { SUPERVISOR_DIR } from './supervisor.mts';
+import { getTodoSnapshot } from './todos.mts';
 import type { WaitInfo } from './verdict.mts';
 
 function supOf(id: string): Verdict | undefined {
@@ -49,6 +52,8 @@ export interface FleetRow {
   turnStartedAt?: number; lastUpdateAt?: number;
   busy?: number | null; idle?: number | null;
   pendingForms: PendingForm[]; pendingPermissions: unknown[];
+  /** plan de la session de travail (`todowrite`) */
+  todo?: { done: number; total: number };
 }
 export interface Verdict {
   resume?: string; confiance?: number | null; progress?: number | null; termine?: boolean;
@@ -90,10 +95,15 @@ interface StatusPayload {
 function buildFleet(status: StatusPayload): Fleet {
   const rows: FleetRow[] = [];
   let concern: string | null = null;
+  const supervisorId = getSupervisorSession()?.oc_session_id;
   for (const [id, s] of Object.entries(status.sessions ?? {})) {
     const meta = sessionsIndex.get(id);
     // fantômes et archivées : sans carte
     if (!meta) continue;
+    if (supervisorId && id === supervisorId) continue;
+    // tout le dossier de supervision est hors flotte, y compris les anciennes
+    // conversations de chat laissées dans OpenChamber
+    if (meta.location?.directory === SUPERVISOR_DIR) continue;
     if (meta.time?.archived) continue;
     // les sous-sessions/sous-agents (parentID) ne sont pas des tâches de flotte
     if (meta.parentID) continue;
@@ -102,9 +112,16 @@ function buildFleet(status: StatusPayload): Fleet {
     // le verdict appartient au tour précédent ? (prompt renvoyé depuis la dernière analyse)
     // → strip résumé/confiance/attend : la carte repasse en « Réflexion en cours »
     const supRaw = supOf(id);
-    const sup = (supRaw && s.status === 'busy' && supRaw.at && s.turnStartedAt && supRaw.at < s.turnStartedAt)
-      ? { at: supRaw.at }
-      : supRaw;
+    const staleBusy = !!(supRaw && s.status === 'busy' && supRaw.at && s.turnStartedAt && supRaw.at < s.turnStartedAt);
+    // verdict écrit avant la dernière activité du tour : ne pas afficher un
+    // résumé périmé (souvent « rien n'a encore été produit ») à côté d'une
+    // livraison fraîche. On garde la progression des todos, on attend le bilan.
+    const staleIdle = !!(supRaw && !supRaw.termine && s.status !== 'busy' && (supRaw.at ?? 0) < (s.lastUpdateAt ?? 0));
+    const sup = staleBusy
+      ? { at: supRaw!.at }
+      : staleIdle
+        ? { at: supRaw!.at, progress: supRaw!.progress }
+        : supRaw;
     const row: FleetRow = {
       id,
       title: meta.title ?? id.slice(0, 18),
@@ -148,6 +165,26 @@ function buildFleet(status: StatusPayload): Fleet {
   return { at: Date.now(), rows, concern };
 }
 
+/** Progression : uniquement le plan `todowrite` de la session de travail. */
+async function enrichTodoProgress(fleet: Fleet): Promise<void> {
+  // Séquentiel : un premier poll ne doit pas lancer 15 lectures de 80 messages
+  // en parallèle sur OpenChamber (réponses vides / timeouts observés).
+  for (const row of fleet.rows) {
+    const snap = await getTodoSnapshot(row.id, row.lastUpdateAt);
+    if (snap.total > 0) {
+      row.todo = { done: snap.done, total: snap.total };
+      row.sup = {
+        ...(row.sup ?? {}),
+        progress: row.sup?.termine ? 100 : (snap.progress ?? 0),
+      };
+    } else if (row.sup) {
+      // plus de repli sur la progression inventée par le compagnon ; un job
+      // terminé reste à 100 même sans plan (règle done ⇒ 100)
+      row.sup = { ...row.sup, progress: row.sup.termine ? 100 : null };
+    }
+  }
+}
+
 async function runPoll(): Promise<void> {
   try {
     const [status, sessions] = await Promise.all([
@@ -167,6 +204,7 @@ async function runPoll(): Promise<void> {
       } catch { /* garde l'ancien annuaire */ }
     }
     cachedFleet = buildFleet(status);
+    await enrichTodoProgress(cachedFleet);
     lastGood = Date.now();
     // l'attente humaine est décidée par les formulaires/permissions réels, pas par le LLM
     const waitingMap = new Map<string, WaitInfo>();
@@ -188,7 +226,11 @@ async function runPoll(): Promise<void> {
       }
     }
     // le compagnon juge les sessions nouvelles (idle) ou périodiquement (busy)
-    companionTick([...sessionsIndex.values()], status.sessions ?? {}, waitingMap);
+    const supervisorId = getSupervisorSession()?.oc_session_id;
+    const tickSessions = [...sessionsIndex.values()].filter(
+      s => s.id !== supervisorId && s.location?.directory !== SUPERVISOR_DIR,
+    );
+    companionTick(tickSessions, status.sessions ?? {}, waitingMap);
   } catch {
     /* garde la dernière flotte connue, réessaie au prochain tick */
   }

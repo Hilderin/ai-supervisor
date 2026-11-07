@@ -10,7 +10,9 @@ import { currentFleet, openchamberUrl, pollOnce, type Fleet } from './fleet.mts'
 import { getDelivery } from './delivery.mts';
 import { readSessionAsset } from './assets.mts';
 import { companionSessionOf } from './companion.mts';
-import { logEvent, upsertTaskState, getTaskState, reopenTaskState } from './state.mts';
+import { getSupervisorSession, logEvent, upsertTaskState, getTaskState, reopenTaskState } from './state.mts';
+import { abortSupervisor, getSupervisorState, newSupervisorConversation, sendSupervisor, SUPERVISOR_DIR } from './supervisor.mts';
+import { cancelPendingForms, pendingFor, runTool } from './tools.mts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 // le build Vite (bun run build:ui) ; le daemon ne sert que des fichiers produits
@@ -70,9 +72,12 @@ function sendReplyPath(sessionId: string, form?: { id?: string }, requestID?: st
 /** Flotte enrichie (état local des tâches) : même vue pour GET /api/fleet et le SSE. */
 function enrichedFleet(): Fleet {
   const fleet = currentFleet();
+  const supervisorId = getSupervisorSession()?.oc_session_id;
   return {
     ...fleet,
     rows: fleet.rows.flatMap((r) => {
+      if (supervisorId && r.id === supervisorId) return [];
+      if (r.dir === SUPERVISOR_DIR) return [];
       const st = getTaskState(r.id) as { closed_at?: number } | null;
       if (st?.closed_at) {
         // activité postérieure à la fermeture ? (nouveau prompt dans OpenChamber) → réouverture
@@ -96,6 +101,45 @@ async function handleApi(req: http.IncomingMessage, res: http.ServerResponse, ur
     const fleet = enrichedFleet();
     void pollOnce();
     json(res, 200, fleet);
+    return;
+  }
+  if (path === '/api/supervisor' && req.method === 'GET') {
+    json(res, 200, await getSupervisorState());
+    return;
+  }
+  if (path === '/api/supervisor/messages' && req.method === 'GET') {
+    const state = await getSupervisorState();
+    json(res, 200, { sessionId: state.sessionId, status: state.status, messages: state.messages, error: state.error });
+    return;
+  }
+  if (path === '/api/supervisor/send' && req.method === 'POST') {
+    const body = await readBody(req);
+    try {
+      json(res, 200, await sendSupervisor(String(body.text ?? '')));
+    } catch (e) {
+      json(res, 502, { error: String(e) });
+    }
+    return;
+  }
+  if (path === '/api/supervisor/new' && req.method === 'POST') {
+    try {
+      json(res, 200, await newSupervisorConversation());
+    } catch (e) {
+      json(res, 502, { error: String(e) });
+    }
+    return;
+  }
+  if (path === '/api/supervisor/abort' && req.method === 'POST') {
+    await abortSupervisor();
+    json(res, 200, { ok: true });
+    return;
+  }
+  if (path.startsWith('/api/tools/') && req.method === 'POST') {
+    const name = path.slice('/api/tools/'.length);
+    const body = await readBody(req);
+    const args = (body.args ?? {}) as Record<string, unknown>;
+    const result = await runTool(name, String(body.sessionId ?? ''), args);
+    json(res, 200, result);
     return;
   }
   if (path === '/api/fleet/delivery' && req.method === 'GET') {
@@ -170,24 +214,74 @@ async function handleApi(req: http.IncomingMessage, res: http.ServerResponse, ur
     const sessionId = String(body.sessionId ?? '');
     const text = String(body.text ?? '').trim();
     if (!sessionId || !text) { json(res, 400, { error: 'sessionId et text requis' }); return; }
+    const pending = await pendingFor(sessionId);
+    if (pending.permissions) {
+      json(res, 409, { error: 'waiting_human', kind: 'permission', message: 'une permission attend sur la carte' });
+      return;
+    }
     try {
+      let cancelledQuestion: string | null = null;
+      if (pending.forms.length) {
+        const cancelled = await cancelPendingForms(sessionId, pending.forms.map(f => f.id));
+        if (!cancelled.ok) {
+          json(res, 502, { error: 'cancel_failed', message: cancelled.error });
+          return;
+        }
+        cancelledQuestion = pending.forms[0].text;
+        logEvent(sessionId, 'note', `question annulée par message : ${cancelledQuestion}`);
+      }
       logEvent(sessionId, 'note', '→ prompt : ' + text.slice(0, 120));
-      json(res, 200, await relay(`/api/session/${sessionId}/prompt`, {
+      const out = await relay(`/api/session/${sessionId}/prompt`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text, delivery: body.delivery ?? 'steer' }),
-      }));
+      });
+      json(res, 200, { ...(out as object), cancelledQuestion });
     } catch (e) { json(res, 502, { error: String(e) }); }
+    return;
+  }
+  if (path === '/api/fleet/cancel-question' && req.method === 'POST') {
+    const body = await readBody(req);
+    const sessionId = String(body.sessionId ?? '');
+    const formId = body.formId ? String(body.formId) : undefined;
+    const message = body.message ? String(body.message) : undefined;
+    const pending = await pendingFor(sessionId);
+    if (!pending.forms.length) { json(res, 409, { error: 'no_question' }); return; }
+    const ids = formId ? [formId] : pending.forms.map(f => f.id);
+    if (formId && !pending.forms.some(f => f.id === formId)) {
+      json(res, 404, { error: 'question inconnue' });
+      return;
+    }
+    const out = await cancelPendingForms(sessionId, ids, message);
+    if (!out.ok) { json(res, 502, { error: 'cancel_failed', message: out.error }); return; }
+    logEvent(sessionId, 'note', 'question annulée depuis la carte');
+    json(res, 200, { ok: true, cancelled: out.cancelled });
     return;
   }
   if (path === '/api/fleet/done' && req.method === 'POST') {
     const body = await readBody(req);
     const sessionId = String(body.sessionId ?? '');
     const note = String(body.note ?? '');
+    const force = body.force === true;
     if (!sessionId) { json(res, 400, { error: 'sessionId requis' }); return; }
+    const pending = await pendingFor(sessionId);
+    const hasPending = pending.forms.length > 0 || pending.permissions > 0;
+    if (hasPending && !force) {
+      const text = pending.forms[0]?.text ?? 'Une permission attend ta réponse.';
+      json(res, 409, {
+        error: 'waiting_human',
+        kind: pending.forms.length ? 'question' : 'permission',
+        question: text,
+        canForce: true,
+      });
+      return;
+    }
+    if (pending.forms.length) {
+      await cancelPendingForms(sessionId, pending.forms.map(f => f.id), 'La tâche est fermée depuis le Superviseur : la question est abandonnée.').catch(() => undefined);
+    }
     // Fermer = retirer du Superviseur. PAS d'archivage : une activité future dans
     // OpenChamber (nouveau prompt) remet la carte dans la flotte (ouverture à la volée).
     upsertTaskState(sessionId, { closedAt: Date.now(), closure: 'terminé' });
-    logEvent(sessionId, 'done', note ? 'fermé — ' + note.slice(0, 80) : 'fermé du Superviseur');
+    logEvent(sessionId, 'done', note ? 'fermé : ' + note.slice(0, 80) : pending ? 'fermé en abandonnant la question' : 'fermé du Superviseur');
     json(res, 200, { ok: true });
     return;
   }

@@ -1,0 +1,8 @@
+{
+  "name": "superviseur-tools",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Outils du chat de supervision (daemon Superviseur)",
+  "exports": "./index.js"
+}

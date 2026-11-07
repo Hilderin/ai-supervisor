@@ -46,22 +46,31 @@ describe('parseVerdictText', () => {
 });
 
 describe('normalizeVerdict', () => {
-  test('done implique 100 et coche tout le plan', () => {
+  test('done implique 100, même si le todo n’est pas recoché', () => {
     const v = normalizeVerdict({
       state: 'done',
       summary: 'La fonctionnalité est livrée et vérifiée.',
       plan: [{ step: 'A', done: false }, { step: 'B', done: false }],
-    }, baseCtx());
+    }, baseCtx({ todoPlan: [{ step: 'A', done: false }, { step: 'B', done: false }] }));
     expect(v.done).toBe(true);
     expect(v.progress).toBe(100);
-    expect(v.plan.every(s => s.done)).toBe(true);
+    expect(v.plan.length).toBe(2);
   });
 
   test('busy ne peut jamais être done', () => {
-    const v = normalizeVerdict({ state: 'done', summary: 'Fini.', plan: [{ step: 'A', done: true }] }, baseCtx({ busy: true }));
+    const v = normalizeVerdict({ state: 'done', summary: 'Fini.' }, baseCtx({
+      busy: true,
+      todoPlan: [{ step: 'A', done: true }],
+    }));
     expect(v.done).toBe(false);
     expect(v.state).toBe('working');
     expect(v.progress).toBe(99);
+  });
+
+  test('sans todo, la progression reste nulle', () => {
+    const v = normalizeVerdict({ state: 'working', summary: 'Ça avance.' }, baseCtx());
+    expect(v.progress).toBeNull();
+    expect(v.plan).toEqual([]);
   });
 
   test('sans signal d’attente, un attend inventé est supprimé', () => {
@@ -91,27 +100,36 @@ describe('normalizeVerdict', () => {
     expect(v.state).toBe('waiting_human');
   });
 
-  test('la progression vient du plan, pas du modèle', () => {
+  test('la progression vient du todowrite, pas du modèle', () => {
     const v = normalizeVerdict({
       summary: 'Deux étapes sur quatre.',
       progress: 92,
       plan: [{ step: 'A', done: true }, { step: 'B', done: true }, { step: 'C', done: false }, { step: 'D', done: false }],
-    }, baseCtx());
+    }, baseCtx({
+      todoPlan: [
+        { step: 'A', done: true },
+        { step: 'B', done: true },
+        { step: 'C', done: false },
+        { step: 'D', done: false },
+      ],
+    }));
     expect(v.progress).toBe(50);
   });
 
-  test('une baisse est refusée si le plan n’a pas changé', () => {
+  test('une baisse est refusée si le todo n’a pas changé', () => {
     const plan = [{ step: 'A', done: true }, { step: 'B', done: false }, { step: 'C', done: false }, { step: 'D', done: false }];
-    const v = normalizeVerdict({ summary: 'Toujours pareil.', plan }, baseCtx({
+    const v = normalizeVerdict({ summary: 'Toujours pareil.' }, baseCtx({
+      todoPlan: plan,
       previous: { progress: 75, plan, resume: 'Trois étapes sur quatre.' },
     }));
     expect(v.progress).toBe(75);
   });
 
-  test('un nouvel objectif autorise la remise à zéro', () => {
+  test('un nouveau todo autorise la remise à zéro', () => {
     const plan = [{ step: 'A', done: false }, { step: 'B', done: false }];
-    const v = normalizeVerdict({ summary: 'Nouvelle demande.', plan }, baseCtx({
+    const v = normalizeVerdict({ summary: 'Nouvelle demande.' }, baseCtx({
       objectiveChanged: true,
+      todoPlan: plan,
       previous: { progress: 90, plan: [{ step: 'X', done: true }] },
     }));
     expect(v.progress).toBe(0);

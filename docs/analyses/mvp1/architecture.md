@@ -20,8 +20,11 @@ superviseur/
       fleet.mts         — lecture : poll /api/sessions/status (3 s) + /api/session ; abonnement SSE /api/event
       delivery.mts      : livraison inline (dernier texte + rendu openchamber_render, cache invalidé par événements)
       assets.mts        : images locales d'une réponse (validation dans le dossier de session, raster only)
-      state.mts         — SQLite (bun:sqlite) : journaux, clôtures, seuils
-      server.mts        — HTTP : sert /api/fleet (JSON fusionné), les actions, et le build UI statique
+      todos.mts         : dernier `todowrite` de la session de travail, progression x/y
+      supervisor.mts    : session de chat `~/.superviseur`, messages, envoi, nouvelle conversation
+      tools.mts         : outils du chat (projets, flotte, start_task, send_task, close_task)
+      state.mts         — SQLite (bun:sqlite) : journaux, clôtures, seuils, briefs, session de chat
+      server.mts        — HTTP : sert /api/fleet, /api/supervisor, /api/tools, les actions et l'UI statique
       index.mts         — file-tout, lance le tout
   ui/                   — UI React (Vite + TypeScript + Tailwind + Zustand)
     src/                — composants, hooks, store, styles
@@ -43,6 +46,11 @@ Un seul process **Bun** fait tout (daemon + serveur HTTP + UI statique) : `bun d
 | `POST /api/fleet/create` | créé la session (proxé `/api/openchamber/sessions` — à confirmer) |
 | `POST /api/fleet/done` | clôturer / repartir (nouvelle session liée) |
 | `GET /api/fleet/stream` | SSE : pousse la flotte enrichie, identique à `GET /api/fleet` (2x/s) ; l'UI garde un poll 3 s en filet |
+| `GET /api/supervisor` | session de chat de `~/.superviseur`, statut, messages transformés |
+| `POST /api/supervisor/send` | envoyer un texte au chat de supervision |
+| `POST /api/supervisor/new` | nouvelle conversation de supervision |
+| `POST /api/supervisor/abort` | arrêter le tour de supervision |
+| `POST /api/tools/:name` | outils du plugin superviseur (`list_projects`, `list_tasks`, `get_task`, `start_task`, `send_task`, `close_task`) |
 | `GET /fleet` | le build UI (`ui/dist/index.html`) |
 
 ## 3. Principes
@@ -50,7 +58,8 @@ Un seul process **Bun** fait tout (daemon + serveur HTTP + UI statique) : `bun d
 1. **OpenChamber seul** : le daemon ne parle jamais à OpenCode directement (le port 43735 exige la basic auth qu'OpenChamber détient ; son `openapi.json` est d'ailleurs indisponible). Proxy HTTP pur, aucun SDK.
 2. **Détails tolérés** : IDs fantômes filtrés (lastUpdateAt > 5 min), reconnexion SSE automatique, port auto-détecté à chaque démarrage avec fallback env. Le poll est single-flight (GET, intervalle et SSE coalescés) et le SSE pousse exactement la même flotte enrichie que le GET.
 3. **Zéro dépendance runtime** dans le daemon : Bun implémente déjà tout ce qu'on utilise (fetch natif, serveur HTTP via node:http compatible, bun:sqlite, WebSocket natif). Les dépendances de l'UI (React, Vite, Tailwind, Zustand) sont des dépendances de build : le daemon ne sert que `ui/dist`. Aucun express, aucun framework côté serveur.
-4. L'état dans SQLite reste minime : ce qui nous appartient (journal, clôtures, seuils). Rien de déjà servi par les endpoints.
+4. L'état dans SQLite reste minime : ce qui nous appartient (journal, clôtures, seuils, briefs de tâche, session de chat). Rien de déjà servi par les endpoints.
+5. Le chat de supervision vit dans `~/.superviseur` ; tout ce dossier est exclu de la flotte et du compagnon. Le plugin projet-local est approuvé via `/api/opencode/trust` et OpenCode doit être redémarré une fois après son ajout.
 
 ## 4. Critères du squelette (fait quand)
 

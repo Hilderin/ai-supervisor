@@ -48,6 +48,25 @@ CREATE TABLE IF NOT EXISTS companion_map (
   version INTEGER,
   created_at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS supervisor_session (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  oc_session_id TEXT NOT NULL,
+  agent TEXT,
+  version INTEGER,
+  title TEXT,
+  created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS task_brief (
+  session_id TEXT PRIMARY KEY,
+  title TEXT,
+  goal TEXT,
+  done_criteria TEXT,
+  constraints TEXT,
+  project_dir TEXT,
+  agent TEXT,
+  model TEXT,
+  created_at INTEGER NOT NULL
+);
 `);
 try { db.exec('ALTER TABLE task_verdict ADD COLUMN note TEXT'); } catch { /* colonne déjà présente */ }
 try { db.exec('ALTER TABLE companion_map ADD COLUMN version INTEGER'); } catch { /* colonne déjà présente */ }
@@ -63,6 +82,8 @@ try { db.exec('ALTER TABLE task_verdict ADD COLUMN state TEXT'); } catch { /* co
 try { db.exec('ALTER TABLE task_verdict ADD COLUMN human_source TEXT'); } catch { /* colonne déjà présente */ }
 try { db.exec('ALTER TABLE task_verdict ADD COLUMN next TEXT'); } catch { /* colonne déjà présente */ }
 try { db.exec('ALTER TABLE task_verdict ADD COLUMN objective_version INTEGER'); } catch { /* colonne déjà présente */ }
+// règle dure : un verdict terminé vaut 100, même si une ancienne ligne avait null
+db.run('UPDATE task_verdict SET progress = 100 WHERE termine = 1 AND progress IS NULL');
 
 /** version du prompt de l'agent analyste : hash du contenu, pas mtime (un touch ne recrée plus tous les comps) */
 import { existsSync, readFileSync, symlinkSync } from 'node:fs';
@@ -71,15 +92,29 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 const agentMD = join(dirname(fileURLToPath(import.meta.url)), '..', 'agent', 'superviseur-analyste.md');
+const orchestratorMD = join(dirname(fileURLToPath(import.meta.url)), '..', 'agent', 'superviseur-orchestrateur.md');
+
 /**
  * Hash du contenu, relu à chaque appel (8 Ko, négligeable) : un cache par mtime
  * pouvait mémoriser un fichier lu pendant une écriture et rester figé ensuite.
  */
-export function getAgentVersion(): number {
+function versionOf(path: string): number {
   try {
-    const digest = createHash('sha256').update(readFileSync(agentMD)).digest('hex');
+    const digest = createHash('sha256').update(readFileSync(path)).digest('hex');
     return parseInt(digest.slice(0, 8), 16);
   } catch { return 0; }
+}
+
+export function getAgentVersion(): number { return versionOf(agentMD); }
+
+function ensureDefinition(md: string, name: string): string {
+  try {
+    const dir = join(homedir(), '.config', 'opencode', 'agent');
+    mkdirSync(dir, { recursive: true });
+    const link = join(dir, `${name}.md`);
+    if (!existsSync(link)) symlinkSync(md, link);
+  } catch { /* le nom reste utilisable si le lien existe déjà ou si le dossier est protégé */ }
+  return name;
 }
 
 /**
@@ -93,14 +128,17 @@ export function agentNameFor(version: number): string {
 }
 
 export function ensureAgentDefinition(version: number): string {
-  const name = agentNameFor(version);
-  try {
-    const dir = join(homedir(), '.config', 'opencode', 'agent');
-    mkdirSync(dir, { recursive: true });
-    const link = join(dir, `${name}.md`);
-    if (!existsSync(link)) symlinkSync(agentMD, link);
-  } catch { /* le nom reste utilisable si le lien existe déjà ou si le dossier est protégé */ }
-  return name;
+  return ensureDefinition(agentMD, agentNameFor(version));
+}
+
+export function getOrchestratorVersion(): number { return versionOf(orchestratorMD); }
+
+export function orchestratorNameFor(version: number): string {
+  return `superviseur-orchestrateur-${version.toString(16)}`;
+}
+
+export function ensureOrchestratorDefinition(version: number): string {
+  return ensureDefinition(orchestratorMD, orchestratorNameFor(version));
 }
 
 export function getVerdict(sessionId: string) {
@@ -193,4 +231,66 @@ export function upsertTaskState(sessionId: string, patch: {
 
 export function getTaskState(sessionId: string) {
   return db.query('SELECT * FROM task_state WHERE session_id = ?').get(sessionId) ?? null;
+}
+
+export interface SupervisorSessionRow {
+  oc_session_id: string;
+  agent: string | null;
+  version: number | null;
+  title: string | null;
+  created_at: number;
+}
+
+export function getSupervisorSession(): SupervisorSessionRow | null {
+  return (db.query('SELECT * FROM supervisor_session WHERE id = 1').get() as SupervisorSessionRow | undefined) ?? null;
+}
+
+export function setSupervisorSession(p: {
+  ocSessionId: string; agent: string; version: number; title: string;
+}) {
+  db.query(`INSERT INTO supervisor_session (id, oc_session_id, agent, version, title, created_at)
+            VALUES (1, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET oc_session_id = excluded.oc_session_id,
+              agent = excluded.agent, version = excluded.version, title = excluded.title`)
+    .run(p.ocSessionId, p.agent, p.version, p.title, Date.now());
+}
+
+export interface TaskBriefRow {
+  session_id: string;
+  title: string | null;
+  goal: string | null;
+  done_criteria: string | null;
+  constraints: string | null;
+  project_dir: string | null;
+  agent: string | null;
+  model: string | null;
+  created_at: number;
+}
+
+export function getTaskBrief(sessionId: string): TaskBriefRow | null {
+  return (db.query('SELECT * FROM task_brief WHERE session_id = ?').get(sessionId) as TaskBriefRow | undefined) ?? null;
+}
+
+/** Tous les briefs d'un projet, avec l'état de fermeture : détection de doublon
+ *  immédiate, sans attendre que la flotte ait vu la nouvelle session. */
+export function listTaskBriefs(projectDir?: string): Array<TaskBriefRow & { closed_at?: number | null }> {
+  const sql = `SELECT b.*, s.closed_at FROM task_brief b
+               LEFT JOIN task_state s ON s.session_id = b.session_id
+               ${projectDir ? 'WHERE b.project_dir = ?' : ''}`;
+  return (projectDir
+    ? db.query(sql).all(projectDir)
+    : db.query(sql).all()) as Array<TaskBriefRow & { closed_at?: number | null }>;
+}
+
+export function putTaskBrief(sessionId: string, p: {
+  title: string; goal: string; doneCriteria: string[]; constraints: string[];
+  projectDir: string; agent?: string | null; model?: string | null;
+}) {
+  db.query(`INSERT INTO task_brief (session_id, title, goal, done_criteria, constraints, project_dir, agent, model, created_at)
+            VALUES (?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(session_id) DO UPDATE SET title = excluded.title, goal = excluded.goal,
+              done_criteria = excluded.done_criteria, constraints = excluded.constraints,
+              project_dir = excluded.project_dir, agent = excluded.agent, model = excluded.model`)
+    .run(sessionId, p.title, p.goal, JSON.stringify(p.doneCriteria), JSON.stringify(p.constraints),
+      p.projectDir, p.agent ?? null, p.model ?? null, Date.now());
 }

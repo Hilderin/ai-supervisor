@@ -13,6 +13,7 @@ import {
   ensureAgentDefinition, getAgentVersion, getCompanion, getTaskState, getVerdict, logEvent,
   putCompanion, setTaskObjective, setTaskPlan, upsertVerdict,
 } from './state.mts';
+import { getTodoSnapshot, todoPlan as todoStepsOf } from './todos.mts';
 import { takeKick, kick as pushKick } from './kicks.mts';
 import { messageText } from './messages.mts';
 import {
@@ -280,6 +281,11 @@ async function analyseOnce(
     const firstUser = prevTask?.goal ? '' : await firstUserText(sid);
     const objective = resolveObjective({ prev: prevTask, lastUser: digest.lastUser, firstUser });
     const prevPlan = parsePlanFromDb(prevTask?.plan);
+    // Le plan est la propriété de la session de travail : on le relit depuis
+    // son `todowrite`. Un nouvel objectif repart sans plan tant que la tâche
+    // n'a pas reposé sa liste.
+    const todoSnap = await getTodoSnapshot(sid);
+    const todoSteps = objective.changed ? [] : todoStepsOf(todoSnap);
 
     // même digest, même statut, pas de nouvel objectif → aucun appel au modèle
     if (!force && !objective.changed && digest.hash === s.lastDigestHash && s.lastStatus === status) {
@@ -304,8 +310,7 @@ async function analyseOnce(
     } | null;
 
     const compId = await ensureCompanion(sid, s);
-    const planForInjection = objective.changed ? [] : (objective.plan.length ? objective.plan : prevPlan);
-    const needsNewPlan = objective.changed || planForInjection.length === 0;
+    const planForInjection = todoSteps;
     const waitText = wait.waiting
       ? `${wait.source}: ${wait.ask}`
       : (digest.agentAsk ? `agent_ask: ${digest.agentAsk}` : 'aucun');
@@ -316,10 +321,8 @@ async function analyseOnce(
     const inject = [
       `Tâche : ${title}`,
       `Objectif actuel (version ${objective.version}) : ${objective.objective || 'inconnu'}`,
-      `Plan actuel :\n${planText(planForInjection)}`,
-      needsNewPlan
-        ? 'Établis un plan de 3 à 6 étapes vérifiables pour cet objectif.'
-        : 'Garde les mêmes étapes du plan et coche celles qui sont faites.',
+      `Plan de la tâche (todowrite, source de vérité) :\n${planText(planForInjection)}`,
+      'Le plan appartient à la session de travail. Ne crée pas de plan, ne le modifie pas, et ne produis pas de champ plan : la progression est calculée par le daemon depuis ce todowrite.',
       `Signal d’attente humaine : ${waitText}`,
       prevText,
       'Message(s) récent(s) :',
@@ -349,6 +352,7 @@ async function analyseOnce(
       agentAsk: busy ? null : digest.agentAsk,
       objectiveChanged: objective.changed,
       objective: objective.objective,
+      todoPlan: todoSteps,
       previous: {
         resume: previousVerdict?.resume ?? undefined,
         progress: previousVerdict?.progress ?? null,
@@ -458,16 +462,18 @@ export function companionTick(
     const task = getTaskState(sess.id) as { closed_at?: number } | null;
     if (task?.closed_at && (stt.lastUpdateAt ?? 0) <= task.closed_at) continue;
 
-    const due = Date.now() - (s.lastRunAt ?? 0) >= MIN_INTERVAL_MS;
-    if (!due) continue;
-
     const wait = waitingMap.get(sess.id) ?? emptyWait();
     const stalePrompt = staleIds.has(sess.id);
     const dispatch = (force: boolean) => {
       void analyseOnce(sess.id, sess.title ?? sess.id.slice(0, 12), sess.location?.directory, stt.status, wait, force);
     };
 
+    // Un kick de début ou de fin de tour est un signal réel : il ne doit pas
+    // être perdu parce qu'une analyse de cadrage vient d'avoir lieu. Le
+    // dédoublonnage par digest dans analyseOnce évite les appels à vide.
     const k = takeKick(sess.id);
+    const due = Date.now() - (s.lastRunAt ?? 0) >= MIN_INTERVAL_MS;
+    if (!due && !(k?.start || k?.end)) continue;
     // migration de prompt : une passe par session, espacée, même sans nouveau message
     if (stalePrompt) {
       if (Date.now() - (s.lastMigrationAt ?? 0) >= 60_000) {

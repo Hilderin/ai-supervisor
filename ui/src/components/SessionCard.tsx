@@ -21,6 +21,7 @@ interface Props {
 export function SessionCard({ row, waiting, done, now }: Props) {
   const closeSession = useFleetStore((s) => s.closeSession);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [closeError, setCloseError] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const kebabRef = useRef<HTMLButtonElement>(null);
 
@@ -31,8 +32,9 @@ export function SessionCard({ row, waiting, done, now }: Props) {
   const form = row.pendingForms?.[0];
   const perm = row.pendingPermissions?.[0];
 
-  const hasProgress = row.sup?.progress != null;
-  const progress = hasProgress ? Math.max(0, Math.min(100, Number(row.sup?.progress))) : 0;
+  const hasProgress = row.sup?.progress != null || !!row.todo;
+  const progress = row.sup?.progress != null ? Math.max(0, Math.min(100, Number(row.sup.progress))) : 0;
+  const shownDone = !!row.sup?.termine && row.status !== 'busy';
   const rawConf = row.sup?.confiance;
   const conf = rawConf == null ? null : Math.max(0, Math.min(1, rawConf));
   const showBars = !!row.sup && (hasProgress || conf != null);
@@ -40,10 +42,23 @@ export function SessionCard({ row, waiting, done, now }: Props) {
   // ou question explicite de l'agent) : les anciens verdicts ne polluent plus la carte
   const attend = row.sup?.attend && (waiting || row.sup.humanSource === 'agent_ask') ? row.sup.attend : '';
 
-  const close = () => {
+  const close = async () => {
     setMenuOpen(false);
-    closeSession(row.id);
-    void closeConversation(row.id).catch((e) => console.error('[done]', e));
+    const pending = row.pendingForms?.[0];
+    const permission = row.pendingPermissions?.[0];
+    const question = pending
+      ? (pending.fields?.[0]?.description ?? pending.fields?.[0]?.title ?? pending.title ?? 'cette question')
+      : permission
+        ? 'une permission'
+        : '';
+    if (question && !window.confirm(`Cette tâche attend encore « ${question} ». La fermer abandonne la demande. Fermer quand même ?`)) return;
+    setCloseError(null);
+    try {
+      await closeConversation(row.id, !!question);
+      closeSession(row.id);
+    } catch (e) {
+      setCloseError(String((e as Error)?.message ?? e));
+    }
   };
 
   // un clic ailleurs referme le menu (même comportement que la maquette)
@@ -137,8 +152,12 @@ export function SessionCard({ row, waiting, done, now }: Props) {
           )}
           <ConfidenceDots conf={conf} note={row.sup?.note} />
           {hasProgress ? (
-            <span className="w-[34px] text-right text-[12px] font-[650] tabular-nums">
-              {Math.round(progress)}%
+            <span
+              data-testid="progress"
+              title={row.todo ? `${row.todo.done} étape(s) sur ${row.todo.total}` : `${Math.round(progress)} %`}
+              className="w-[38px] text-right text-[12px] font-[650] tabular-nums"
+            >
+              {row.todo && !shownDone ? `${row.todo.done}/${row.todo.total}` : `${Math.round(progress)} %`}
             </span>
           ) : null}
         </div>
@@ -174,10 +193,12 @@ export function SessionCard({ row, waiting, done, now }: Props) {
 
       <Composer sessionId={row.id} />
 
+      {closeError ? <div className="mt-[6px] text-[11.5px] text-danger">{closeError}</div> : null}
+
       {done ? (
         <div className="mt-[9px] flex items-center gap-[7px] border-t border-border pt-[9px]">
           <span className="flex-1" />
-          <button type="button" onClick={close} className={BTN_PRIMARY}>
+          <button type="button" onClick={() => void close()} className={BTN_PRIMARY}>
             Fermer
           </button>
         </div>
@@ -190,7 +211,7 @@ export function SessionCard({ row, waiting, done, now }: Props) {
         >
           <button
             type="button"
-            onClick={close}
+            onClick={() => void close()}
             className="flex w-full cursor-pointer items-center gap-[8px] bg-transparent px-[12px] py-[9px] text-left text-[13.5px] text-text hover:bg-hover"
           >
             <span className="shrink-0 opacity-[.65]">

@@ -8,6 +8,7 @@
  * changer le dernier message d'une session passe par ici.
  */
 import { deliveryEventRelevant, invalidateDelivery } from './delivery.mts';
+import { invalidateTodos } from './todos.mts';
 
 const kicks = new Map<string, { start: boolean; end: boolean }>();
 
@@ -33,7 +34,10 @@ export function ingestEvent(frame: EventFrame): void {
   // un événement sans sessionID exploitable vide tout le cache : mieux vaut
   // une lecture fraîche qu'une carte figée sur une ancienne réponse
   if (deliveryEventRelevant(type)) invalidateDelivery(sid || undefined);
+  if (/^message\./.test(type) || /^session\.(text\.|step\.ended$|idle$)/.test(type)) {
+    invalidateTodos(sid || undefined);
+  }
   if (!sid) return;
   if (type === 'session.inbox.enqueued') kick(sid, 'start');
-  else if (/^session\.execution\.(succeeded|failed|interrupted)$/.test(type)) kick(sid, 'end');
+  else if (/^session\.execution\.(succeeded|failed|interrupted)$/.test(type) || type === 'session.idle') kick(sid, 'end');
 }

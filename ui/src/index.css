@@ -72,6 +72,15 @@
   overflow-wrap: anywhere;
 }
 
+.chat-md {
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.chat-md p {
+  margin-bottom: 8px;
+}
+
 .delivery-md > :first-child {
   margin-top: 0;
 }

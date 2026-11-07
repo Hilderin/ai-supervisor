@@ -61,5 +61,6 @@ Le brainstorm vit ici. Une question = une décision de design ; on la tranche, o
 | **Spike confirmé (config réelle)** : le Superviseur = client HTTP d'OpenChamber (port auto-détecté, sans credential) ; `sessions/status` donne statuts + questions + permissions en attente ; répondre un form par API débloque la session. Daemon = SSE + poll. | 2026-11-06 | doc 11 |
 | La flotte suit l'attention, pas un cycle de vie dev : Planning/Isolating de PILOT est optionnel par tâche, jamais une étape obligatoire (cadence protégée) | 2026-11-06 | doc 08 §2 |
 | Les micro-tâches (type « réponds à Gab ») sont des cartes légères dans la même flotte ; leur réponse est l'action principale de la carte | 2026-11-06 | doc 08 §6 |
-| Lancement par barre unique en langage naturel, réglages fins ajustables après coup | 2026-11-06 | doc 08 §3 (à préciser) |
+| Lancement par barre unique en langage naturel, réglages fins ajustables après coup | 2026-11-06 | doc 08 §3, remplacé le 2026-11-06 par le chat de supervision ([mvp1/chat-superviseur.md](../mvp1/chat-superviseur.md)) |
+| **Le lancement passe par un chat de supervision à gauche** : session OpenChamber dans `~/.superviseur`, agent `superviseur-orchestrateur`, outil `start_task` réel ; la politique « demander ou lancer » vit dans le prompt de l'agent, pas dans un écran de validation | 2026-11-06 | [mvp1/chat-superviseur.md](../mvp1/chat-superviseur.md) |
 | Les questions à l'utilisateur passent par le tool `question` (jamais de HTML) | 2026-11-06 | AGENTS.md |

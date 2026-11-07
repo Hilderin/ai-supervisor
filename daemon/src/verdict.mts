@@ -60,6 +60,8 @@ export interface NormalizeContext {
   agentAsk?: string | null;
   objectiveChanged: boolean;
   objective: string;
+  /** Plan de la session de travail (`todowrite`) : seule source de progression. */
+  todoPlan?: PlanStep[];
   previous?: PreviousVerdict | null;
 }
 
@@ -339,12 +341,11 @@ export function normalizeVerdict(raw: RawVerdict, ctx: NormalizeContext): Normal
   const ask = pickString(hrAsk, raw.pending_human, raw.attend, raw.wait, ctx.wait.ask, ctx.agentAsk);
   const attend = waiting ? ask.slice(0, 180) : '';
 
-  let plan = normalizePlan(raw.plan);
-  if (!plan.length && !ctx.objectiveChanged) plan = ctx.previous?.plan ?? [];
-  if (done) plan = plan.map(s => ({ ...s, done: true }));
-
-  let progress = planProgress(plan, done);
-  if (!done && !ctx.objectiveChanged && progress != null && ctx.previous?.progress != null) {
+  // La progression ne vient jamais du texte du compagnon : uniquement du
+  // `todowrite` de la session de travail. Un plan vide signifie pas de barre.
+  const plan = (ctx.todoPlan ?? []).map(s => ({ ...s }));
+  let progress: number | null = plan.length ? planProgress(plan, done) : (done ? 100 : null);
+  if (!done && plan.length && progress != null && ctx.previous?.progress != null) {
     const samePlan = JSON.stringify(plan) === JSON.stringify(ctx.previous.plan ?? []);
     if (samePlan && progress < ctx.previous.progress - 5) progress = ctx.previous.progress;
   }

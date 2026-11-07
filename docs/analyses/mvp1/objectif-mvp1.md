@@ -6,13 +6,15 @@
 
 | # | Capacité | État | Détail |
 | --- | --- | --- | --- |
-| 1 | Saisie → session | ✖ reporté (choix explicite : en dernier, design de page en évolution) | barre désactivée pour l'instant ; position finale I4 |
-| 2 | Cartes d'état | ◐ | statut vivant, âge, titre, projet — **progression décorative** (35 % fixe), confiance non câblée (todos pas encore branchés) |
-| 3 | Réponse inline | ✔ | questions mono et multi-parts (multiselect, champ libre, Répondre) testées de bout en bout ; **permissions : chemin câblé mais jamais testé** (aucune vraie demande) |
+| 1 | Saisie → session | ✔ | chat de supervision à gauche + `start_task` ; barre du haut retirée ; détail : [chat-superviseur.md](chat-superviseur.md) |
+| 2 | Cartes d'état | ✔ | statut vivant, âge, titre, projet, progression `x/y` lue dans le `todowrite` de la tâche, confiance du compagnon |
+| 3 | Réponse inline | ✔ | questions mono et multi-parts (multiselect, champ libre, Répondre) testées de bout en bout ; **permissions : mode YOLO, parcours non développé** ([permissions-yolo.md](permissions-yolo.md)) |
 | 4 | Livraison inline | ✔ | bloc « Résultat » dans la carte : dernier texte markdown + rendu `openchamber_render` sandboxé, route dédiée `GET /api/fleet/delivery`, cache invalidé par événements (détail : `implementation-ui-react.md` §5) |
-| 5 | Clôture | ◐ | endpoint daemon `/api/fleet/done` existe ; **UI sans boutons Terminer / Repartir** |
+| 5 | Clôture | ◐ | endpoint daemon `/api/fleet/done` existe ; fermeture carte + `close_task` du chat ; **Repartir pas encore** |
 | 6 | ↗ OpenChamber | ◐ | ouvre `openchamber-ui://session/{id}` — schéma **deviné, jamais vérifié** (à capturer depuis l'app) |
 | — | SSE instantané | ✖ | le poll 3 s porte tout (tuile planifiée I5) |
+
+> Design tranché et implémenté le 2026-11-06 : chat de supervision à gauche + outil `start_task`, barre du haut retirée. La progression vient du `todowrite` de la tâche. Voir [chat-superviseur.md](chat-superviseur.md) et [chat-superviseur-tests.md](chat-superviseur-tests.md).
 
 Un jalon reste **central et testable tout de suite** : le steer pendant un tour en cours (composer sur carte busy) — l'endpoint répond, mais on n'a jamais envoyé un texte dans une session **effectivement busy**.
 

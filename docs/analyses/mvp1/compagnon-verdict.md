@@ -5,6 +5,11 @@ Décisions prises le 2026-11-06 après l'audit des 358 verdicts des sessions
 relire la conversation, et de retirer au LLM les décisions qui peuvent être
 déduites de faits.
 
+> **Révision 2026-11-06 (chat de supervision)** : le plan et la progression
+> viennent du `todowrite` de la session de travail, pas du compagnon. Le
+> compagnon ne produit plus de plan ; la carte lit le dernier tool part
+> `todowrite` (`state.metadata.todos`). Sans todo, pas de barre.
+
 ## Symptômes constatés
 
 - 96 verdicts sur 358 affichaient un `attend` ; une minorité seulement
@@ -25,8 +30,8 @@ Le verdict JSON du compagnon contient :
 | `state` | `working`, `waiting_human`, `done`, `blocked` | `done` est refusé si le job est `busy` |
 | `summary` | ce qui est vrai ou disponible maintenant | 1 à 2 phrases, 240 caractères, français, troisième personne pour l'agent |
 | `next` | ce qui reste ou ce qui se passe ensuite | vide si `done` |
-| `plan` | 3 à 6 étapes vérifiables | stable tant que l'objectif ne change pas |
-| `progress` | calculé par le daemon | `null` sans plan ; 100 seulement si `done` |
+| `plan` | retiré du compagnon | la source est le `todowrite` de la session de travail |
+| `progress` | calculé par le daemon depuis les todos | `null` sans todo ; 100 seulement si `done` |
 | `confidence` | 0 à 1, ou `null` si rien à juger | `null` produit les pastilles grises |
 | `confidence_reason` | ce qui soutient et ce qui manque | obligatoire |
 | `human_request` | `{needs, source, ask}` | gaté par un signal réel |
@@ -37,13 +42,16 @@ Le verdict JSON du compagnon contient :
    formulaires (`question_tool`), des permissions, ou d'une question explicite
    du dernier message de l'agent (`agent_ask`). Le compagnon ne fait que
    reformuler. Sans signal, `attend` est vide même si le modèle insiste.
-2. **La progression vient du plan.** Le daemon calcule les étapes faites sur
-   les étapes du plan. Un plan absent donne `progress: null` et pas de barre.
-   Une étape faite sans objectif vérifié plafonne à 99 %.
+2. **La progression vient du plan de la tâche.** Le daemon lit le dernier
+   `todowrite` de la session de travail et calcule les étapes faites sur les
+   étapes. Le compagnon ne fournit pas de plan. Un todo absent donne
+   `progress: null` et pas de barre. Une étape faite sans objectif vérifié
+   plafonne à 99 %.
 3. **`done` implique 100**, et `busy` interdit `done`.
 4. **Un nouvel objectif change la version.** Une consigne longue avec un verbe
-   d'action incrémente `objective_version`, remet le plan à zéro et crée un
-   nouveau plan. Une réponse courte (« oui », « Bun ») ne change pas l'objectif.
+   d'action incrémente `objective_version` et remet le plan à zéro. La session de
+   travail repose son `todowrite` quand elle reprend. Une réponse courte
+   (« oui », « Bun ») ne change pas l'objectif.
 5. **Pas de baisse silencieuse.** À plan identique, une baisse de plus de 5
    points est refusée. Une baisse n'est permise que si l'objectif change ou si
    le plan change réellement.
@@ -69,6 +77,12 @@ Le verdict JSON du compagnon contient :
 11. **Ménage des compagnons.** `bun daemon/scripts/cleanup-companions.mts`
     (simulation) puis `--apply` garde le compagnon de `companion_map` et archive
     les autres, ainsi que les compagnons de parents disparus ou archivés.
+12. **La fin de tour est prioritaire.** Un kick `end` (exécution terminée ou
+    `session.idle`) n'est pas bloqué par l'intervalle minimal de 20 s ; le
+    dédoublonnage par digest évite les appels à vide. Si un verdict est
+    antérieur à la dernière activité de la session, son résumé et sa confiance
+    sont masqués jusqu'au bilan suivant : la carte ne montre pas « rien n'a
+    encore été produit » à côté d'une livraison fraîche.
 
 ## Fichiers
 

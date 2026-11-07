@@ -178,7 +178,31 @@ bun run dev:ui
 
 ## 10. Reste à faire
 
-- La barre de création de session reste désactivée (position MVP1, design en évolution).
-- Le chemin permission n'a pas encore été exercé sur une vraie demande OpenChamber (aucune demande réelle disponible pendant la migration) ; le contrat et le rendu sont testés sur flotte factice.
+- La barre de création de session reste désactivée dans l'état actuel ; le design est tranché dans [chat-superviseur.md](chat-superviseur.md) (chat de supervision à gauche, `start_task`), l'implémentation remplacera la barre.
+- Le chemin permission n'a pas encore été exercé sur une vraie demande OpenChamber (aucune demande réelle disponible pendant la migration) ; le contrat et le rendu sont testés sur flotte factice. L'instance tourne en YOLO et le parcours est reporté : [permissions-yolo.md](permissions-yolo.md).
 - Le déplacement d'une carte entre sections peut perdre le focus du composer (le texte est conservé par le store). Un rendu en liste plate avec portails pourrait le préserver si l'usage le réclame.
 - Livraison : les pages `openchamber_render` en langage `ui` ne sont pas dessinées (texte final seulement) ; les pages qui attendent une réponse (`awaitAnswer`) ne sont pas affichées (leur réponse reste un geste OpenChamber) ; les images locales d'une page HTML ne sont pas résolues ; un tour de plus de 40 messages peut sortir le dernier prompt de la fenêtre (le dernier texte assistant reste retenu).
+
+## 11. Chat de supervision (implémenté le 2026-11-06)
+
+Le chat de gauche remplace la barre de saisie du haut. Il vit dans `~/.superviseur` et tout le dossier est exclu de la flotte et du compagnon.
+
+### Composants
+
+- `SupervisorChat.tsx` : panneau vertical, messages, tool chips, composer, erreurs, bouton Nouvelle, Ouvrir, Replier.
+- `ChatMarkdown.tsx` : markdown GFM, `skipHtml`, pas d'images locales dans le chat.
+- `supervisorStore.ts` : état du chat ; `sendError` séparé de `refreshError` pour qu'un poll ne masque pas un échec d'envoi ; `draft` restauré après échec.
+- `useSupervisor.ts` : poll 1,2 s quand le superviseur travaille, 4 s au repos.
+- `App.tsx` : chat 380 px redimensionnable (320 à 480, largeur mémorisée), onglets Chat/Tâches sous 1100 px, flotte à droite. L'icône Envoyer est `SendIcon`, comme les composers de carte.
+
+### Routes
+
+| Route | Usage |
+| --- | --- |
+| `GET /api/supervisor` | session, statut, messages transformés (texte + tool chips) |
+| `POST /api/supervisor/send` | envoyer un texte au chat |
+| `POST /api/supervisor/new` | nouvelle conversation |
+| `POST /api/supervisor/abort` | arrêter le tour |
+| `POST /api/tools/:name` | outils du plugin (`list_projects`, `list_tasks`, `get_task`, `start_task`, `send_task`, `close_task`) |
+
+Le détail du contrat, du plugin, du trust du dossier et des tests est dans [chat-superviseur.md](chat-superviseur.md) et [chat-superviseur-tests.md](chat-superviseur-tests.md). `bun test daemon/test ui/src` couvre 110 tests ; les campagnes Playwright ont validé C1 à C17.

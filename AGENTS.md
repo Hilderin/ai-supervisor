@@ -35,6 +35,7 @@ Directives pour tout agent travaillant dans ce repo.
 - Les scheduled tasks n'ont **pas d'historique de runs** ; `/api/openchamber/message-search` existe (à tester) ; la mémoire agent = JSON lisible-corrigeable via HTTP.
 - **Livraison inline : le dernier message assistant n'est pas la réponse** : un tour finit souvent par des tool calls sans texte. Depuis le dernier message `user`, prendre le dernier texte assistant et le dernier `openchamber_render` du même tour.
 - **`openchamber_render`** : la page est dans `state.input.parameters.html` (ou `state.input.html`), le titre dans `parameters.title` (ou `title`), et le rendu est confirmé par `state.metadata.openchamber.ok`. Les pages en langage `ui` (`parameters.ui`) ne sont pas du HTML : ne pas les dessiner comme telles.
+- **Todo list de tâche** : le plugin OpenCodeTodoList est actif et écrit son JSON dans `opencode.db`, table `kv`, clé `plugin:…:session/<sessionID>`. La lecture stable pour le daemon est le tool part `todowrite` (`state.metadata.todos`), pas la base ; la table `todo` native n'est pas ce store.
 
 ### UI (patterns de la page flotte)
 
@@ -77,18 +78,35 @@ Directives pour tout agent travaillant dans ce repo.
 - **Le prompt d'un agent est mis en cache par NOM, pas par contenu** : changer le fichier ne suffit pas, une session créée avec le même nom peut garder l'ancien prompt. Le daemon crée `superviseur-analyste-<hash>` (symlink vers le fichier canonique), le fixe **dès la création** de la session enfant (le `send` ne l'impose pas toujours), et recrée le compagnon si `companion_map.agent` ne correspond pas.
 - **`getAgentVersion` lit et hashe le contenu à chaque appel** : un cache par `mtime` a mémorisé un fichier lu pendant une écriture et est resté figé sur une version périmée. 8 Ko toutes les 3 s sont négligeables.
 - **L'attente humaine ne se décide pas par le LLM** : `attend` vient des formulaires (`question_tool`), des permissions, ou d'une question explicite du dernier message de l'agent. Le compagnon ne fait que reformuler ; sans signal, le daemon vide `attend`. Le digest nomme le lecteur `[TOI]`, jamais `[HUMAIN]`.
-- **La progression vient d'un plan stocké** (3 à 6 étapes), pas d'un pourcentage inventé : le daemon calcule `étapes faites / étapes`, `done` implique 100, `busy` interdit `done`, pas de plan ⇒ pas de barre, baisse refusée à plan identique.
+- **La progression vient du plan `todowrite` de la session de travail** (3 à 6 étapes), pas du compagnon ni d'un pourcentage inventé : le daemon lit le tool part `todowrite`, calcule `étapes faites / étapes`, `done` implique 100, `busy` interdit `done`, pas de plan ⇒ pas de barre, baisse refusée à plan identique.
 - **Un nouvel objectif est versionné** : une consigne longue avec un verbe d'action incrémente `task_state.objective_version` et remet le plan à zéro ; une réponse courte ne change pas l'objectif. La carte lit le dernier objectif, pas seulement le premier prompt.
 - **Résumé de carte** : français, troisième personne pour l'agent, « tu » réservé au lecteur ; interdits = identifiants, commits, branches, numéros de document, fichiers, outils, tests, pourcentages, `idle/busy/extrait`, « le compagnon » pour l'agent, et toute allusion au plan/contrat/JSON. Linter + une reprise unique + ancien résumé en repli.
 - **Déclencheurs et coût** : digest inchangé ⇒ aucun appel ; 20 s minimum par session ; 3 analyses simultanées ; les compagnons à migrer passent en priorité sinon deux sessions busy prennent tous les créneaux.
 - **Ménage** : `bun daemon/scripts/cleanup-companions.mts` (simulation) puis `--apply`. Garde le compagnon de `companion_map`, archive les autres, supprime les mappings des parents disparus ou archivés. Idempotent.
 - Détails et décisions : `docs/analyses/mvp1/compagnon-verdict.md`.
 
+### Chat de supervision (2026-11-06)
+
+- Le chat vit dans `~/.superviseur` (session OpenChamber normale, agent `superviseur-orchestrateur-<hash>`). **Tout le dossier** est exclu de la flotte et du compagnon : les anciennes conversations restent dans OpenChamber mais ne deviennent jamais des cartes.
+- **Plugin projet-local** : `~/.superviseur/.opencode/plugins/superviseur` est bien chargé ; un agent projet-local dans `~/.superviseur/.opencode/agent` n'est **pas** chargé par cette version d'OpenChamber. L'agent orchestrateur est donc global et versionné, comme l'analyste.
+- **Trust du dossier** : OpenChamber met le dossier en pause (`opencode_trust_required`) tant que son empreinte de plugins/commandes n'est pas approuvée. Le daemon appelle `GET/POST /api/opencode/trust` avec le `fingerprint` avant de créer la session.
+- **Ajouter un plugin exige un redémarrage d'OpenCode** : `/api/location/reload` ne recharge pas la liste des plugins, et `/api/config/reload` peut interrompre une réponse en cours. Le dossier doit être approuvé puis OpenCode redémarré une fois.
+- **Outils du plugin** : `codemode: false` pour des outils directs. L'agent désactive `openchamber*` et `execute` ; le daemon vérifie que l'appelant est la session de supervision (`not_supervisor` sinon).
+- **`start_task` et doublons** : la flotte peut ne pas avoir encore vu la nouvelle session. Vérifier `task_brief` (écrit immédiatement) et garder un set `creating` par `projet|titre` ; sinon deux appels rapprochés créent deux sessions.
+- **Fin de tour** : un kick `end` (`session.execution.*` ou `session.idle`) n'est pas bloqué par l'intervalle de 20 s. Si le verdict précède la dernière activité, masquer résumé/confiance et garder la progression des todos en attendant le bilan.
+- **Chat UI** : l'erreur d'envoi (`sendError`) est séparée de l'erreur de poll (`refreshError`) ; sinon le poll suivant efface le bandeau et fait disparaître le message. Composer désactivé pendant un tour busy, icône Envoyer identique aux cartes, auto-grow 120 px.
+- **« Nouvelle » n'est pas un tour LLM** : créer la session sans prompt et séparer `creating` de `sending` ; l'écran se vide immédiatement, sans indicateur « le superviseur travaille ». Les suggestions de l'écran vide ont été retirées (demande utilisateur).
+- **En-tête du chat** : la barre de page (logo, titre, « Masquer », Live) a été retirée ; le chat porte le titre. `+` pour Nouvelle, icône de panneau pour replier, flèche pour OpenChamber. Replié, un rail de 34 px avec l'icône de panneau rouvre le chat.
+- **`send_task`** : seul outil d'écriture dans une tâche. Une question en attente est **annulée** via `DELETE /api/session/:id/form/:formID?message=…` puis le texte est envoyé (même geste qu'OpenChamber) ; une permission reste bloquante. `cancel_question` et le bouton « Annuler la question » font le même DELETE. `close_task` refuse une attente sauf `force` explicite, et annule alors la question en journalisant l'abandon. Pas de `reply_task`, pas de `merge_pr`.
+- **Information inaccessible = intention de tâche probable** : si le chat n'a pas l'accès (web, fichier, exécution), il ne répond pas seulement « je ne peux pas » ; il propose une tâche de recherche ou d'exécution, demande la précision minimale, et lance `start_task` sur accord. Une demande explicite (« cherche la météo à Montréal ») part directement dans le projet `chats` ; une question vague propose d'abord. Une question à laquelle il peut répondre reste une réponse.
+- **Permissions : YOLO, hors scope** : l'instance ne demande pas de permission ; le chemin carte/proxy reste en place mais n'est pas développé. Voir `docs/analyses/mvp1/permissions-yolo.md`. Ne pas annuler une permission avec le DELETE des questions.
+- Détails, tests et questions : `docs/analyses/mvp1/chat-superviseur.md` et `chat-superviseur-tests.md`.
+
 ### Repo & docs
 
 - **Lister le dossier avant d'attribuer un numéro de doc** (double 09 déjà arrivé).
 - **Une demande de boîte à idées n'est pas un chantier d'implémentation** (déjà arrivé : « ajoute l'idée confiance non définie » lu comme « implémente-la »). Quand un message peut se lire comme une note de conception OU une tâche de code, trancher explicitement avant d'agir (question courte : « note dans la boîte, ou j'implémente ? »).
 - **Image locale dans une réponse** : OpenChamber ne donne un grant que pour un chemin cité par le message assistant lui-même. Une copie du message dans un résumé compagnon (ou un autre fil) affiche une image brisée. Pour une image destinée à être partagée, servir une URL HTTP (build/daemon) ou une data URL, pas un chemin local.
-- Le MVP1 est le contrat (`docs/analyses/mvp1/objectif-mvp1.md`) : création de session en dernier (design en évolution).
+- Le MVP1 est le contrat (`docs/analyses/mvp1/objectif-mvp1.md`) ; la création de session est implémentée via le chat de supervision (`docs/analyses/mvp1/chat-superviseur.md`).
 - Ne pas dupliquer : ce qui est analysé ailleurs (spike, architecture) se cite par lien.
 - UI React : décisions et commandes dans `docs/analyses/mvp1/implementation-ui-react.md` et `ui/README.md`.

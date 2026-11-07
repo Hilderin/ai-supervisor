@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { replyForm } from '../lib/api';
+import { cancelQuestion, replyForm } from '../lib/api';
 import { buildAnswer, type Choice } from '../lib/answer';
 import { cx } from '../lib/cx';
 import { BTN_GHOST, BTN_GHOST_SELECTED, BTN_PRIMARY, INPUT } from '../lib/ui';
@@ -19,6 +19,8 @@ export function QuestionBox({ sessionId, form }: Props) {
   const [choice, setChoice] = useState<Choice>({});
   const [free, setFree] = useState<Record<string, string>>({});
   const [sending, setSending] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const toggle = (key: string, value: string, multi: boolean) => {
     setChoice((prev) => {
@@ -29,14 +31,27 @@ export function QuestionBox({ sessionId, form }: Props) {
     });
   };
 
+  const answer = buildAnswer(fields, choice, free);
+  const canSubmit = Object.keys(answer).length > 0;
+
   const submit = () => {
-    if (sending) return;
-    const answer = buildAnswer(fields, choice, free);
-    if (!Object.keys(answer).length) return;
+    if (sending || !canSubmit) return;
     setSending(true);
+    setError(null);
     void replyForm(sessionId, form.id, answer)
-      .catch((e) => console.error('[replyForm]', e))
+      .catch((e) => setError(String(e?.message ?? e)))
       .finally(() => setSending(false));
+  };
+
+  const cancel = () => {
+    if (sending || cancelling) return;
+    const q = fields[0]?.description ?? fields[0]?.title ?? 'cette question';
+    if (!window.confirm(`Annuler la question « ${q} » ? L'agent reprendra sans réponse.`)) return;
+    setCancelling(true);
+    setError(null);
+    void cancelQuestion(sessionId, form.id)
+      .catch((e) => setError(String(e?.message ?? e)))
+      .finally(() => setCancelling(false));
   };
 
   return (
@@ -87,8 +102,22 @@ export function QuestionBox({ sessionId, form }: Props) {
           </div>
         );
       })}
+      {error ? <div className="mb-[6px] text-[11.5px] text-danger">{error}</div> : null}
       <div className="mb-[4px] mt-[2px] flex justify-end gap-[7px]">
-        <button type="button" onClick={submit} disabled={sending} className={BTN_PRIMARY}>
+        <button
+          type="button"
+          onClick={cancel}
+          disabled={sending || cancelling}
+          className={cx(BTN_GHOST, 'text-muted', (sending || cancelling) && 'cursor-default opacity-40')}
+        >
+          Annuler la question
+        </button>
+        <button
+          type="button"
+          onClick={submit}
+          disabled={sending || !canSubmit}
+          className={cx(BTN_PRIMARY, (sending || !canSubmit) && 'cursor-default opacity-40')}
+        >
           Répondre
         </button>
       </div>
