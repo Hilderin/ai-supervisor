@@ -4,35 +4,40 @@ Idées et suggestions en vrac, à creuser (ou non) plus tard. Rien d'engagé ici
 
 ## Sommaire par importance
 
-L'importance est jugée sur l'apport au cœur du Superviseur (voir ce qui tourne, comprendre où ça va, intervenir à temps), puis sur le coût quand deux idées se valent. Un gros pari pas encore tranché (le chat permanent) descend, parce qu'on ne peut pas le prioriser avant les signaux de base. C'est un jugement de travail, révisable : déplacer une section suffit, le tableau suit.
+L'importance est jugée sur l'apport au cœur du Superviseur (voir ce qui tourne, comprendre où ça va, intervenir à temps), puis sur le coût quand deux idées se valent. Un gros pari pas encore tranché (le chat permanent) descend, parce qu'on ne peut pas le prioriser avant les signaux de base. C'est un jugement de travail, révisable.
 
-Les sections ci-dessous sont dans cet ordre.
+Les idées à faire sont triées par priorité. Les idées complétées ou closes sont listées ensuite ; les sections détaillées conservent l'ordre d'origine.
 
-| # | Idée | Pourquoi ce rang | Coût |
-|---|------|------------------|------|
-| 1 | Le superviseur fixe l'objectif, et peut stopper ou rediriger un agent qui dérape | Protège du travail qui part dans la mauvaise direction, né d'un cas réel : c'est la raison d'être du Superviseur (porter l'attention) | moyen |
-| 2 | Ordre des cartes figé : les nouvelles en bas, rien ne bouge sous le curseur | L'instabilité de l'écran empêche de lire la flotte pendant qu'on travaille ; bénéfice quotidien pour un coût faible | faible |
-| 3 | Une ligne « action en cours » : ce que l'agent fait vraiment, tout de suite | Répond au doute « est-ce que ça avance ? » dès les premières secondes, sans attendre l'analyse du compagnon | faible à moyen |
-| 4 | Voir une erreur de session sur la carte (et le retry qui suit) | Un tour qui échoue et réessaie ressemble à un tour qui avance : sans signal, on confond erreur et lenteur ; l'événement d'échec arrive déjà au daemon, il est simplement jeté | faible à moyen |
-| 5 | Envoyer des instructions pendant qu'une tâche travaille | Capacité de pilotage centrale (queue, direct, fork, btw), mais dépend de ce que l'API permet réellement | moyen à élevé |
-| 6 | Un tool « dire à l'utilisateur » : informer sans arrêter le travail | Complète le canal utilisateur → tâche (rang 5) par le sens inverse : la tâche peut répondre ou signaler au fil du tour, sans tour ni question bloquante ; le récepteur existe déjà (le chat sait afficher), c'est la sortie qui manque | faible à moyen |
-| 7 | Un mode plan pour le superviseur : lire le projet avant de cadrer une carte | Le brief d'une tâche est deviné à partir d'une phrase : sans lecture du projet, l'objectif et les critères restent génériques et l'humain corrige ce que l'agent n'a pas pu lire ; même outils que le mode discussion, autre intention | moyen |
-| 8 | Un vrai mode conversationnel : brainstormer sans lancer de tâche | Le chat existe, mais son agent est un aiguilleur sans accès au projet : il manque la posture (discuter) et des outils de lecture ; le coût est surtout du prompt et une bascule explicite | faible à moyen |
-| 9 | Mettre à jour une étape du plan sans réécrire la liste | Répare un signal déjà affiché qui ment : la barre reste vide puis saute à 100 % ; une barre fausse coûte plus qu'une ligne absente | moyen |
-| 10 | Objectif courant affiché sur la carte, en plus du résumé | Complète les rangs 1 et 3 : savoir où va la carte, pas seulement ce qu'elle fait ; un champ à ajouter | faible |
-| 11 | Numéroter les tâches, avec un préfixe par projet | Une référence stable pour suivre et désigner une tâche (« reprends la 42 ») alors que le titre change ; peu coûteux et utile partout (carte, chat, notifications) | faible |
-| 12 | Notifications desktop + badge d'attention sur l'icône | Le Superviseur doit venir vers l'utilisateur quand il n'est pas devant ; sans ça, tout le reste suppose l'œil sur la fenêtre | moyen |
-| 13 | Chemins de fichiers et URL cliquables dans les résultats | Aller du résultat au fichier sans copier-coller ; s'appuie sur le rendu existant de la livraison et sur `/api/fleet/asset` | faible à moyen |
-| 14 | Pinner des conversations / indiquer une priorité | Triage quand la flotte grossit ; secondaire tant que l'ordre des cartes n'est pas stabilisé | faible à moyen |
-| 15 | Always on top + une UI qui tient dans un coin | Définit le mode d'usage (patch d'écran) ; à faire une fois les signaux essentiels arrêtés | moyen |
-| 16 | Date et heure de la dernière activité sur une conversation | Petit signal complémentaire (session vivante ou morte), peu coûteux, non bloquant | faible |
-| 17 | Un chat permanent, à droite ? (le « poste de commandement » conversationnel) | Gros pari d'architecture, à trancher après les signaux de base : il peut réorienter toute l'UI | élevé |
-| 18 | Markdown dans l'affichage (hors livraison) | Lisibilité de ce qu'écrivent les agents partout (brief, questions, tooltips), pour un coût faible ; c'est du confort, pas du pilotage | faible |
-| 19 | Un petit bouton config dans la conversation | Confort (modèle et agent à chaud), le plus simple ; n'a d'intérêt qu'une fois le pilotage en place | faible |
-| 20 | Choisir le modèle du chat, des tâches et du compagnon | Le modèle est un levier de coût et de qualité invisible aujourd'hui ; il manque un geste simple pour régler chaque type de conversation | faible à moyen |
-| 21 | Coller des images dans le chat et les cartes | Le presse-papiers est le chemin le plus court pour montrer une maquette, une erreur ou un rendu cassé ; confort réel, mais secondaire face au pilotage | faible à moyen |
+### À faire
 
-État au 2026-11-07 : rangs 2, 6, 9 et 17 faits ; rang 3 couvert autrement (étape courante du plan) ; rang 7 implémenté en partie (mode Investigation, lectures de fichiers bornées, proposition dans le chat). Ces idées restent listées avec leur note de clôture ou leurs écarts ; les autres sont ouvertes.
+| # | Idée | Pourquoi ce rang | Coût | État |
+|---|------|------------------|------|------|
+| 1 | Le superviseur fixe l'objectif, et peut stopper ou rediriger un agent qui dérape | Protège du travail qui part dans la mauvaise direction, né d'un cas réel : c'est la raison d'être du Superviseur (porter l'attention) | moyen | À faire |
+| 5 | Envoyer des instructions pendant qu'une tâche travaille | Capacité de pilotage centrale (queue, direct, fork, btw), mais dépend de ce que l'API permet réellement | moyen à élevé | Partiel : file d'attente |
+| 7 | Un mode plan pour le superviseur : lire le projet avant de cadrer une carte | Le brief d'une tâche est deviné à partir d'une phrase : sans lecture du projet, l'objectif et les critères restent génériques et l'humain corrige ce que l'agent n'a pas pu lire ; même outils que le mode discussion, autre intention | moyen | Partiel : mode Investigation et lecture bornée |
+| 8 | Un vrai mode conversationnel : brainstormer sans lancer de tâche | Le chat existe, mais son agent est un aiguilleur sans accès au projet : il manque la posture (discuter) et des outils de lecture ; le coût est surtout du prompt et une bascule explicite | faible à moyen | À faire |
+| 10 | Objectif courant affiché sur la carte, en plus du résumé | Complète les rangs 1 et 3 : savoir où va la carte, pas seulement ce qu'elle fait ; un champ à ajouter | faible | À faire |
+| 11 | Numéroter les tâches, avec un préfixe par projet | Une référence stable pour suivre et désigner une tâche (« reprends la 42 ») alors que le titre change ; peu coûteux et utile partout (carte, chat, notifications) | faible | À faire |
+| 12 | Notifications desktop + badge d'attention sur l'icône | Le Superviseur doit venir vers l'utilisateur quand il n'est pas devant ; sans ça, tout le reste suppose l'œil sur la fenêtre | moyen | À faire |
+| 13 | Chemins de fichiers et URL cliquables dans les résultats | Aller du résultat au fichier sans copier-coller ; s'appuie sur le rendu existant de la livraison et sur `/api/fleet/asset` | faible à moyen | À faire |
+| 15 | Always on top + une UI qui tient dans un coin | Définit le mode d'usage (patch d'écran) ; à faire une fois les signaux essentiels arrêtés | moyen | À faire |
+| 18 | Markdown dans l'affichage (hors livraison) | Lisibilité de ce qu'écrivent les agents partout (brief, questions, tooltips), pour un coût faible ; c'est du confort, pas du pilotage | faible | Partiel : chat seulement |
+| 19 | Un petit bouton config dans la conversation | Confort (modèle et agent à chaud), le plus simple ; n'a d'intérêt qu'une fois le pilotage en place | faible | À faire |
+| 20 | Choisir le modèle du chat, des tâches et du compagnon | Le modèle est un levier de coût et de qualité invisible aujourd'hui ; il manque un geste simple pour régler chaque type de conversation | faible à moyen | À faire |
+| 21 | Coller des images dans le chat et les cartes | Le presse-papiers est le chemin le plus court pour montrer une maquette, une erreur ou un rendu cassé ; confort réel, mais secondaire face au pilotage | faible à moyen | À faire |
+
+### Complétées / closes
+
+| # | Idée | Pourquoi ce rang | Coût | État |
+|---|------|------------------|------|------|
+| 2 | Ordre des cartes figé : les nouvelles en bas, rien ne bouge sous le curseur | L'instabilité de l'écran empêche de lire la flotte pendant qu'on travaille ; bénéfice quotidien pour un coût faible | faible | Fait |
+| 3 | Une ligne « action en cours » : ce que l'agent fait vraiment, tout de suite | Répond au doute « est-ce que ça avance ? » dès les premières secondes, sans attendre l'analyse du compagnon | faible à moyen | Couvert autrement : étape courante du plan |
+| 4 | Voir une erreur de session sur la carte (et le retry qui suit) | Un tour qui échoue et réessaie ressemble à un tour qui avance : sans signal, on confond erreur et lenteur ; l'événement d'échec arrive déjà au daemon, il est simplement jeté | faible à moyen | Fait |
+| 6 | Un tool « dire à l'utilisateur » : informer sans arrêter le travail | Complète le canal utilisateur → tâche (rang 5) par le sens inverse : la tâche peut répondre ou signaler au fil du tour, sans tour ni question bloquante ; le récepteur existe déjà (le chat sait afficher), c'est la sortie qui manque | faible à moyen | Fait : tool `answer` |
+| 9 | Mettre à jour une étape du plan sans réécrire la liste | Répare un signal déjà affiché qui ment : la barre reste vide puis saute à 100 % ; une barre fausse coûte plus qu'une ligne absente | moyen | Fait : `todoupdate` |
+| 14 | Pinner des conversations / indiquer une priorité | Triage quand la flotte grossit ; secondaire tant que l'ordre des cartes n'est pas stabilisé | faible à moyen | Clos : l'ordre des cartes est stable |
+| 16 | Date et heure de la dernière activité sur une conversation | Petit signal complémentaire (session vivante ou morte), peu coûteux, non bloquant | faible | Fait |
+| 17 | Un chat permanent, à droite ? (le « poste de commandement » conversationnel) | Gros pari d'architecture, à trancher après les signaux de base : il peut réorienter toute l'UI | élevé | Fait : chat à gauche |
 
 ## Idées
 
@@ -334,7 +339,7 @@ Lien : idée « markdown dans l'affichage » (le rendu inline est le prérequis 
 
 Pouvoir **pinner** des conversations, ou leur **indiquer une priorité**, pour qu'elles remontent en haut de la liste, au-dessus des autres. Complète le triage : ce qui est urgent à mes yeux reste visible même quand la flotte bouge beaucoup.
 
-À creuser : pin simple vs échelle de priorité (combien de niveaux ?), position et signal visuel des cartes épinglées (section dédiée en haut ? badge sur la carte ?), et lien avec les signaux déjà existants (une tâche bloquée mais non épinglée doit-elle passer devant une épinglée qui tourne bien ?).
+> Clos le 2026-11-07 : l'ordre des cartes est désormais stable ; elles ne bougent plus selon leur activité. Le pin ou la priorité ne sont donc plus nécessaires pour compenser les déplacements.
 
 ### Always on top + une UI qui tient dans un coin
 
@@ -349,7 +354,7 @@ Deux compléments, pensés pour **laisser le Superviseur visible en permanence s
 
 Chaque conversation affiche **la date et l'heure de sa dernière activité**, doublée d'un temps relatif restimé en continu : « 4 nov 14h45 (3j) », « 9h34 (2h) ». L'absolu pour vérifier, le relatif pour sentir d'un coup d'œil si la session est vivante.
 
-À creuser : quelle activité compte (dernier message ? dernier tool call ?) ; le format court en petit format (fenêtre en coin d'écran) : relatif seul, absolu en tooltip ; et le lien avec les états (une session « en cours » dont la dernière activité date de 3 h est un signal en soi).
+> Fait le 2026-11-07 : la date et l'heure de la dernière activité sont affichées sur la conversation, avec un temps relatif pour estimer sa fraîcheur d'un coup d'œil.
 
 ### Un chat permanent, à droite ? (le « poste de commandement » conversationnel)
 
