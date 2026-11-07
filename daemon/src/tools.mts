@@ -14,7 +14,7 @@ import { getTodoSnapshot, todoPlan } from './todos.mts';
 import {
   armTaskResume, getTaskState, getTaskBrief, listTaskBriefs, logEvent, putTaskBrief, reviveTaskResume, upsertTaskState,
 } from './state.mts';
-import { isSupervisorSession, SUPERVISOR_DIR } from './supervisor.mts';
+import { isSupervisorSession, SUPERVISOR_DIR, wrapOwnerPrompt } from './supervisor.mts';
 
 export interface ToolResult {
   ok: boolean;
@@ -458,7 +458,11 @@ export async function sendTask(args: { task?: string; text?: string } = {}): Pro
     cancelledQuestion = pending.forms[0].text;
     logEvent(row.id, 'note', `question annulée par message : ${cancelledQuestion}`);
   }
-  const out = await jpost(`/api/session/${row.id}/prompt`, { text, delivery: 'steer' });
+  // encadrement owner : le plan doit être remis à jour quand une nouvelle
+  // instruction du propriétaire arrive (session idle et tour busy) ; le journal
+  // et la réponse gardent le texte brut
+  const prompt = wrapOwnerPrompt(text);
+  const out = await jpost(`/api/session/${row.id}/prompt`, { text: prompt, delivery: 'steer' });
   if (!out.ok) return { ok: false, error: 'send_failed', message: `envoi refusé (${out.status})`, taskId: row.id };
   // le propriétaire écrit à la tâche : sa reprise repart si elle était désactivée
   reviveTaskResume(row.id);

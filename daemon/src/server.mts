@@ -11,7 +11,7 @@ import { getDelivery } from './delivery.mts';
 import { readSessionAsset } from './assets.mts';
 import { companionSessionOf } from './companion.mts';
 import { getSupervisorSession, logEvent, upsertTaskState, getTaskState, reopenTaskState } from './state.mts';
-import { abortSupervisor, cancelQueuedSupervisor, getSupervisorState, newSupervisorConversation, queueSupervisor, revertSupervisor, sendSupervisor, SUPERVISOR_DIR } from './supervisor.mts';
+import { abortSupervisor, cancelQueuedSupervisor, getSupervisorState, newSupervisorConversation, queueSupervisor, revertSupervisor, sendSupervisor, SUPERVISOR_DIR, wrapOwnerPrompt } from './supervisor.mts';
 import { cancelPendingForms, pendingFor, runTool } from './tools.mts';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -258,9 +258,11 @@ async function handleApi(req: http.IncomingMessage, res: http.ServerResponse, ur
         logEvent(sessionId, 'note', `question annulée par message : ${cancelledQuestion}`);
       }
       logEvent(sessionId, 'note', '→ prompt : ' + text.slice(0, 120));
+      // même encadrement que le chat : l'instruction du propriétaire demande
+      // la mise à jour de la todolist, et le texte brut reste dans le journal
       const out = await relay(`/api/session/${sessionId}/prompt`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, delivery: body.delivery ?? 'steer' }),
+        body: JSON.stringify({ text: wrapOwnerPrompt(text), delivery: body.delivery ?? 'steer' }),
       });
       json(res, 200, { ...(out as object), cancelledQuestion });
     } catch (e) { json(res, 502, { error: String(e) }); }
