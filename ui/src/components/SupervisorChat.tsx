@@ -167,7 +167,10 @@ export function MessageMeta({
   return (
     <div
       data-testid="message-meta"
-      className="mt-[3px] flex min-h-[15px] items-center justify-start gap-[6px]"
+      className={cx(
+        'mt-[3px] flex min-h-[15px] items-center gap-[6px]',
+        message.role === 'user' ? 'justify-end' : 'justify-start',
+      )}
     >
       {message.at ? (
         <span className="text-[10px] leading-none text-placeholder">{clock(message.at)}</span>

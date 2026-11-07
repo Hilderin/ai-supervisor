@@ -153,7 +153,7 @@ Deux écarts de comportement volontaires :
 ## 8. Vérification
 
 - `bun run typecheck` : TypeScript strict, aucune erreur.
-- `bun test` : 71 tests UI (construction des réponses, placement TERMINÉ / périmé / busy, hystérésis de section, fermeture / réouverture, âges, garde d'horodatage, états de livraison, markdown, images locales, CSP du rendu, libellés de plan, envoi direct / file, boutons Envoyer et Stop, sens de « Nettoyer », actions de message, bloc `send_task`).
+- `bun test` : 72 tests UI (construction des réponses, placement TERMINÉ / périmé / busy, hystérésis de section, fermeture / réouverture, âges, garde d'horodatage, états de livraison, markdown, images locales, CSP du rendu, libellés de plan, envoi direct / file, boutons Envoyer et Stop, sens de « Nettoyer », actions de message, bloc `send_task`).
 - `bun test daemon/test` : 27 tests (dont 16 livraison et 7 assets : dernier texte, tour courant, rendu, refus, troncature, cache, single-flight, invalidation, course événement/lecture, chemins d'image).
 - `bun run build` : build Vite dans `ui/dist`.
 - Vérification visuelle : captures Playwright de la référence et du build sur une flotte factice, diff au pixel. Les zones communes sont identiques ; les seules différences sont le chip, la permission et la couleur de la ligne ✋ (écarts assumés ci-dessus).
@@ -189,7 +189,7 @@ Le chat de gauche remplace la barre de saisie du haut. Il vit dans `~/.supervise
 
 ### Composants
 
-- `SupervisorChat.tsx` : panneau vertical, messages, tool chips, composer, erreurs, icône balai « Nettoyer le chat », Ouvrir, Replier. Chaque message expose deux icônes (copier, revenir à partir d'ici) à gauche, sur la ligne de l'heure, avec infobulle et libellé accessible ; un `send_task` réussi ajoute un bloc « Envoyé à « titre » » avec le texte complet, le titre étant résolu dans la flotte à l'affichage. Le composer se redimensionne à la souris, reste actif pendant un tour et reprend le focus après « Nettoyer ».
+- `SupervisorChat.tsx` : panneau vertical, messages, tool chips, composer, erreurs, icône balai « Nettoyer le chat », Ouvrir, Replier. Chaque message expose deux icônes (copier, revenir à partir d'ici) sur la ligne de l'heure (à droite côté utilisateur, à gauche côté agent), avec infobulle et libellé accessible ; un `send_task` réussi ajoute un bloc « Envoyé à « titre » » avec le texte complet, le titre étant résolu dans la flotte à l'affichage. Le composer se redimensionne à la souris, reste actif pendant un tour et reprend le focus après « Nettoyer ».
 - `ChatMarkdown.tsx` : markdown GFM, `skipHtml`, pas d'images locales dans le chat.
 - `supervisorStore.ts` : état du chat ; `sendError` séparé de `refreshError` pour qu'un poll ne masque pas un échec d'envoi ; `draft` restauré après échec ; envoi direct au repos, mise en file pendant un tour.
 - `useSupervisor.ts` : poll 1,2 s quand le superviseur travaille, 4 s au repos.

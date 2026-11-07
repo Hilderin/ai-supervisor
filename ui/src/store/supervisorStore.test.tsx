@@ -163,13 +163,16 @@ describe('MessageMeta : heure et actions sur une ligne', () => {
     expect(out).not.toContain('>Revenir');
   });
 
-  test('l’heure et les icônes sont alignées à gauche pour les deux rôles', () => {
-    for (const role of ['user', 'assistant'] as const) {
-      const out = render({ role });
-      expect(out).toContain('justify-start');
-      expect(out).not.toContain('justify-end');
-      expect(out).not.toContain('justify-between');
-    }
+  test('l’utilisateur garde l’heure et les icônes à droite', () => {
+    const out = render();
+    expect(out).toContain('justify-end');
+    expect(out).not.toContain('justify-start');
+  });
+
+  test('les messages de l’agent gardent l’heure et les icônes à gauche', () => {
+    const out = render({ role: 'assistant' });
+    expect(out).toContain('justify-start');
+    expect(out).not.toContain('justify-end');
   });
 
   test('un message sans texte n’a pas d’action Copier', () => {

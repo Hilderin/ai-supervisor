@@ -79,8 +79,8 @@ Dernière vérification sur le build final : les quatre chemins A/B/C/D de `veri
 6. **Fin de tour** : un kick `end` (exécution terminée ou `session.idle`) n'est pas bloqué par l'intervalle de 20 s ; un verdict antérieur à la dernière activité est masqué en attendant le bilan.
 7. **`start_task`** : session top-level sans `parentID`, brief stocké immédiatement ; doublon vérifié dans `task_brief` avant la flotte ; plafond par défaut 8.
 8. **`send_task`** : seul outil d'écriture dans une tâche ; annule une question en attente puis envoie le texte ; une permission reste bloquante. `cancel_question` et le bouton de carte utilisent le même `DELETE /form/:id`. `close_task` refuse une attente sauf `force`. Pas de `reply_task`, pas de `merge_pr`.
-9. **UI** : chat 380 px redimensionnable (320..480, mémorisé), onglets Chat/Tâches sous 1100 px, icône Envoyer identique aux cartes, erreurs d'envoi séparées du poll, auto-grow 120 px. Le composer du chat se règle aussi en hauteur (34..360, mémorisé), reste actif pendant un tour (file d'attente avec Envoyer + Stop), affiche les icônes Copier / Revenir à gauche sur la ligne de l'heure, reprend le focus après « Nettoyer », affiche le bloc `send_task` avec le titre résolu et le texte complet, et le compteur d'étapes ouvre le plan.
-10. **Tests** : 133 tests unitaires (71 UI + 62 daemon), campagnes Playwright et quatre revues indépendantes.
+9. **UI** : chat 380 px redimensionnable (320..480, mémorisé), onglets Chat/Tâches sous 1100 px, icône Envoyer identique aux cartes, erreurs d'envoi séparées du poll, auto-grow 120 px. Le composer du chat se règle aussi en hauteur (34..360, mémorisé), reste actif pendant un tour (file d'attente avec Envoyer + Stop), affiche les icônes Copier / Revenir sur la ligne de l'heure (à droite côté utilisateur, à gauche côté agent), reprend le focus après « Nettoyer », affiche le bloc `send_task` avec le titre résolu et le texte complet, et le compteur d'étapes ouvre le plan.
+10. **Tests** : 134 tests unitaires (72 UI + 62 daemon), campagnes Playwright et quatre revues indépendantes.
 
 ## Ajouts du 2026-11-06 (soir)
 
