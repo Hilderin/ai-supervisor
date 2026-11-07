@@ -14,7 +14,14 @@
 | 6 | ↗ OpenChamber | ◐ | ouvre `openchamber-ui://session/{id}` — schéma **deviné, jamais vérifié** (à capturer depuis l'app) |
 | — | SSE instantané | ✖ | le poll 3 s porte tout (tuile planifiée I5) |
 
-> Design tranché et implémenté le 2026-11-06 : chat de supervision à gauche + outil `start_task`, barre du haut retirée. La progression vient du `todowrite` de la tâche. Voir [chat-superviseur.md](chat-superviseur.md) et [chat-superviseur-tests.md](chat-superviseur-tests.md).
+> Design tranché et implémenté le 2026-11-06 : chat de supervision à gauche
+> + outil `start_task`, barre du haut retirée. La progression vient du
+> `todowrite` de la tâche. Voir [chat-superviseur.md](chat-superviseur.md) et
+> [chat-superviseur-tests.md](chat-superviseur-tests.md).
+>
+> Ajout du 2026-11-07 : l'auto-restart (session d'une tâche détruite → nouvelle
+> session sur le modèle default courant, carte reprise sans doublon).
+> Détail : [auto-restart.md](auto-restart.md).
 
 Un jalon reste **central et testable tout de suite** : le steer pendant un tour en cours (composer sur carte busy) — l'endpoint répond, mais on n'a jamais envoyé un texte dans une session **effectivement busy**.
 

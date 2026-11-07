@@ -14,6 +14,9 @@ mkdirSync(dataDir, { recursive: true });
 
 export const db = new Database(join(dataDir, 'superviseur.db'));
 db.run('PRAGMA journal_mode = WAL;');
+// un script annexe (test, brut, script ponctuel) qui écrit au même instant ne
+// doit plus tuer le daemon : mmap/attente de verrou 5 s avant SQLITE_BUSY
+db.run('PRAGMA busy_timeout = 5000;');
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS task_log (
@@ -67,6 +70,24 @@ CREATE TABLE IF NOT EXISTS task_brief (
   model TEXT,
   created_at INTEGER NOT NULL
 );
+-- Registre de reprise : une tâche garde une identité stable (task_id) même
+-- quand sa session OpenCode disparaît et qu'une nouvelle la remplace.
+CREATE TABLE IF NOT EXISTS task_resume (
+  task_id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  title TEXT,
+  project_dir TEXT,
+  agent TEXT,
+  model TEXT,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  last_attempt_at INTEGER,
+  session_since INTEGER,
+  last_seen_at INTEGER,
+  disabled_at INTEGER,
+  disabled_reason TEXT,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_task_resume_session ON task_resume(session_id);
 `);
 try { db.exec('ALTER TABLE task_verdict ADD COLUMN note TEXT'); } catch { /* colonne déjà présente */ }
 try { db.exec('ALTER TABLE companion_map ADD COLUMN version INTEGER'); } catch { /* colonne déjà présente */ }
@@ -204,6 +225,10 @@ export function putCompanion(parentSid: string, compId: string, agent?: string) 
 export function reopenTaskState(sid: string) {
   db.query('UPDATE task_state SET closed_at = NULL, closure = NULL WHERE session_id = ?').run(sid);
   db.query('DELETE FROM task_verdict WHERE session_id = ?').run(sid);
+  // carte rouverte : la reprise redevient possible (budget remis à zéro)
+  db.query(`UPDATE task_resume SET disabled_at = NULL, disabled_reason = NULL,
+      attempts = 0, session_since = NULL, last_seen_at = NULL, updated_at = ?
+      WHERE session_id = ?`).run(Date.now(), sid);
 }
 
 export function getCompanionOut(parentSid: string): string | null { return getCompanion(parentSid); }
@@ -293,4 +318,117 @@ export function putTaskBrief(sessionId: string, p: {
               project_dir = excluded.project_dir, agent = excluded.agent, model = excluded.model`)
     .run(sessionId, p.title, p.goal, JSON.stringify(p.doneCriteria), JSON.stringify(p.constraints),
       p.projectDir, p.agent ?? null, p.model ?? null, Date.now());
+}
+
+/* --- Registre de reprise (auto-restart) ---
+ * Une ligne par tâche, identifiée par `task_id` : l'id de la session d'origine,
+ * conservé à travers les recréations. `session_id` porte la session vivante
+ * actuelle ; les garde-fous (tentatives, backoff, désactivation) vivent ici.
+ */
+
+export interface TaskResumeRow {
+  task_id: string;
+  session_id: string;
+  title: string | null;
+  project_dir: string | null;
+  agent: string | null;
+  model: string | null;
+  attempts: number;
+  last_attempt_at: number | null;
+  session_since: number | null;
+  last_seen_at: number | null;
+  disabled_at: number | null;
+  disabled_reason: string | null;
+  updated_at: number;
+}
+
+export function getTaskResume(taskId: string): TaskResumeRow | null {
+  return (db.query('SELECT * FROM task_resume WHERE task_id = ?').get(taskId) as TaskResumeRow | undefined) ?? null;
+}
+
+export function getTaskResumeBySession(sessionId: string): TaskResumeRow | null {
+  return (db.query('SELECT * FROM task_resume WHERE session_id = ?').get(sessionId) as TaskResumeRow | undefined) ?? null;
+}
+
+export function listTaskResume(): TaskResumeRow[] {
+  return db.query('SELECT * FROM task_resume ORDER BY updated_at').all() as TaskResumeRow[];
+}
+
+/** Arme (ou re-arme) la reprise d'une tâche. Un task_id déjà armé garde son historique de garde-fous. */
+export function armTaskResume(taskId: string, p: {
+  sessionId: string; title: string; projectDir: string; agent?: string | null; model?: string | null; at?: number;
+}) {
+  const at = p.at ?? Date.now();
+  db.query(`INSERT INTO task_resume (task_id, session_id, title, project_dir, agent, model, updated_at)
+            VALUES (?,?,?,?,?,?,?)
+            ON CONFLICT(task_id) DO UPDATE SET title = excluded.title, project_dir = excluded.project_dir,
+              agent = excluded.agent, updated_at = excluded.updated_at`)
+    .run(taskId, p.sessionId, p.title, p.projectDir, p.agent ?? null, p.model ?? null, at);
+}
+
+/** La session de la tâche a été vue vivante. */
+export function noteResumeAlive(taskId: string, at = Date.now()) {
+  db.query(`UPDATE task_resume SET
+      last_seen_at = ?, session_since = COALESCE(session_since, ?),
+      disabled_at = NULL, disabled_reason = NULL, updated_at = ?
+      WHERE task_id = ? AND (disabled_at IS NOT NULL OR last_seen_at IS NULL OR last_seen_at != ?)`)
+    .run(at, at, at, taskId, at);
+}
+
+/** Un essai de reprise : la tâche passe sur une nouvelle session (ou un essai vient d'échouer). */
+export function noteResumeAttempt(taskId: string, p: {
+  newSessionId?: string; at?: number;
+}) {
+  const at = p.at ?? Date.now();
+  db.query(`UPDATE task_resume SET
+      attempts = attempts + 1, last_attempt_at = ?,
+      session_id = COALESCE(?, session_id), session_since = NULL,
+      last_seen_at = NULL, disabled_at = NULL, disabled_reason = NULL, updated_at = ?
+      WHERE task_id = ?`)
+    .run(at, p.newSessionId ?? null, at, taskId);
+}
+
+export function resetResumeAttempts(taskId: string, at = Date.now()) {
+  db.query('UPDATE task_resume SET attempts = 0, updated_at = ? WHERE task_id = ?')
+    .run(at, taskId);
+}
+
+export function disableTaskResume(taskId: string, reason: string, at = Date.now()) {
+  db.query('UPDATE task_resume SET disabled_at = ?, disabled_reason = ?, updated_at = ? WHERE task_id = ?')
+    .run(at, reason.slice(0, 200), at, taskId);
+}
+
+export function enableTaskResume(taskId: string, at = Date.now()) {
+  db.query(`UPDATE task_resume SET disabled_at = NULL, disabled_reason = NULL,
+      attempts = 0, session_since = NULL, updated_at = ? WHERE task_id = ?`)
+    .run(at, taskId);
+}
+
+/** Une activité humaine sur la carte (prompt envoyé) rouvre la reprise si elle était désactivée. */
+export function reviveTaskResume(sessionId: string) {
+  db.query(`UPDATE task_resume SET disabled_at = NULL, disabled_reason = NULL,
+      attempts = 0, session_since = NULL, last_seen_at = NULL, updated_at = ?
+      WHERE session_id = ? AND disabled_at IS NOT NULL`)
+    .run(Date.now(), sessionId);
+}
+
+/**
+ * La tâche passe à une nouvelle session : ses données locales suivent.
+ * Le verdict est supprimé ici : un verdict ancien sur une session neuve
+ * masquerait le travail en cours (carte « terminé » figée).
+ */
+export function migrateTaskSession(oldId: string, newId: string) {
+  if (!oldId || !newId || oldId === newId) return;
+  db.transaction(() => {
+    db.query('UPDATE task_state SET session_id = ? WHERE session_id = ?').run(newId, oldId);
+    db.query('UPDATE task_brief SET session_id = ? WHERE session_id = ?').run(newId, oldId);
+    db.query('UPDATE task_log SET session_id = ? WHERE session_id = ?').run(newId, oldId);
+    db.query('DELETE FROM task_verdict WHERE session_id = ?').run(oldId);
+    // Le compagnon enfant est détruit avec son parent : la mapping ne doit pas
+    // ressusciter une session morte, le nouveau parent refabrique le sien.
+    db.query('DELETE FROM companion_map WHERE parent_session_id = ?').run(oldId);
+    // le registre suit la tâche : la session de reprise devient la nouvelle
+    db.query('UPDATE task_resume SET session_id = ?, session_since = NULL, last_seen_at = NULL WHERE session_id = ?')
+      .run(newId, oldId);
+  })();
 }

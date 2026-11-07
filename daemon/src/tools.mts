@@ -12,7 +12,7 @@ import { currentFleet, openchamberUrl, pollOnce, type FleetRow } from './fleet.m
 import { getDelivery } from './delivery.mts';
 import { getTodoSnapshot, todoPlan } from './todos.mts';
 import {
-  getTaskState, getTaskBrief, listTaskBriefs, logEvent, putTaskBrief, upsertTaskState,
+  armTaskResume, getTaskState, getTaskBrief, listTaskBriefs, logEvent, putTaskBrief, reviveTaskResume, upsertTaskState,
 } from './state.mts';
 import { isSupervisorSession, SUPERVISOR_DIR } from './supervisor.mts';
 
@@ -405,6 +405,15 @@ export async function startTask(args: {
       model: args.model ?? null,
     });
     upsertTaskState(taskId, { title, goal });
+    // la tâche est armée pour l'auto-restart dès sa création : si sa session
+    // OpenCode est détruite, une nouvelle repart automatiquement (task_resume)
+    armTaskResume(taskId, {
+      sessionId: taskId,
+      title,
+      projectDir: project.directory,
+      agent,
+      model: args.model ?? null,
+    });
     logEvent(taskId, 'open', `lancé depuis le chat : ${title}`.slice(0, 180));
     logEvent('supervisor', 'note', `start_task ${title} → ${taskId}`);
 
@@ -451,6 +460,8 @@ export async function sendTask(args: { task?: string; text?: string } = {}): Pro
   }
   const out = await jpost(`/api/session/${row.id}/prompt`, { text, delivery: 'steer' });
   if (!out.ok) return { ok: false, error: 'send_failed', message: `envoi refusé (${out.status})`, taskId: row.id };
+  // le propriétaire écrit à la tâche : sa reprise repart si elle était désactivée
+  reviveTaskResume(row.id);
   logEvent(row.id, 'note', `→ chat : ${text.slice(0, 120)}`);
   logEvent('supervisor', 'note', `send_task ${row.title}`);
   return { ok: true, taskId: row.id, title: row.title, text, cancelledQuestion };

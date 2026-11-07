@@ -16,6 +16,7 @@ export interface OpenchamberSession {
   metadata?: { openchamber?: { work?: { state?: string }, turn?: { durationMs?: number } } };
 }
 import { companionTick, verdictOf } from './companion.mts';
+import { setBase as setResumeBase, resumeTick } from './resume.mts';
 import { getSupervisorSession } from './state.mts';
 import { SUPERVISOR_DIR } from './supervisor.mts';
 import { getTodoSnapshot } from './todos.mts';
@@ -75,6 +76,7 @@ export function openchamberUrl(path: string) { return `${base}${path}`; }
 export function currentFleet(): Fleet { return cachedFleet; }
 export function setBase(b: string) {
   base = b.endsWith('/') ? b.slice(0, -1) : b;
+  setResumeBase(base);
 }
 
 async function jget(path: string, timeoutMs = 6000): Promise<unknown> {
@@ -235,6 +237,10 @@ async function runPoll(): Promise<void> {
       s => s.id !== supervisorId && s.location?.directory !== SUPERVISOR_DIR,
     );
     companionTick(tickSessions, status.sessions ?? {}, waitingMap);
+    // auto-restart : une tâche armée dont la session a été détruite repart sur
+    // une session neuve (modèle default courant), registre task_resume
+    void resumeTick(new Set(sessionsIndex.keys()))
+      .catch(() => { /* un tick raté réessaie au prochain poll */ });
   } catch {
     /* garde la dernière flotte connue, réessaie au prochain tick */
   }
