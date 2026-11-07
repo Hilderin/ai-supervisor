@@ -29,7 +29,7 @@ Les sections ci-dessous sont dans cet ordre.
 | 17 | Un chat permanent, à droite ? (le « poste de commandement » conversationnel) | Gros pari d'architecture, à trancher après les signaux de base : il peut réorienter toute l'UI | élevé |
 | 18 | Markdown dans l'affichage (hors livraison) | Lisibilité de ce qu'écrivent les agents partout (brief, questions, tooltips), pour un coût faible ; c'est du confort, pas du pilotage | faible |
 | 19 | Un petit bouton config dans la conversation | Confort (modèle et agent à chaud), le plus simple ; n'a d'intérêt qu'une fois le pilotage en place | faible |
-| 20 | Changer de modèle facilement : dans le chat et pour les tâches | Le modèle est un levier de coût et de qualité invisible aujourd'hui ; le paramètre existe déjà côté outil, il manque le geste et une UI courte | faible à moyen |
+| 20 | Choisir le modèle du chat, des tâches et du compagnon | Le modèle est un levier de coût et de qualité invisible aujourd'hui ; il manque un geste simple pour régler chaque type de conversation | faible à moyen |
 | 21 | Coller des images dans le chat et les cartes | Le presse-papiers est le chemin le plus court pour montrer une maquette, une erreur ou un rendu cassé ; confort réel, mais secondaire face au pilotage | faible à moyen |
 
 État au 2026-11-07 : rangs 2, 6, 9 et 17 faits ; rang 3 couvert autrement (étape courante du plan) ; rang 7 implémenté en partie (mode Investigation, lectures de fichiers bornées, proposition dans le chat). Ces idées restent listées avec leur note de clôture ou leurs écarts ; les autres sont ouvertes.
@@ -409,15 +409,16 @@ Dans l'en-tête d'une conversation (sans doute à côté du modèle/agent affich
 
 À creuser : le changement s'applique-t-il immédiatement (au prochain tour de la session) ou seulement nouvel envoi ? Faut-il une confirmation avant de basculer ? Comment signaler dans l'historique qu'un changement de modèle/agent a eu lieu (traçabilité des échanges) ?
 
-### Changer de modèle facilement : dans le chat et pour les tâches
+### Choisir le modèle du chat, des tâches et du compagnon
 
 Discussion du 7 nov : le modèle devient un choix de pilotage (un modèle fort pour réfléchir, un modèle rapide et bon marché pour les petites tâches), mais le Superviseur ne permet pas de le choisir : tout est régi par défaut de la session, invisible, et le changer suppose de ressortir de l'interface.
 
-Demande, trois endroits :
+Demande, quatre endroits :
 
 - **dans le chat du superviseur** : un sélecteur court près du composer (quelques modèles favoris, la valeur courante marquée), ou une commande simple (« passe sur ... » vers un modèle précis) que l'orchestrateur applique à sa propre session ;
 - **à la création d'une tâche** : un champ modèle au moment du lancement, avec un défaut par projet (reprendre le modèle de la tâche précédente) ; le paramètre existe déjà côté outil (`start_task` accepte `model`), il n'a pas d'UI ;
-- **sur la carte d'une session lancée** : c'est le terrain de l'idée « un petit bouton config » (au-dessus) ; les deux idées se rejoignent là.
+- **sur la carte d'une session lancée** : c'est le terrain de l'idée « un petit bouton config » (au-dessus) ; les deux idées se rejoignent là ;
+- **pour le compagnon de supervision** : un réglage dédié du modèle utilisé par ses conversations d'analyse, indépendant du modèle du chat et des tâches. Le changement doit aussi être propagé aux conversations de compagnon déjà en cours, afin que leurs prochaines analyses utilisent le modèle choisi, et pas seulement aux nouveaux compagnons.
 
 Constat sur le code actuel :
 
@@ -428,6 +429,7 @@ Constat sur le code actuel :
 À creuser avant d'implémenter :
 
 - **ce que l'API permet** : changer le modèle d'une session existante (au prochain tour ? par message ?) ou seulement à la création ; c'est la même question que l'idée « config dans la conversation », à trancher une fois pour les deux ;
+- **propagation au compagnon** : déterminer comment mettre à jour les sessions de compagnon existantes quand le réglage change, pour que le nouveau modèle s'applique à leurs prochaines analyses sans attendre leur recréation ;
 - **chat : un état explicite** : le sélecteur du chat porte la session du superviseur, donc un changement s'applique aux conversations suivantes ; afficher le modèle courant choisi (et la variante), pas seulement un réglage fugitif du composer ;
 - **modèle + variante** : proposer le couple (modèle, variante), sinon on change de modèle sans pouvoir choisir « thinking » ou sa variante rapide ;
 - **visibilité** : montrer le modèle en usage sur la carte et dans le chat ; sans ça, on ne sait pas ce que le geste a changé ;
