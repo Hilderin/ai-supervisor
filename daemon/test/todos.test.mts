@@ -41,6 +41,28 @@ describe('todos', () => {
     expect(extractTodos(messages)[0]?.content).toBe('X');
   });
 
+  test('todoupdate est aussi une source : le dernier part gagne', () => {
+    const todos = [
+      { content: 'A', status: 'completed', priority: 'high' },
+      { content: 'B', status: 'in_progress', priority: 'medium' },
+      { content: 'C', status: 'pending', priority: 'low' },
+    ];
+    const messages = [
+      {
+        content: [
+          { type: 'tool', tool: 'todowrite', state: { status: 'completed', metadata: { todos: todos.slice(0, 2) } } },
+        ],
+      },
+      {
+        content: [
+          // mise à jour unitaire par numéro : le part porte la liste complète
+          { type: 'tool', tool: 'todoupdate', state: { status: 'completed', metadata: { todos } } },
+        ],
+      },
+    ];
+    expect(extractTodos(messages)).toEqual(todos);
+  });
+
   test('progression : 50 %, 99 % quand tout est fait, null sans plan', () => {
     const half = snapshotOf([
       { content: 'A', status: 'completed', priority: 'high' },

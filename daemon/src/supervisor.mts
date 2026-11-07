@@ -301,7 +301,7 @@ function toMessage(m: WireMessage): SupervisorMessage | null {
       });
     }
   }
-  const text = messageText(m).trim();
+  const text = stripOwnerWrap(messageText(m).trim());
   if (!text && !tools.length) return null;
   return {
     id: m.id,
@@ -348,7 +348,8 @@ async function queuedOf(id: string): Promise<QueuedSupervisorMessage[]> {
     return (session?.items ?? [])
       .map(item => ({
         id: String(item.id ?? ''),
-        text: String(item.text ?? item.content ?? ''),
+        // la file porte le texte encadré : on l'affiche dépouillé
+        text: stripOwnerWrap(String(item.text ?? item.content ?? '')),
         at: Number(item.createdAt ?? 0),
       }))
       .filter(item => !!item.id);
@@ -416,12 +417,33 @@ export async function getSupervisorState(): Promise<SupervisorState> {
   }
 }
 
+/**
+ * Encadrement des messages du propriétaire envoyés dans le chat de supervision.
+ * Il ne s'applique qu'aux envois du chat (sendSupervisor / queueSupervisor) :
+ * les messages du daemon lui-même (ordres système, annulations vers les tâches)
+ * ne passent pas par là.
+ *
+ * Le texte encadré part tel quel à OpenChamber, donc la bulle du chat le
+ * porte aussi : `stripOwnerWrap` ne fait le retirer que pour l'affichage.
+ */
+export const OWNER_WRAP = 'Nouvelle instruction de l\u2019utilisateur, mets ta todolist à jour au besoin :';
+
+export function wrapOwnerPrompt(text: string): string {
+  return `${OWNER_WRAP}\n\n${text}`;
+}
+
+export function stripOwnerWrap(text: string): string {
+  const clean = String(text ?? '');
+  if (!clean.startsWith(OWNER_WRAP)) return clean;
+  return clean.slice(OWNER_WRAP.length).trim();
+}
+
 export async function sendSupervisor(text: string): Promise<SupervisorState> {
   const clean = String(text ?? '').trim();
   if (!clean) return getSupervisorState();
   const { id, agent } = await ensureSupervisorSession();
   const out = await jpost(`/api/openchamber/sessions/${id}/send`, {
-    prompt: clean,
+    prompt: wrapOwnerPrompt(clean),
     agent,
     directory: SUPERVISOR_DIR,
   });
@@ -446,9 +468,10 @@ export async function queueSupervisor(text: string): Promise<SupervisorState> {
   const { id, agent } = await ensureSupervisorSession();
   const sendConfig = await sendConfigOf(id, agent);
   if (!sendConfig) throw new Error('modèle du superviseur introuvable');
+  const wrapped = wrapOwnerPrompt(clean);
   const out = await jpost(`/api/message-queue/sessions/${encodeURIComponent(id)}/items`, {
     directory: SUPERVISOR_DIR,
-    item: { content: clean, text: clean, sendConfig },
+    item: { content: wrapped, text: wrapped, sendConfig },
   });
   if (!out.ok) throw new Error(`file d'attente superviseur → ${out.status}`);
   logEvent('supervisor', 'note', `file → ${clean.slice(0, 120)}`);

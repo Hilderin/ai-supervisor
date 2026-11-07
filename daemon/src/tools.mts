@@ -238,7 +238,9 @@ function composePrompt(p: {
   if (p.context) lines.push('', 'Contexte :', p.context);
   lines.push(
     '',
-    'Plan : utilise `todowrite` pour poser un plan de 3 à 6 étapes. Remplace la liste complète à chaque changement, marque `in_progress` quand tu commences une étape et `completed` quand elle est finie. Utilise `todoread` après une compaction.',
+    'Plan : tiens ta todolist à jour en continu (pas de limite au nombre d\'éléments) : une liste séquentielle d\'étapes, découpées par petits incréments, posée et modifiée avec `todowrite`.',
+    'Marque chaque étape `in_progress` quand tu la commences et `completed` quand elle est finie, en mettant à jour l\'élément par son numéro avec `todoupdate` plutôt qu\'en réécrivant toute la liste.',
+    'Utilise `todoread` après une compaction.',
     'Bilan : à la fin, écris un court bilan (fait, reste, décisions) dans ton dernier message.',
   );
   return lines.join('\n');

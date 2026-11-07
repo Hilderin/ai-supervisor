@@ -125,6 +125,7 @@ export function PlanPopover({ label, steps, done, total }: Props) {
                     >
                       {step.status === 'completed' ? '✓' : step.status === 'in_progress' ? '●' : '○'}
                     </span>
+                    <span className="mt-[1px] shrink-0 tabular-nums text-muted">{i + 1}.</span>
                     <span
                       className={cx(
                         'min-w-0',

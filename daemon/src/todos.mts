@@ -1,7 +1,8 @@
 /**
- * Plan de tâche : le `todowrite` de la session de travail est la seule source
- * de la progression. On lit le tool part dans les messages OpenChamber, jamais
- * la base OpenCode : la clé `kv` du plugin est interne et le tool part est la
+ * Plan de tâche : le `todowrite` (et son complément `todoupdate`, mise à jour
+ * unitaire par numéro) de la session de travail est la seule source de la
+ * progression. On lit le tool part dans les messages OpenChamber, jamais la
+ * base OpenCode : la clé `kv` du plugin est interne et le tool part est la
  * surface stable déjà exposée par l'API.
  *
  * Le cache évite de relire 60 messages à chaque tick de flotte. Il est indexé
@@ -60,8 +61,10 @@ export function setBase(b: string) {
 const cache = new Map<string, { at: number; lastUpdateAt: number; value: TodoSnapshot }>();
 const inFlight = new Map<string, Promise<TodoSnapshot>>();
 
+const TODO_TOOLS = new Set(['todowrite', 'todoupdate']);
+
 function isTodoTool(name: unknown): boolean {
-  return String(name ?? '').trim().toLowerCase().replace(/:\d+$/, '') === 'todowrite';
+  return TODO_TOOLS.has(String(name ?? '').trim().toLowerCase().replace(/:\d+$/, ''));
 }
 
 function asArray(raw: unknown): unknown[] {
