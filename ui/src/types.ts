@@ -116,9 +116,18 @@ export interface SupervisorState {
   status: 'idle' | 'busy' | 'unknown';
   agent: string | null;
   directory: string;
+  mode: 'pilot' | 'investigation';
+  projectDirectory: string | null;
   messages: SupervisorMessage[];
   queued: QueuedSupervisorMessage[];
   error?: string;
+}
+
+export interface SupervisorProject {
+  id: string;
+  name: string;
+  directory: string;
+  lastUsedAt: number;
 }
 
 /** `GET /api/fleet/delivery?sessionId=…` : dernier résultat de l'agent. */

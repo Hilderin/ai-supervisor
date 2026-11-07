@@ -2,19 +2,24 @@
  * Outils du chat de supervision.
  *
  * Toute la logique d'écriture est ici, côté daemon. Le plugin OpenCode ne fait
- * que transmettre l'appel et le `sessionID` de l'appelant. Les outils de lecture
- * utilisent la même flotte enrichie que l'UI ; `start_task` crée une session
- * top-level dans le projet choisi, jamais un sous-agent.
+ * que transmettre l'appel et le `sessionID` de l'appelant. Les lectures d'état
+ * utilisent la même flotte enrichie que l'UI ; en mode Investigation, les
+ * lectures de fichiers sont bornées au seul projet choisi côté serveur.
+ * `start_task` crée une session top-level, jamais un sous-agent.
  */
-import { basename, isAbsolute, resolve } from 'node:path';
+import { realpath } from 'node:fs/promises';
+import { basename, isAbsolute, relative, resolve, sep } from 'node:path';
 import { homedir } from 'node:os';
 import { currentFleet, openchamberUrl, pollOnce, type FleetRow } from './fleet.mts';
 import { getDelivery } from './delivery.mts';
 import { getTodoSnapshot, todoPlan } from './todos.mts';
+import { globProjectFiles, grepProjectFiles, readProjectFile } from './investigation.mts';
+import { modeDenial } from './investigation-policy.mts';
 import {
-  armTaskResume, getTaskState, getTaskBrief, listTaskBriefs, logEvent, putTaskBrief, reviveTaskResume, upsertTaskState,
+  armTaskResume, getTaskState, getTaskBrief, getSupervisorMode, listTaskBriefs, logEvent,
+  putTaskBrief, reviveTaskResume, setSupervisorMode, upsertTaskState,
 } from './state.mts';
-import { isSupervisorSession, SUPERVISOR_DIR, wrapOwnerPrompt } from './supervisor.mts';
+import { isSupervisorBusy, isSupervisorSession, SUPERVISOR_DIR, wrapOwnerPrompt } from './supervisor.mts';
 
 export interface ToolResult {
   ok: boolean;
@@ -148,6 +153,46 @@ async function projects(): Promise<Project[]> {
       lastUsedAt: Number(p.time?.active ?? 0),
     }))
     .sort((a, b) => b.lastUsedAt - a.lastUsedAt);
+}
+
+export async function supervisorProjects(): Promise<Project[]> {
+  return projects();
+}
+
+export async function configureSupervisorMode(mode: unknown, projectDirectory: unknown) {
+  if (mode !== 'pilot' && mode !== 'investigation') return { ok: false, error: 'invalid_mode' };
+  if (await isSupervisorBusy()) return { ok: false, error: 'supervisor_busy', message: 'attends la fin du tour avant de changer de mode' };
+  const requested = String(projectDirectory ?? '').trim();
+  let selected: Project | undefined;
+  if (requested) selected = (await projects()).find(p => p.directory === requested);
+  if (requested && !selected) return { ok: false, error: 'unknown_project' };
+  if (selected && !(await safeInvestigationProject(selected.directory))) {
+    return { ok: false, error: 'protected_project', message: 'ce dossier ne peut pas être utilisé pour une investigation' };
+  }
+  if (mode === 'investigation' && !selected) return { ok: false, error: 'project_required', message: 'choisis un projet pour enquêter' };
+  const current = getSupervisorMode();
+  const directory = selected?.directory ?? current.projectDir;
+  setSupervisorMode(mode, directory);
+  return { ok: true, mode, projectDirectory: directory };
+}
+
+async function safeInvestigationProject(directory: string): Promise<boolean> {
+  try {
+    const [root, protectedRoot] = await Promise.all([realpath(directory), realpath(SUPERVISOR_DIR)]);
+    const rel = relative(protectedRoot, root);
+    const insideProtected = rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
+    return !insideProtected;
+  } catch { return false; }
+}
+
+async function investigationDirectory(): Promise<string | null> {
+  const setting = getSupervisorMode();
+  if (setting.mode !== 'investigation' || !setting.projectDir) return null;
+  // Réconcilier à chaque appel avec le catalogue OpenChamber : le dossier n'est
+  // jamais fourni librement par le modèle et ne peut pas être changé via les args.
+  const selected = (await projects()).find(project => project.directory === setting.projectDir);
+  if (!selected || !(await safeInvestigationProject(selected.directory))) return null;
+  return selected.directory;
 }
 
 async function resolveProject(ref: string): Promise<{ project?: Project; error?: string; candidates?: Project[] }> {
@@ -542,11 +587,35 @@ export async function closeTask(args: { task?: string; note?: string; force?: bo
   return { ok: true, taskId: row.id, title: row.title, abandonedQuestion: abandoned || undefined };
 }
 
+async function runInvestigationTool(name: string, args: Record<string, unknown>): Promise<ToolResult> {
+  const directory = await investigationDirectory();
+  if (!directory) return { ok: false, error: 'project_required', message: 'le projet d’investigation n’est plus disponible' };
+  if (name === 'read_project') {
+    return await readProjectFile(directory, String(args.path ?? ''), Number(args.start_line), Number(args.line_count));
+  }
+  if (name === 'glob_project') {
+    return await globProjectFiles(directory, String(args.pattern ?? '**/*'));
+  }
+  if (name === 'grep_project') {
+    return await grepProjectFiles(
+      directory,
+      String(args.query ?? ''),
+      String(args.pattern ?? '**/*'),
+      args.case_sensitive === true,
+    );
+  }
+  return { ok: false, error: 'unknown_tool', message: name };
+}
+
 /** Dispatch unique pour la route /api/tools/:name. */
 export async function runTool(name: string, callerSessionId: string, args: Record<string, unknown>): Promise<ToolResult> {
   if (!isSupervisorSession(callerSessionId)) {
     return { ok: false, error: 'not_supervisor', message: 'outil réservé à la session de supervision' };
   }
+  const mode = getSupervisorMode().mode;
+  const denied = modeDenial(name, mode);
+  if (denied) return denied;
+  if (mode === 'investigation') return runInvestigationTool(name, args);
   switch (name) {
     case 'list_projects': return listProjects();
     case 'list_tasks': return listTasks(args as { section?: string; include_closed?: boolean });

@@ -9,6 +9,8 @@ const base = (over: Partial<SupervisorState> = {}): SupervisorState => ({
   status: 'idle',
   agent: 'orchestrateur',
   directory: '/tmp/superviseur',
+  mode: 'pilot',
+  projectDirectory: null,
   messages: [],
   queued: [],
   ...over,
@@ -74,6 +76,18 @@ describe('supervisorStore : envoi direct, file et actions', () => {
     expect(calls[0]?.url).toBe('/api/supervisor/revert');
     expect(calls[0]?.body?.messageId).toBe('msg_1');
     expect(useSupervisorStore.getState().draft).toBe('texte initial');
+  });
+
+  test('le changement de mode passe par la route daemon avec le projet choisi', async () => {
+    await useSupervisorStore.getState().setMode('investigation', '/tmp/projet');
+    expect(calls[0]?.url).toBe('/api/supervisor/mode');
+    expect(calls[0]?.body).toEqual({ mode: 'investigation', projectDirectory: '/tmp/projet' });
+  });
+
+  test('le composer ne démarre pas un tour pendant la bascule de mode', async () => {
+    useSupervisorStore.setState({ modeUpdating: true });
+    await useSupervisorStore.getState().send('inspecte le projet');
+    expect(calls).toHaveLength(0);
   });
 });
 

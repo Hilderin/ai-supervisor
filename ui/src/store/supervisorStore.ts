@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import {
   abortSupervisor, cancelQueuedSupervisor, fetchSupervisor, newSupervisor,
-  queueSupervisor, revertSupervisor, sendSupervisor,
+  queueSupervisor, revertSupervisor, sendSupervisor, updateSupervisorMode,
 } from '../lib/api';
 import type { SupervisorState } from '../types';
 
@@ -14,6 +14,7 @@ interface SupervisorStore {
   creating: boolean;
   /** revert en cours : les actions de message sont verrouillées */
   reverting: boolean;
+  modeUpdating: boolean;
   /** erreur d'un envoi : ne doit pas être effacée par le poll suivant */
   sendError: string | null;
   /** erreur du dernier poll */
@@ -27,6 +28,7 @@ interface SupervisorStore {
   revert: (messageId: string, restoreText?: string) => Promise<void>;
   newConversation: () => Promise<void>;
   stop: () => Promise<void>;
+  setMode: (mode: 'pilot' | 'investigation', projectDirectory: string | null) => Promise<void>;
 }
 
 export const useSupervisorStore = create<SupervisorStore>((set, get) => ({
@@ -36,6 +38,7 @@ export const useSupervisorStore = create<SupervisorStore>((set, get) => ({
   sending: false,
   creating: false,
   reverting: false,
+  modeUpdating: false,
   sendError: null,
   refreshError: null,
   draft: '',
@@ -62,7 +65,7 @@ export const useSupervisorStore = create<SupervisorStore>((set, get) => ({
 
   send: async (text) => {
     const value = text.trim();
-    if (!value) return;
+    if (!value || get().modeUpdating) return;
     const before = get().state;
     // pendant un tour (ou juste après un envoi), le message part en file :
     // OpenChamber le livrera dès que la session redevient idle
@@ -169,5 +172,17 @@ export const useSupervisorStore = create<SupervisorStore>((set, get) => ({
       set({ refreshError: 'Arrêt impossible. Le superviseur ne répond pas.' });
     }
     await get().refresh();
+  },
+
+  setMode: async (mode, projectDirectory) => {
+    if (get().modeUpdating) return;
+    set({ modeUpdating: true, sendError: null });
+    try {
+      const next = await updateSupervisorMode(mode, projectDirectory);
+      const state = get().state;
+      if (state) set({ state: { ...state, mode: next.mode, projectDirectory: next.projectDirectory } });
+    } finally {
+      set({ modeUpdating: false });
+    }
   },
 }));

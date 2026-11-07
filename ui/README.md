@@ -23,6 +23,7 @@ Le daemon sert `ui/dist` : lancer `bun run build` (ou `bun run build:ui` depuis 
 - `src/components/DeliveryBlock.tsx` : livraison inline à la demande (texte + rendu).
 - `src/components/DeliveryMarkdown.tsx` : markdown GFM, HTML brut ignoré, images locales via `/api/fleet/asset`.
 - `src/components/SupervisorChat.tsx` : chat de gauche, messages, tool chips, composer, erreurs, repli.
+- Le chat propose Piloter / Investigation ; Investigation impose un projet OpenChamber et ne lit que ses fichiers via les outils bornés du daemon.
 - `src/components/ChatMarkdown.tsx` : markdown du chat sans images locales ni HTML brut.
 - `src/hooks/useSupervisor.ts` : poll 1,2 s quand le superviseur travaille, 4 s au repos.
 - `src/store/supervisorStore.ts` : état du chat, `sendError` séparé de `refreshError`, brouillon, nouvelle conversation.

@@ -93,6 +93,61 @@ export default {
       });
 
       editor.add({
+        name: "read_project",
+        description:
+          "Lit un fichier texte du projet sélectionné en mode investigation. Chemin relatif à la racine du projet uniquement ; aucune écriture, commande ou lecture hors projet.",
+        options: toolOptions("read_project"),
+        input: {
+          type: "object",
+          properties: {
+            path: { type: "string", description: "Chemin relatif du fichier dans le projet sélectionné." },
+            start_line: { type: "integer", minimum: 1, description: "Première ligne (facultative)." },
+            line_count: { type: "integer", minimum: 1, maximum: 400, description: "Nombre de lignes (maximum 400)." },
+          },
+          required: ["path"],
+          additionalProperties: false,
+        },
+        execute(input, context) {
+          return call("read_project", input, context);
+        },
+      });
+
+      editor.add({
+        name: "glob_project",
+        description:
+          "Liste les chemins du projet sélectionné qui correspondent à un motif glob (par exemple **/*.ts). Lecture seule, sans suivre les liens symboliques.",
+        options: toolOptions("glob_project"),
+        input: {
+          type: "object",
+          properties: { pattern: { type: "string", description: "Motif relatif, par défaut **/*." } },
+          additionalProperties: false,
+        },
+        execute(input, context) {
+          return call("glob_project", input, context);
+        },
+      });
+
+      editor.add({
+        name: "grep_project",
+        description:
+          "Recherche une chaîne littérale dans les fichiers texte du projet sélectionné. Retour borné, lecture seule, sans exécuter de regex.",
+        options: toolOptions("grep_project"),
+        input: {
+          type: "object",
+          properties: {
+            query: { type: "string", description: "Texte exact à rechercher." },
+            pattern: { type: "string", description: "Filtre glob relatif optionnel, par exemple **/*.md." },
+            case_sensitive: { type: "boolean", description: "Respecter la casse." },
+          },
+          required: ["query"],
+          additionalProperties: false,
+        },
+        execute(input, context) {
+          return call("grep_project", input, context);
+        },
+      });
+
+      editor.add({
         name: "start_task",
         description:
           "Crée une session de travail top-level dans un projet, avec son goal, ses critères et son brief. Action réelle : appeler seulement quand le global est clair et le projet résolu. Ne crée pas de sous-agent.",

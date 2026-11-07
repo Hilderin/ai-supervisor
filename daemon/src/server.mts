@@ -13,7 +13,7 @@ import { readSessionAsset } from './assets.mts';
 import { companionSessionOf } from './companion.mts';
 import { getSupervisorSession, logEvent, upsertTaskState, getTaskState, reopenTaskState } from './state.mts';
 import { abortSupervisor, cancelQueuedSupervisor, getSupervisorState, newSupervisorConversation, queueSupervisor, revertSupervisor, sendSupervisor, SUPERVISOR_DIR, wrapOwnerPrompt } from './supervisor.mts';
-import { cancelPendingForms, pendingFor, runTool } from './tools.mts';
+import { cancelPendingForms, configureSupervisorMode, pendingFor, runTool, supervisorProjects } from './tools.mts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 // le build Vite (bun run build:ui) ; le daemon ne sert que des fichiers produits
@@ -113,6 +113,23 @@ async function handleApi(req: http.IncomingMessage, res: http.ServerResponse, ur
     json(res, 200, await getSupervisorState());
     return;
   }
+  if (path === '/api/supervisor/projects' && req.method === 'GET') {
+    try { json(res, 200, { projects: await supervisorProjects() }); }
+    catch (e) { json(res, 502, { error: String(e) }); }
+    return;
+  }
+
+  if (path === '/api/supervisor/mode' && req.method === 'POST') {
+    const body = await readBody(req);
+    try {
+      const result = await configureSupervisorMode(body.mode, body.projectDirectory);
+      json(res, result.ok ? 200 : result.error === 'supervisor_busy' ? 409 : 400, result);
+    } catch (e) {
+      json(res, 502, { ok: false, error: String(e) });
+    }
+    return;
+  }
+
   if (path === '/api/supervisor/messages' && req.method === 'GET') {
     const state = await getSupervisorState();
     json(res, 200, { sessionId: state.sessionId, status: state.status, messages: state.messages, queued: state.queued, error: state.error });

@@ -11,7 +11,7 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  ensureOrchestratorDefinition, getOrchestratorVersion, getSupervisorSession,
+  ensureOrchestratorDefinition, getOrchestratorVersion, getSupervisorMode, getSupervisorSession,
   logEvent, setSupervisorSession,
 } from './state.mts';
 import { messageText } from './messages.mts';
@@ -100,6 +100,8 @@ export interface SupervisorState {
   status: 'idle' | 'busy' | 'unknown';
   agent: string | null;
   directory: string;
+  mode: 'pilot' | 'investigation';
+  projectDirectory: string | null;
   messages: SupervisorMessage[];
   queued: QueuedSupervisorMessage[];
   error?: string;
@@ -262,6 +264,9 @@ function toolLabel(part: WirePart): {
   if (name === 'list_projects') label = 'a listé les projets';
   else if (name === 'list_tasks') label = 'a consulté la flotte';
   else if (name === 'get_task') label = 'a lu une tâche';
+  else if (name === 'read_project') label = 'a lu un fichier du projet';
+  else if (name === 'glob_project') label = 'a repéré des fichiers du projet';
+  else if (name === 'grep_project') label = 'a cherché dans le projet';
   else if (name === 'send_task') label = ok === false ? 'n’a pas pu envoyer le message' : 'a envoyé un message à une tâche';
   else if (name === 'close_task') label = ok === false ? 'n’a pas pu fermer la tâche' : 'a fermé une tâche';
   else if (name === 'start_task') {
@@ -403,13 +408,19 @@ export async function getSupervisorState(): Promise<SupervisorState> {
     // fin de tour : OpenChamber a pu rouvrir le marqueur « In work » après le send
     if (effective === 'idle' && lastStatus === 'busy') void quietWork(id);
     lastStatus = effective;
-    return { sessionId: id, status: effective, agent, directory: SUPERVISOR_DIR, messages: list, queued };
+    const mode = getSupervisorMode();
+    return {
+      sessionId: id, status: effective, agent, directory: SUPERVISOR_DIR,
+      mode: mode.mode, projectDirectory: mode.projectDir, messages: list, queued,
+    };
   } catch (e) {
     return {
       sessionId: getSupervisorSession()?.oc_session_id ?? null,
       status: 'unknown',
       agent: getSupervisorSession()?.agent ?? null,
       directory: SUPERVISOR_DIR,
+      mode: getSupervisorMode().mode,
+      projectDirectory: getSupervisorMode().projectDir,
       messages: [],
       queued: [],
       error: String(e),
@@ -439,18 +450,41 @@ export function wrapOwnerPrompt(text: string): string {
   return `${OWNER_WRAP}\n\n${text}`;
 }
 
+const PILOT_WRAP = 'Mode Piloter : tu peux cadrer et lancer des tâches selon tes règles habituelles.';
+const INVESTIGATION_WRAP = 'Mode Investigation : lecture seule du projet sélectionné, sans création de tâche ni modification de fichier.';
+
+export function wrapSupervisorPrompt(text: string, mode: 'pilot' | 'investigation', projectDirectory: string | null): string {
+  if (mode === 'investigation' && projectDirectory) return wrapInvestigationPrompt(text, projectDirectory);
+  return `${OWNER_WRAP}\n\n${PILOT_WRAP}\n\n${text}`;
+}
+
+export function wrapInvestigationPrompt(text: string, projectDirectory: string): string {
+  return `${INVESTIGATION_WRAP}\nProjet sélectionné : ${projectDirectory}\n\n${text}`;
+}
+
 export function stripOwnerWrap(text: string): string {
   const clean = String(text ?? '');
+  if (clean.startsWith(INVESTIGATION_WRAP)) {
+    const userText = clean.indexOf('\n\n');
+    return userText >= 0 ? clean.slice(userText + 2).trim() : '';
+  }
   if (!clean.startsWith(OWNER_WRAP)) return clean;
-  return clean.slice(OWNER_WRAP.length).trim();
+  const body = clean.slice(OWNER_WRAP.length).trim();
+  if (body.startsWith(PILOT_WRAP)) {
+    const userText = body.indexOf('\n\n');
+    return userText >= 0 ? body.slice(userText + 2).trim() : '';
+  }
+  return body;
 }
 
 export async function sendSupervisor(text: string): Promise<SupervisorState> {
   const clean = String(text ?? '').trim();
   if (!clean) return getSupervisorState();
   const { id, agent } = await ensureSupervisorSession();
+  const mode = getSupervisorMode();
+  const prompt = wrapSupervisorPrompt(clean, mode.mode, mode.projectDir);
   const out = await jpost(`/api/openchamber/sessions/${id}/send`, {
-    prompt: wrapOwnerPrompt(clean),
+    prompt,
     agent,
     directory: SUPERVISOR_DIR,
   });
@@ -473,9 +507,10 @@ export async function queueSupervisor(text: string): Promise<SupervisorState> {
   const clean = String(text ?? '').trim();
   if (!clean) return getSupervisorState();
   const { id, agent } = await ensureSupervisorSession();
+  const mode = getSupervisorMode();
   const sendConfig = await sendConfigOf(id, agent);
   if (!sendConfig) throw new Error('modèle du superviseur introuvable');
-  const wrapped = wrapOwnerPrompt(clean);
+  const wrapped = wrapSupervisorPrompt(clean, mode.mode, mode.projectDir);
   const out = await jpost(`/api/message-queue/sessions/${encodeURIComponent(id)}/items`, {
     directory: SUPERVISOR_DIR,
     item: { content: wrapped, text: wrapped, sendConfig },
@@ -518,7 +553,11 @@ export async function newSupervisorConversation(): Promise<SupervisorState> {
   setSupervisorSession({ ocSessionId: id, agent, version, title: 'Superviseur' });
   logEvent('supervisor', 'note', `nouvelle conversation #${id.slice(-6)}`);
   // session neuve : pas besoin de relire 80 messages ni le statut, elle est vide
-  return { sessionId: id, status: 'idle', agent, directory: SUPERVISOR_DIR, messages: [], queued: [] };
+  const mode = getSupervisorMode();
+  return {
+    sessionId: id, status: 'idle', agent, directory: SUPERVISOR_DIR,
+    mode: mode.mode, projectDirectory: mode.projectDir, messages: [], queued: [],
+  };
 }
 
 export async function abortSupervisor(): Promise<void> {
@@ -527,6 +566,27 @@ export async function abortSupervisor(): Promise<void> {
   // best-effort : selon la version, l'interruption est exposée sous abort ou interrupt
   await jpost(`/api/session/${id}/abort`, {}).catch(() => undefined);
   await jpost(`/api/session/${id}/interrupt`, {}).catch(() => undefined);
+}
+
+export async function isSupervisorBusy(): Promise<boolean> {
+  const id = getSupervisorSession()?.oc_session_id;
+  if (!id) return false;
+  try {
+    const snapshot = await jget('/api/sessions/status') as { sessions?: Record<string, { status?: string }> };
+    const status = snapshot.sessions?.[id]?.status;
+    if (status === 'busy') return true;
+    const messages = await jget(`/api/session/${encodeURIComponent(id)}/message?limit=80&order=desc`) as { data?: WireMessage[] };
+    const toolRunning = (messages.data ?? []).some(message => (message.content ?? []).some(part =>
+      part.type === 'tool' && (part.state?.status === 'running' || part.state?.status === 'pending')));
+    const queue = await jget('/api/message-queue') as {
+      sessions?: Array<{ sessionId?: string; items?: unknown[] }>;
+    };
+    const queued = (queue.sessions ?? []).find(session => session.sessionId === id)?.items ?? [];
+    return toolRunning || queued.length > 0 || (status !== undefined && status !== 'idle');
+  } catch {
+    // En cas de statut invérifiable, ne pas changer la frontière d'outils à l'aveugle.
+    return true;
+  }
 }
 
 export function isSupervisorSession(sessionId: string): boolean {

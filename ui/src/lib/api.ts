@@ -1,4 +1,4 @@
-import type { Delivery, Fleet, SupervisorState, TaskAnswer } from '../types';
+import type { Delivery, Fleet, SupervisorProject, SupervisorState, TaskAnswer } from '../types';
 
 async function post(path: string, body: unknown): Promise<void> {
   const res = await fetch(path, {
@@ -26,6 +26,27 @@ export async function fetchSupervisor(): Promise<SupervisorState> {
   const res = await fetch('/api/supervisor', { cache: 'no-store' });
   if (!res.ok) throw new Error(String(res.status));
   return (await res.json()) as SupervisorState;
+}
+
+export async function fetchSupervisorProjects(): Promise<SupervisorProject[]> {
+  const res = await fetch('/api/supervisor/projects', { cache: 'no-store' });
+  if (!res.ok) throw new Error(String(res.status));
+  const body = (await res.json()) as { projects?: SupervisorProject[] };
+  return body.projects ?? [];
+}
+
+export async function updateSupervisorMode(
+  mode: 'pilot' | 'investigation',
+  projectDirectory: string | null,
+): Promise<{ mode: 'pilot' | 'investigation'; projectDirectory: string | null }> {
+  const res = await fetch('/api/supervisor/mode', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mode, projectDirectory }),
+  });
+  const body = await res.json().catch(() => ({})) as { mode?: 'pilot' | 'investigation'; projectDirectory?: string | null; message?: string; error?: string };
+  if (!res.ok) throw new Error(body.message ?? body.error ?? `${res.status}`);
+  return { mode: body.mode ?? mode, projectDirectory: body.projectDirectory ?? projectDirectory };
 }
 
 export async function sendSupervisor(text: string): Promise<SupervisorState> {

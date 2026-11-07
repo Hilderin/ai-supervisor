@@ -105,7 +105,7 @@ Principes :
 3. **L'UI ne parle qu'au daemon** : elle ne connaît ni l'agent, ni les outils, ni les ids internes d'OpenChamber pour les actions. Elle affiche et envoie du texte.
 4. **Le chat est une session normale** : il reste visible dans OpenChamber, mais il est exclu de la flotte et du compagnon. C'est une session de supervision, pas une tâche.
 5. **Les outils sont maison** : les outils `openchamber_*` ne couvrent pas la gestion de sessions. Le daemon expose un contrat étroit, validé et journalisé.
-6. **L'agent est un orchestrateur** : il ne lit pas les fichiers, ne lance pas de commandes, ne fait pas de revue de code. Il parle, il liste, il lance.
+6. **L'agent a deux modes explicites** : Piloter consulte la flotte et lance selon les règles existantes ; Investigation lit seulement le projet choisi via les outils daemon bornés et propose un cadrage sans lancer.
 
 ### 3.2 Séparation des rôles
 
@@ -140,8 +140,13 @@ Le prompt d'un agent est mis en cache **par nom**, pas par contenu. Changer le f
 
 Allowlist :
 
-- activés : les outils superviseur (`list_projects`, `list_tasks`, `get_task`, `start_task`, et plus tard les autres) ;
-- désactivés : `bash`, `edit`, `write`, `read`, `glob`, `grep`, `webfetch`, `todowrite`, `question`, `task`. `task` est désactivé pour empêcher tout sous-agent : l'orchestrateur crée des sessions top-level, pas des sessions enfants. `todowrite` est désactivé parce que le plan est tenu par la session de travail, pas par l'orchestrateur.
+- activés en Piloter : les outils superviseur (`list_projects`, `list_tasks`, `get_task`, `start_task`, etc.) ;
+- activés en Investigation : `read_project`, `glob_project`, `grep_project`, outils directs du plugin qui ne font que des lectures bornées dans le projet sélectionné ;
+- désactivés dans la définition OpenCode : `bash`, `edit`, `write`, `read`, `glob`, `grep`, `webfetch`, `todowrite`, `question`, `task`, `execute` et les outils `openchamber_*`. `task` est désactivé pour empêcher tout sous-agent ; `todowrite` appartient aux sessions de travail.
+
+Le plugin expose les outils des deux modes, mais **l'autorité est le dispatcher du daemon** : en mode Investigation, il n'accepte que les trois outils de lecture dédiés ; en mode Piloter, ces lectures fichier sont refusées. Le projet est sélectionné dans le catalogue OpenChamber et relu côté daemon à chaque appel. Le sélecteur de mode et le dossier sont persistés ; le changement de mode est refusé pendant un tour.
+
+Les chemins sont relatifs à la racine du projet ; les traversées, tous les liens symboliques, `.git`, `.superviseur`, `node_modules`, la base `superviseur.db`, les fichiers binaires et les retours trop volumineux sont refusés ou bornés. `grep_project` prend une chaîne littérale, pas une expression régulière. Aucun outil de commande ou d'accès réseau n'est exposé en Investigation.
 
 Pas de `question` : dans un chat, une question en texte est plus naturelle et évite un formulaire bloquant que notre panneau devrait rendre. Pas de `webfetch` en phase 1 : le chat n'est pas un assistant généraliste, mais une information inaccessible n'est pas une impasse. Une question comme la météo reçoit « je n'ai pas la météo en direct ici, mais je peux lancer une tâche de recherche ; tu veux, et pour quelle ville ? ». Une demande explicite (« cherche la météo à Montréal ») lance directement la tâche dans le projet `chats`. Une question à laquelle l'agent peut répondre de sa connaissance reste une réponse, pas une tâche.
 
@@ -495,6 +500,8 @@ L'agent doit lister explicitement ses outils. Les noms exacts dépendent du tran
 | Route | Méthode | Rôle |
 | --- | --- | --- |
 | `GET /api/supervisor` | GET | id de session, état occupé, métadonnées |
+| `GET /api/supervisor/projects` | GET | catalogue des projets éligibles à l'investigation |
+| `POST /api/supervisor/mode` | POST | basculer entre Piloter et Investigation, choisir le projet |
 | `GET /api/supervisor/messages` | GET | messages paginés du chat |
 | `POST /api/supervisor/send` | POST | envoyer un texte au chat |
 | `GET /api/supervisor/stream` | GET SSE | mises à jour du chat |
@@ -571,9 +578,17 @@ L'outil est local, mono-utilisateur, sans exposition réseau. Les risques princi
 - **Coût** : un tour par message utilisateur, pas de boucle de fond. Le chat ne tourne pas quand personne ne parle.
 - **Confidentialité** : le chat est stocké par OpenChamber dans son store local, associé au projet `~/.superviseur`. Les résumés de tâches peuvent contenir des informations sensibles ; ils ne sortent pas de la machine.
 
-### 10.3 Le chat n'est pas un assistant généraliste
+### 10.3 Le mode Investigation est une lecture seule côté daemon
 
-En phase 1, l'agent répond à ce qu'il sait. Pour le reste, une information inaccessible est traitée comme une **intention de tâche probable**, pas comme un refus : il propose une tâche de recherche ou d'exécution, demande la précision minimale, puis lance sur accord. Une demande explicite de recherche part directement. L'agent n'a toujours pas d'outil web lui-même : c'est la session de travail qui cherche. Un outil web direct dans le chat reste hors phase 1.
+- Le mode est choisi explicitement dans l'UI ; le projet sélectionné est persisté et validé à nouveau contre `GET /api/project` à chaque appel de lecture.
+- `runTool` vérifie le mode après l'identité de session. En Investigation, seuls `read_project`, `glob_project` et `grep_project` passent ; les outils de lancement, d'envoi, d'annulation et de fermeture répondent `read_only_mode`.
+- Ces outils n'utilisent que `realpath`, `stat`, `lstat`, `readdir` et `readFile`. Ils n'acceptent pas de chemin absolu ni `..`, n'effectuent aucune écriture et refusent les liens symboliques.
+- Le mode Piloter refuse aussi les outils de lecture fichier pour éviter une investigation silencieuse hors du mode choisi.
+- La politique du prompt guide l'agent mais ne constitue pas la frontière de sécurité. L'UI ne contrôle pas l'autorisation des outils.
+
+### 10.4 Le mode Piloter n'est pas un assistant généraliste
+
+En mode Piloter, l'agent répond à ce qu'il sait. Pour le reste, une information inaccessible est traitée comme une **intention de tâche probable**, pas comme un refus : il propose une tâche de recherche ou d'exécution, demande la précision minimale, puis lance sur accord. Une demande explicite de recherche part directement. L'agent n'a pas d'outil web ; c'est la session de travail qui cherche. En mode Investigation, il lit uniquement le projet choisi et ne lance rien.
 
 ## 11. Risques et alternatives
 
@@ -639,7 +654,7 @@ Les tests ci-dessus. Aucun code d'UI.
 
 - Chat à gauche, flotte à droite, barre du haut supprimée.
 - Session `~/.superviseur`, exclusion de la flotte et du compagnon.
-- Agent `superviseur-orchestrateur` avec `list_projects`, `list_tasks`, `get_task`, `start_task`.
+- Agent `superviseur-orchestrateur` avec outils de pilotage et, en mode Investigation, outils de lecture dédiés.
 - `start_task` réel, avec brief stocké et prompt composé.
 - Progression de la carte via le dernier `todowrite` ; le compagnon ne produit pas de plan.
 - Markdown du chat, tool chips, état occupé, arrêt, nouvelle conversation.
@@ -664,6 +679,8 @@ Les tests ci-dessus. Aucun code d'UI.
 
 Pièces jointes, vocal, threads, réactions, mobile, multi-utilisateur, web généraliste, merge et PR.
 
+Le mode Investigation est ajouté au chat : il reste 100 % web, utilise les lectures du daemon et n'ajoute pas de mode local ou d'exécution.
+
 ## 14. Critères d'acceptation
 
 1. Une tâche lancée depuis le chat dans un projet connu crée une session, une carte et un brief avec goal.
@@ -681,6 +698,9 @@ Pièces jointes, vocal, threads, réactions, mobile, multi-utilisateur, web gén
 13. La tâche pose un plan `todowrite` de 3 à 6 étapes ; la carte affiche `x/y`, et une liste complète ne passe pas la carte en TERMINÉ tant que la session est busy.
 14. Une question en attente peut être annulée par `send_task` (avec le texte envoyé) ou par `cancel_question` / le bouton de la carte ; l'agent reprend sans réponse.
 15. Fermer une tâche qui attend une question ou une permission est refusé sans `force` explicite ; avec `force`, la question est annulée et la fermeture est journalisée.
+16. En mode Investigation, l'utilisateur choisit un projet et peut lire, lister et rechercher dans ses fichiers ; les chemins hors racine et les fichiers protégés sont refusés.
+17. Le dispatcher serveur refuse `start_task`, `send_task`, `cancel_question`, `close_task` et les outils système en Investigation, même si un appel est tenté directement.
+18. En mode Piloter, les trois outils de lecture projet sont refusés ; aucun `bash`, `webfetch`, outil OpenCode natif ou sous-agent n'est activé pour l'investigation.
 
 ## 15. Décisions
 
@@ -701,6 +721,7 @@ Les décisions ci-dessous viennent de la conversation ou des constats ci-dessus.
 | Tout le dossier `~/.superviseur` est exclu de la flotte et du compagnon | 2026-11-06 | Implémentation |
 | Le chat superviseur est retiré de « In work » (`metadata.openchamber.work = null`) après création, réutilisation et chaque envoi : le dossier `~/.superviseur` ne suffit pas à le sortir du home | 2026-11-06 | Implémentation |
 | Le compagnon ne produit plus de plan ; le `todowrite` de la tâche est la source | 2026-11-06 | Progression |
+| Mode Investigation explicite, projet choisi dans OpenChamber, trois outils de lecture bornés et refus côté daemon de toutes les autres opérations ; le cadrage reste dans le fil, lancement après retour explicite en Piloter | 2026-11-07 | Sécurité et agent |
 
 ### 15.2 Ouvertes
 
@@ -714,6 +735,8 @@ Les décisions ci-dessous viennent de la conversation ou des constats ci-dessus.
 | Fermer depuis le chat | Phase 2 | Après le socle |
 | Qui écrit dans une tâche en phase 1 | La carte (steer, réponses, fermeture) | Après le socle |
 | Recherche dans les sessions | Phase 2 | Après le socle |
+| Recherche dans l'historique depuis Investigation | `message-search` en GET, à vérifier avant exposition | Spike API avant implémentation |
+| Proposition de tâche en Investigation | Cadrage structuré dans le fil ; pas de bloc de validation dédié pour l'instant | Retour d'usage |
 | Repli si `~/.superviseur` est refusé | Pré-création ou `~/.config/openchamber/chats` | Après le spike |
 | Web pour les questions générales | Non en phase 1 | À l'usage |
 | Plan et progression via OpenCodeTodoList | Réutiliser le plugin ; lire le tool part, pas la base ; le compagnon ne produit plus de plan | Validé (campagne C6) |

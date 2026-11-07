@@ -93,6 +93,9 @@ Dernière vérification sur le build final : les quatre chemins A/B/C/D de `veri
 | C27 | Hauteur du composer | La poignée au-dessus du champ règle la hauteur à la souris, entre 34 et 360 px, et la valeur est mémorisée | À faire | Poignée et bornes câblées ; glissement non automatisé dans la campagne. |
 | C28 | Bloc `send_task` | Sous « a envoyé un message à une tâche », afficher le nom courant de la tâche destinataire et le texte complet envoyé, avec repli si la tâche a quitté la flotte | OK | `taskTitleOf` résout le titre dans la flotte à l'affichage ; tests unitaires : renommage, tâche absente, texte de 600 caractères non tronqué. |
 | C29 | Focus après « Nettoyer » | Après le nettoyage, le curseur revient dans le champ de saisie | À faire | Effet câblé sur la fin de `creating`, pas encore vérifié au clavier dans la campagne. |
+| C30 | Lectures en Investigation | Le mode permet lecture, glob et recherche littérale dans le projet choisi ; traversements, liens symboliques, binaires et fichiers protégés sont refusés | OK (unitaire) | `bun test daemon/test/investigation.test.mts` : lecture, glob, grep littéral, refus des chemins et absence de modification. |
+| C31 | Refus serveur en Investigation | Les outils de lancement, steer, annulation, fermeture et exécution ne passent pas le dispatcher, même si appelés directement | OK (politique unitaire) | La politique de liste blanche testée est appliquée par `runTool`. La campagne HTTP contre une instance OpenChamber n'a pas été rejouée. |
+| C32 | Pas de lecture fichier hors mode | En mode Piloter, les trois outils de lecture du projet sont refusés ; le choix du mode est explicite | À faire | Tests unitaires de la politique et contrôle visuel du sélecteur à rejouer. |
 
 ## Questions à trancher
 

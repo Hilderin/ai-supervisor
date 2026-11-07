@@ -59,6 +59,11 @@ CREATE TABLE IF NOT EXISTS supervisor_session (
   title TEXT,
   created_at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS supervisor_mode (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  mode TEXT NOT NULL DEFAULT 'pilot',
+  project_dir TEXT
+);
 CREATE TABLE IF NOT EXISTS task_brief (
   session_id TEXT PRIMARY KEY,
   title TEXT,
@@ -280,6 +285,22 @@ export interface SupervisorSessionRow {
 
 export function getSupervisorSession(): SupervisorSessionRow | null {
   return (db.query('SELECT * FROM supervisor_session WHERE id = 1').get() as SupervisorSessionRow | undefined) ?? null;
+}
+
+export type SupervisorMode = 'pilot' | 'investigation';
+export function getSupervisorMode(): { mode: SupervisorMode; projectDir: string | null } {
+  const row = db.query('SELECT mode, project_dir FROM supervisor_mode WHERE id = 1').get() as
+    { mode?: string; project_dir?: string | null } | undefined;
+  return {
+    mode: row?.mode === 'investigation' ? 'investigation' : 'pilot',
+    projectDir: row?.project_dir ?? null,
+  };
+}
+
+export function setSupervisorMode(mode: SupervisorMode, projectDir: string | null): void {
+  db.query(`INSERT INTO supervisor_mode (id, mode, project_dir) VALUES (1, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET mode=excluded.mode, project_dir=excluded.project_dir`)
+    .run(mode, projectDir);
 }
 
 export function setSupervisorSession(p: {

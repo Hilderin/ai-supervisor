@@ -32,7 +32,7 @@ Les sections ci-dessous sont dans cet ordre.
 | 20 | Changer de modèle facilement : dans le chat et pour les tâches | Le modèle est un levier de coût et de qualité invisible aujourd'hui ; le paramètre existe déjà côté outil, il manque le geste et une UI courte | faible à moyen |
 | 21 | Coller des images dans le chat et les cartes | Le presse-papiers est le chemin le plus court pour montrer une maquette, une erreur ou un rendu cassé ; confort réel, mais secondaire face au pilotage | faible à moyen |
 
-État au 2026-11-07 : rangs 2, 6, 9 et 17 faits ; rang 3 couvert autrement (étape courante du plan). Ces idées restent listées avec leur note de clôture ; les autres sont ouvertes.
+État au 2026-11-07 : rangs 2, 6, 9 et 17 faits ; rang 3 couvert autrement (étape courante du plan) ; rang 7 implémenté en partie (mode Investigation, lectures de fichiers bornées, proposition dans le chat). Ces idées restent listées avec leur note de clôture ou leurs écarts ; les autres sont ouvertes.
 
 ## Idées
 
@@ -188,6 +188,10 @@ Constat sur le code actuel :
 - **rapport avec le mode discussion** (rang 8) : mêmes outils de lecture, intention différente ; ne pas construire deux mécanismes de sélection de projet.
 
 Lien : idée « un vrai mode conversationnel » (le pendant discussion), idée « objectif courant » (rang 10) et rang 1 (la qualité de l'objectif est la référence du jugement), `daemon/agent/superviseur-orchestrateur.md`, `daemon/src/tools.mts` (`start_task` et `context`), doc [mvp1/chat-superviseur.md](../mvp1/chat-superviseur.md).
+
+> Implémenté en partie le 2026-11-07 : sélecteur explicite Piloter / Investigation dans le chat ; projet choisi dans le catalogue OpenChamber ; outils daemon `read_project`, `glob_project`, `grep_project`, chemins relatifs, liens symboliques refusés, tailles et retours bornés. Le dispatch serveur refuse toutes les opérations hors lecture en Investigation. Le cadrage est proposé dans le fil ; l'utilisateur repasse explicitement en mode Piloter avant `start_task`.
+>
+> Écarts conservés : la recherche dans les conversations passées (`message-search`) n'est pas exposée, car son contrat et sa qualité n'ont pas encore été vérifiés ; aucun `webfetch` ni outil natif n'est donné à l'agent. La proposition est du texte structuré dans le fil, pas encore un bloc de carte avec validation dédiée. Voir la décision dans [06](06-questions-ouvertes.md) et le contrat dans [chat-superviseur.md](../mvp1/chat-superviseur.md).
 
 ### Un vrai mode conversationnel : brainstormer sans lancer de tâche
 
