@@ -1,0 +1,8 @@
+{
+  "name": "superviseur-task",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "SuperviseurTask : tool answer, réponse d'une tâche visible dans le Superviseur",
+  "exports": "./index.js"
+}

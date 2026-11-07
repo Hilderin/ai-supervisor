@@ -55,6 +55,9 @@ export function SessionCard({ row, state, selected, flash, now, onOpen }: Props)
   const rawConf = row.sup?.confiance;
   const conf = rawConf == null ? null : Math.max(0, Math.min(1, rawConf));
   const attend = row.sup?.attend && (waiting || row.sup.humanSource === 'agent_ask') ? row.sup.attend : '';
+  // réponses au propriétaire (tool answer) pas encore lues : le badge vit dans
+  // en-tête, il ne change ni l'état ni la section de la carte
+  const unreadAnswers = row.unreadAnswers ?? 0;
   const currentStep =
     row.todo?.steps?.find((step) => step.status === 'in_progress') ??
     row.todo?.steps?.find((step) => step.status === 'pending');
@@ -173,6 +176,15 @@ export function SessionCard({ row, state, selected, flash, now, onOpen }: Props)
             className="flex h-[16px] w-[16px] shrink-0 items-center justify-center rounded-full bg-orange text-[10px] font-bold text-white"
           >
             {form ? '?' : '!'}
+          </span>
+        ) : null}
+        {unreadAnswers > 0 ? (
+          <span
+            data-testid="card-unread-answers"
+            title="Nouvelles réponses de cette tâche : ouvert le détail pour les lire"
+            className="shrink-0 rounded-full bg-orange-soft px-[6px] py-[1px] text-[10.5px] font-semibold tabular-nums text-attend"
+          >
+            {unreadAnswers > 1 ? `${unreadAnswers} réponses` : '1 réponse'}
           </span>
         ) : null}
         <button

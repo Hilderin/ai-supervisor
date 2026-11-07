@@ -19,6 +19,8 @@ Directives pour tout agent travaillant dans ce repo.
 
 ### API OpenCode / OpenChamber (instance réelle)
 
+- **Le listing `/api/session/:id/message` est paginé aussi** (fenêtre par défaut, 41 premiers messages vus en pratique sur 136) : avec `order=asc` sans `limit`, les derniers tours (là où sont les `answer` et les rendus) disparaissent du diagnostic et on conclut à un appel manquant. TOUJOURS `?limit=200` sur ce listing quand on inspecte une session.
+
 - **`/api/session` est paginé à 50 par défaut**: au-delà de 50 sessions de l'instance (avec tous les enfants compagnon/sous-agents), les parents glissent dans et hors des 50 premières à chaque création → « fantômes » alternatifs dans la flotte et flicker des cartes. TOUJOURS paginer `/api/session?limit=200` (ou paginer explicitement).
 
 - L'ordre des messages est **descendant** (plus récent d'abord) : `.slice(-n)` prend les plus anciens: toujours trier sur `time.created` avant usage.
@@ -126,8 +128,16 @@ Directives pour tout agent travaillant dans ce repo.
 - **Créations refusées = essais comptés** : budget de 3 essais consécutifs, backoff croissant 30 s → 60 s → 120 s (plafond 10 min), budget remis à zéro après 10 min de session stable. Après épuisement, la tâche passe en désactivée. Une écriture humaine (`send_task`) réarme une tâche désactivée.
 - **Interrupteur** : `SUPERVISEUR_AUTO_RESTART=0` désactive tout ; autres variables (essais, backoff, confirmation, fenêtre d'orphelines) dans `docs/analyses/mvp1/auto-restart.md`. Tests : `bun test daemon/test/resume.test.mts`.
 
+### Tool `answer` (plugin superviseur-task, 2026-11-07)
+
+- **Le tool `answer` n'est pas un banc d'essai** (déjà arrivé : une « vérification du rendu » envoyée comme réponse au propriétaire). La règle vit dans le **prompt injecté à la création de tâche** (`composePrompt` de `daemon/src/tools.mts`), car les tâches naissent dans des projets qui n'ont pas cette leçon dans leur AGENTS.md : ne pas compter sur le projet pour l'apporter. La description du tool (`daemon/plugin/superviseur-task`) porte le même garde-fou. Sans attente du propriétaire (question posée, point à valider, consigne livrée), rien à envoyer ; une validation de code ou de rendu passe par le build, les tests ou la flotte ; le bilan s'écrit en dernier message de session.
+- **La réponse `answer` doit être autonome** (déjà arrivé : un `answer` en prose qui disait « le tableau du chat donne l'ordre complet » alors que le tableau vivait dans un `openchamber_render` de la session). Le propriétaire ne lit pas la conversation de la tâche : tout tableau ou classement utile se reproduit en markdown dans le texte de `answer`, jamais un renvoi au chat. Le texte est par ailleurs sans contrainte de longueur (l'ancienne « 1 à 5 phrases » du plugin poussait les modèles au monobloc), en markdown lisible maîtrisé.
+- **Les questions passent par le tool `question`** : seule une question posée en formulaire s'affiche dans le Superviseur (QuestionBox du détail). Une question posée en texte dans la conversation est invisible pour le propriétaire.
+- Les garde-fous sont gelés par `daemon/test/answerGuidance.test.mts` (texte statique des deux sources, sans ouverture de base).
+
 ### Repo & docs
 
+- **Backtick dans les commentaires SQL de `db.exec` (state.mts)** : tout le bloc est un template literal JS ; un backtick dans un commentaire SQL (même une ligne de doc) casse le parse de fichier entier avec une erreur d'astuce hors de l'endroit réel. Utiliser des guillemets français dans les commentaires SQL.
 - **Lister le dossier avant d'attribuer un numéro de doc** (double 09 déjà arrivé).
 - **`bun test daemon/test` en un bloc = verrous SQLite (2026-11-07)** : les fichiers de test ouvrent chacun `data/superviseur.db` (module `state.mts`) ; lancés en parallèle, les fichiers qui touchent la base (`resume.test.mts`, ...) échouent en bloc avec des erreurs `run (bun:sqlite)`, chacun isolément passe. Lancer fichier par fichier : `for f in daemon/test/*.test.mts; do bun test "$f"; done`. **Consequence réelle : un run batch a vidé les 5 tables `task_*` de la base de production le 2026-11-07** (les suppressions de `resume.test.mts` ont touché la vraie base, d'où le garde-fou dans le fichier de test qui refuse toute écriture si la base liée n'est pas temporaire). Ne jamais lancer en batch tant que le liage de `state.mts` n'est pas injectable.
 - **`db` de `state.mts` a désormais `PRAGMA busy_timeout = 5000`** : un script ponctuel qui écrit pendant un tour du daemon ne tue plus le process avec `SQLiteError: database is locked` (déjà arrivé le 2026-11-07 : un `bun -e` de reconstruction a fait crasher le daemon sur `logEvent` de `companion.mts`).

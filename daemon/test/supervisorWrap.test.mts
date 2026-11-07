@@ -2,9 +2,10 @@ import { describe, expect, test } from 'bun:test';
 import { OWNER_WRAP, stripOwnerWrap, wrapOwnerPrompt } from '../src/supervisor.mts';
 
 describe('encadrement des prompts du propriétaire', () => {
-  test('le texte envoyé au chat est précédé de l\'instruction todolist', () => {
+  test('le texte envoyé au chat est précédé de l\'instruction combinée (todolist + answer)', () => {
     const wrapped = wrapOwnerPrompt('cherche la météo');
     expect(wrapped.startsWith(OWNER_WRAP)).toBe(true);
+    expect(wrapped).toContain('answer');
     expect(wrapped.endsWith('cherche la météo')).toBe(true);
   });
 

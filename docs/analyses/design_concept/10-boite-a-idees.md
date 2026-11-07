@@ -16,21 +16,23 @@ Les sections ci-dessous sont dans cet ordre.
 | 4 | Voir une erreur de session sur la carte (et le retry qui suit) | Un tour qui échoue et réessaie ressemble à un tour qui avance : sans signal, on confond erreur et lenteur ; l'événement d'échec arrive déjà au daemon, il est simplement jeté | faible à moyen |
 | 5 | Envoyer des instructions pendant qu'une tâche travaille | Capacité de pilotage centrale (queue, direct, fork, btw), mais dépend de ce que l'API permet réellement | moyen à élevé |
 | 6 | Un tool « dire à l'utilisateur » : informer sans arrêter le travail | Complète le canal utilisateur → tâche (rang 5) par le sens inverse : la tâche peut répondre ou signaler au fil du tour, sans tour ni question bloquante ; le récepteur existe déjà (le chat sait afficher), c'est la sortie qui manque | faible à moyen |
-| 7 | Mettre à jour une étape du plan sans réécrire la liste | Répare un signal déjà affiché qui ment : la barre reste vide puis saute à 100 % ; une barre fausse coûte plus qu'une ligne absente | moyen |
-| 8 | Objectif courant affiché sur la carte, en plus du résumé | Complète les rangs 1 et 3 : savoir où va la carte, pas seulement ce qu'elle fait ; un champ à ajouter | faible |
-| 9 | Numéroter les tâches, avec un préfixe par projet | Une référence stable pour suivre et désigner une tâche (« reprends la 42 ») alors que le titre change ; peu coûteux et utile partout (carte, chat, notifications) | faible |
-| 10 | Notifications desktop + badge d'attention sur l'icône | Le Superviseur doit venir vers l'utilisateur quand il n'est pas devant ; sans ça, tout le reste suppose l'œil sur la fenêtre | moyen |
-| 11 | Chemins de fichiers et URL cliquables dans les résultats | Aller du résultat au fichier sans copier-coller ; s'appuie sur le rendu existant de la livraison et sur `/api/fleet/asset` | faible à moyen |
-| 12 | Pinner des conversations / indiquer une priorité | Triage quand la flotte grossit ; secondaire tant que l'ordre des cartes n'est pas stabilisé | faible à moyen |
-| 13 | Always on top + une UI qui tient dans un coin | Définit le mode d'usage (patch d'écran) ; à faire une fois les signaux essentiels arrêtés | moyen |
-| 14 | Date et heure de la dernière activité sur une conversation | Petit signal complémentaire (session vivante ou morte), peu coûteux, non bloquant | faible |
-| 15 | Un chat permanent, à droite ? (le « poste de commandement » conversationnel) | Gros pari d'architecture, à trancher après les signaux de base : il peut réorienter toute l'UI | élevé |
-| 16 | Markdown dans l'affichage (hors livraison) | Lisibilité de ce qu'écrivent les agents partout (brief, questions, tooltips), pour un coût faible ; c'est du confort, pas du pilotage | faible |
-| 17 | Un petit bouton config dans la conversation | Confort (modèle et agent à chaud), le plus simple ; n'a d'intérêt qu'une fois le pilotage en place | faible |
-| 18 | Changer de modèle facilement : dans le chat et pour les tâches | Le modèle est un levier de coût et de qualité invisible aujourd'hui ; le paramètre existe déjà côté outil, il manque le geste et une UI courte | faible à moyen |
-| 19 | Coller des images dans le chat et les cartes | Le presse-papiers est le chemin le plus court pour montrer une maquette, une erreur ou un rendu cassé ; confort réel, mais secondaire face au pilotage | faible à moyen |
+| 7 | Un mode plan pour le superviseur : lire le projet avant de cadrer une carte | Le brief d'une tâche est deviné à partir d'une phrase : sans lecture du projet, l'objectif et les critères restent génériques et l'humain corrige ce que l'agent n'a pas pu lire ; même outils que le mode discussion, autre intention | moyen |
+| 8 | Un vrai mode conversationnel : brainstormer sans lancer de tâche | Le chat existe, mais son agent est un aiguilleur sans accès au projet : il manque la posture (discuter) et des outils de lecture ; le coût est surtout du prompt et une bascule explicite | faible à moyen |
+| 9 | Mettre à jour une étape du plan sans réécrire la liste | Répare un signal déjà affiché qui ment : la barre reste vide puis saute à 100 % ; une barre fausse coûte plus qu'une ligne absente | moyen |
+| 10 | Objectif courant affiché sur la carte, en plus du résumé | Complète les rangs 1 et 3 : savoir où va la carte, pas seulement ce qu'elle fait ; un champ à ajouter | faible |
+| 11 | Numéroter les tâches, avec un préfixe par projet | Une référence stable pour suivre et désigner une tâche (« reprends la 42 ») alors que le titre change ; peu coûteux et utile partout (carte, chat, notifications) | faible |
+| 12 | Notifications desktop + badge d'attention sur l'icône | Le Superviseur doit venir vers l'utilisateur quand il n'est pas devant ; sans ça, tout le reste suppose l'œil sur la fenêtre | moyen |
+| 13 | Chemins de fichiers et URL cliquables dans les résultats | Aller du résultat au fichier sans copier-coller ; s'appuie sur le rendu existant de la livraison et sur `/api/fleet/asset` | faible à moyen |
+| 14 | Pinner des conversations / indiquer une priorité | Triage quand la flotte grossit ; secondaire tant que l'ordre des cartes n'est pas stabilisé | faible à moyen |
+| 15 | Always on top + une UI qui tient dans un coin | Définit le mode d'usage (patch d'écran) ; à faire une fois les signaux essentiels arrêtés | moyen |
+| 16 | Date et heure de la dernière activité sur une conversation | Petit signal complémentaire (session vivante ou morte), peu coûteux, non bloquant | faible |
+| 17 | Un chat permanent, à droite ? (le « poste de commandement » conversationnel) | Gros pari d'architecture, à trancher après les signaux de base : il peut réorienter toute l'UI | élevé |
+| 18 | Markdown dans l'affichage (hors livraison) | Lisibilité de ce qu'écrivent les agents partout (brief, questions, tooltips), pour un coût faible ; c'est du confort, pas du pilotage | faible |
+| 19 | Un petit bouton config dans la conversation | Confort (modèle et agent à chaud), le plus simple ; n'a d'intérêt qu'une fois le pilotage en place | faible |
+| 20 | Changer de modèle facilement : dans le chat et pour les tâches | Le modèle est un levier de coût et de qualité invisible aujourd'hui ; le paramètre existe déjà côté outil, il manque le geste et une UI courte | faible à moyen |
+| 21 | Coller des images dans le chat et les cartes | Le presse-papiers est le chemin le plus court pour montrer une maquette, une erreur ou un rendu cassé ; confort réel, mais secondaire face au pilotage | faible à moyen |
 
-État au 2026-11-07 : rangs 2, 7 et 15 faits ; rang 3 couvert autrement (étape courante du plan). Ces idées restent listées avec leur note de clôture ; les autres sont ouvertes.
+État au 2026-11-07 : rangs 2, 6, 9 et 17 faits ; rang 3 couvert autrement (étape courante du plan). Ces idées restent listées avec leur note de clôture ; les autres sont ouvertes.
 
 ## Idées
 
@@ -160,6 +162,64 @@ Constat sur le code actuel :
 - **relation avec l'analyse** : le compagnon reformule après coup ; donner l'aparté en matière première plutôt que de répéter son contenu en double dans le résumé.
 
 Lien : idée « envoyer des instructions pendant qu'une tâche travaille » (l'autre sens du canal, les modes d'envoi), leçon « Livraison inline » dans `AGENTS.md` (le dernier texte assistant n'est pas la réponse), doc [mvp1/chat-superviseur.md](../mvp1/chat-superviseur.md), `daemon/src/todos.mts` pour la lecture des tool parts.
+
+> Fait le 2026-11-07 : le tool `answer` (plugin `superviseur-task`, route `POST /api/task/answer`) écrit dans `task_answer` ; la carte affiche le compteur de réponses non lues, le panneau de détails lit la liste complète, et « Got it » les marque comme lues. Livré sous une autre forme que l'idée : pas de message dans le chat, et rien ne repart dans la session (la réponse est un enregistrement hors session).
+
+### Un mode plan pour le superviseur : lire le projet avant de cadrer une carte
+
+Discussion du 7 nov : le superviseur crée des cartes à partir de quelques phrases et de l'état de la flotte. Il n'a ni fichiers, ni recherche, ni web : le brief (objectif, critères, contraintes) reste générique, les hypothèses sont devinées, et le compagnon doit ensuite juger un objectif que personne n'a vérifié. L'humain corrige à la main ce que l'agent n'a pas pu lire, ou découvre trop tard que la carte visait à côté.
+
+Demande : un mode plan, dans le chat, où le superviseur peut explorer avant de cadrer : lire les docs et le code du projet visé, chercher dans les conversations passées, puis proposer une carte complète (but, périmètre, critères de fin, hypothèses, risques) à valider avant le lancement. Aucune écriture : il lit, il propose, l'humain lance.
+
+Constat sur le code actuel :
+
+- `daemon/agent/superviseur-orchestrateur.md` a `read`, `glob`, `grep`, `webfetch` désactivés ; le prompt compense par des règles génériques (« propose une tâche, demande la précision minimale ») ;
+- `start_task` accepte un `context` (repris dans `composePrompt`) mais le chat n'a rien pour le remplir autrement qu'avec la phrase de l'utilisateur ;
+- le chat vit dans `~/.superviseur`, pas dans le dossier du projet : la lecture doit être cadrée sur un projet désigné (comme le fait `list_projects` pour le lancement) ;
+- la flotte garde déjà de la matière (états, verdicts, journal), mais aucun outil ne l'expose au chat pour retrouver une tâche ou une décision passée.
+
+À trancher :
+
+- **mode explicite ou posture par défaut** : un sélecteur (Piloter / Planifier) ou le mode plan automatique à chaque demande de tâche ? Le mode explicite est prévisible ; le plan par défaut alourdirait les lancements évidents ;
+- **outils** : `read`, `glob`, `grep` sur le dossier du projet ; `webfetch` seulement s'il est autorisé ; rien en écriture, pas de `bash`, pas de `todowrite`. Un agent distinct (`superviseur-plan-<hash>`) évite de mélanger les consignes et respecte le cache par nom ;
+- **lecture seule n'est pas sans risque** : borner les chemins au dossier du projet (même validation que `/api/fleet/asset`), et ne pas laisser le chat lire `~/.superviseur` ni la base ;
+- **proposition de carte** : un rendu structuré (objectif, critères, contraintes, hypothèses) que l'utilisateur valide, puis `start_task` avec ce contexte ; sans ce rendez-vous, l'exploration ne change pas la qualité du brief ;
+- **coût et latence** : lire quelques fichiers avant de lancer prend du temps et des tokens ; le mode plan doit pouvoir s'arrêter (« assez lu ») et les lancements triviaux rester directs ;
+- **rapport avec le mode discussion** (rang 8) : mêmes outils de lecture, intention différente ; ne pas construire deux mécanismes de sélection de projet.
+
+Lien : idée « un vrai mode conversationnel » (le pendant discussion), idée « objectif courant » (rang 10) et rang 1 (la qualité de l'objectif est la référence du jugement), `daemon/agent/superviseur-orchestrateur.md`, `daemon/src/tools.mts` (`start_task` et `context`), doc [mvp1/chat-superviseur.md](../mvp1/chat-superviseur.md).
+
+### Un vrai mode conversationnel : brainstormer sans lancer de tâche
+
+Discussion du 7 nov : le Superviseur est bon pour partir des tâches et surveiller une flotte, mais pas pour penser à deux. Le chat parle déjà, seulement son agent est un aiguilleur : il cadre une intention et lance une session, et le reste du temps il renvoie vers une tâche. Pour brainstormer (« est-ce que cette idée tient ? », « comment aborder ce sujet ? »), deux murs : la posture (tout finit en brief) et l'accès (le chat n'a ni fichiers, ni web, ni exécution : il ne peut pas lire le projet dont on parle).
+
+Demande : un mode conversationnel assumé dans le chat : discuter d'une idée, la retourner, proposer des pistes, sans créer de tâche ni de plan, et sans transformer la discussion en brief. Si elle converge, un geste explicite peut en faire une tâche, en reprenant l'objectif et le contexte de l'échange.
+
+Constat sur le code actuel :
+
+- l'agent du chat (`daemon/agent/superviseur-orchestrateur.md`) n'a pas les outils de lecture, le même manque que l'idée « mode plan » ci-dessus : rien pour explorer le sujet ;
+- son prompt pousse à l'action : « transforme une intention en tâche », « ne réponds pas seulement je ne peux pas : c'est souvent une intention de tâche », et « intention implicite : demande tu veux que je lance ? » ;
+- le chat vit dans `~/.superviseur` : même avec la lecture activée, il ne verrait pas le dossier du projet dont on parle sauf à le désigner ;
+- la leçon du rang 1 (une idée lue comme un chantier) montre le risque : un mode qui lance dès qu'il entend un verbe d'action.
+
+Options, à trancher :
+
+- **mode explicite « Discuter » / « Piloter »** : prévisible, il change la consigne et les outils ; en discussion, lecture seule sur un projet désigné, pas d'écriture, pas de `start_task` sauf demande. Coût : un état de plus dans l'UI, et il faut y penser ;
+- **registre inféré** : plus fluide, mais c'est exactement le glissement que le rang 1 veut empêcher ; à ne pas retenir seul, éventuellement en secours du mode explicite ;
+- **atelier séparé** : une session en lecture sur le dossier du projet, distincte du chat d'orchestration ; plus puissante pour lire le code, mais deux fils à suivre et la bascule vers la tâche moins directe.
+
+Préférence (à confirmer) : mode explicite dans le chat, lecture seule sur un projet choisi, et un bouton « en faire une tâche » à la convergence, qui reprend le contexte de la discussion.
+
+À creuser avant d'implémenter :
+
+- **outils du mode discussion** : `read`, `glob`, `grep`, éventuellement `webfetch` ; jamais `edit`, `todowrite` ni `start_task` sans demande. Qui les porte : un agent distinct (le prompt est mis en cache par nom) ou le même agent avec une consigne de mode ?
+- **dossier** : la session du chat est dans `~/.superviseur` ; le mode discussion doit désigner un projet (le dernier utilisé ?), sinon la lecture ne sert à rien ;
+- **sortie** : pas de livraison et pas de carte ; à la convergence, le résumé devient le contexte d'une tâche (`start_task` a déjà `context`) ou une note dans cette boîte ;
+- **modèle** : brainstormer appelle un modèle fort, aiguiller un modèle rapide ; lien avec l'idée « changer de modèle facilement » ;
+- **mémoire** : une discussion utile doit rester retrouvable ; la session OpenChamber la garde, mais rien ne la relie à une idée ou un projet dans le Superviseur ;
+- **longueur** : pas de carte donc pas de clamp, le chat redevient un fil normal ; c'est le but, mais ça change le ton et la densité des réponses (déjà la règle du prompt : pas de tableau décoratif).
+
+Lien : idée « un chat permanent » (rang 17), idée rang 1 (dérive), idée « changer de modèle facilement », `daemon/agent/superviseur-orchestrateur.md`, doc [mvp1/chat-superviseur.md](../mvp1/chat-superviseur.md).
 
 ### Mettre à jour une étape du plan sans réécrire toute la liste
 

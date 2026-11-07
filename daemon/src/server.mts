@@ -7,6 +7,7 @@ import { readFile } from 'node:fs/promises';
 import { dirname, extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { currentFleet, openchamberUrl, pollOnce, type Fleet } from './fleet.mts';
+import { ackAnswers, AnswerError, listAnswers, recordAnswer, unreadAnswerCounts } from './answers.mts';
 import { getDelivery } from './delivery.mts';
 import { readSessionAsset } from './assets.mts';
 import { companionSessionOf } from './companion.mts';
@@ -73,6 +74,10 @@ function sendReplyPath(sessionId: string, form?: { id?: string }, requestID?: st
 function enrichedFleet(): Fleet {
   const fleet = currentFleet();
   const supervisorId = getSupervisorSession()?.oc_session_id;
+  // compteur de réponses non lues : une seule requête par frame, réparti ici
+  // (jamais dans buildFleet : la flotte brute vient d'OpenChamber, la table
+  // task_answer nous appartient)
+  const unread = unreadAnswerCounts();
   return {
     ...fleet,
     rows: fleet.rows.flatMap((r) => {
@@ -80,15 +85,16 @@ function enrichedFleet(): Fleet {
       if (r.dir === SUPERVISOR_DIR) return [];
       const st = getTaskState(r.id) as { closed_at?: number } | null;
       if (st?.closed_at) {
-        // activité postérieure à la fermeture ? (nouveau prompt dans OpenChamber) → réouverture
+        // activité postérieure à la fermeture ? (nouveau prompt dans OpenChamber, ou
+        // un tool answer livré après clôture) → réouverture
         const last = Math.max(r.lastUpdateAt ?? 0, r.busy ?? 0);
         if (last > (st.closed_at ?? 0)) {
           reopenTaskState(r.id);
-          return [{ ...r, task: getTaskState(r.id) }];
+          return [{ ...r, task: getTaskState(r.id), unreadAnswers: unread.get(r.id) ?? 0 }];
         }
         return [];
       }
-      return [{ ...r, task: st }];
+      return [{ ...r, task: st, unreadAnswers: unread.get(r.id) ?? 0 }];
     }),
   };
 }
@@ -167,6 +173,38 @@ async function handleApi(req: http.IncomingMessage, res: http.ServerResponse, ur
     const args = (body.args ?? {}) as Record<string, unknown>;
     const result = await runTool(name, String(body.sessionId ?? ''), args);
     json(res, 200, result);
+    return;
+  }
+  if (path === '/api/task/answer' && req.method === 'POST') {
+    // tool `answer` des sessions de tâche (plugin superviseur-task) : la route
+    // n'est PAS sous /api/tools (réservée au chat de supervision) ; le garde
+    // isTaskSession rejette compagnon et chat.
+    const body = await readBody(req);
+    const sessionId = String(body.sessionId ?? '');
+    const args = (body.args ?? {}) as Record<string, unknown>;
+    try {
+      const answer = recordAnswer(sessionId, args.text, args.question);
+      json(res, 200, { ok: true, taskId: sessionId, answerId: answer.id, at: answer.at });
+    } catch (e) {
+      const err = e as AnswerError;
+      json(res, err instanceof AnswerError ? err.status : 500, { ok: false, error: err.message });
+    }
+    return;
+  }
+  if (path === '/api/fleet/answers' && req.method === 'GET') {
+    // panel de détails : toutes les réponses de la tâche, lues et non lues.
+    const sessionId = (url.searchParams.get('sessionId') ?? '').trim();
+    if (!sessionId) { json(res, 400, { error: 'sessionId requis' }); return; }
+    json(res, 200, { sessionId, answers: listAnswers(sessionId) });
+    return;
+  }
+  if (path === '/api/fleet/answers/ack' && req.method === 'POST') {
+    const body = await readBody(req);
+    const sessionId = String(body.sessionId ?? '');
+    if (!sessionId) { json(res, 400, { error: 'sessionId requis' }); return; }
+    const ids = Array.isArray(body.ids) ? body.ids.map((n) => Number(n)) : undefined;
+    const acked = ackAnswers(sessionId, ids);
+    json(res, 200, { ok: true, acked });
     return;
   }
   if (path === '/api/fleet/delivery' && req.method === 'GET') {

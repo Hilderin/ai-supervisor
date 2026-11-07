@@ -67,6 +67,17 @@ export interface FleetRow {
   task?: { closed_at?: number } | null;
   /** plan de la session de travail (`todowrite`) */
   todo?: { done: number; total: number; steps: TodoStep[] };
+  /** réponses au propriétaire (tool `answer`) pas encore lues (« Got it ») */
+  unreadAnswers?: number;
+}
+
+/** Réponse d'une tâche au propriétaire, `GET /api/fleet/answers?sessionId=…`. */
+export interface TaskAnswer {
+  id: number;
+  at: number;
+  text: string;
+  question?: string | null;
+  read_at?: number | null;
 }
 
 export interface Fleet {

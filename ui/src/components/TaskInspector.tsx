@@ -11,6 +11,7 @@ import type { FleetRow } from '../types';
 import { CardStateIcon } from './CardStateIcon';
 import { Composer } from './Composer';
 import { ConfidenceDots } from './ConfidenceDots';
+import { AnswersSection } from './AnswersSection';
 import { DeliveryBlock } from './DeliveryBlock';
 import { OpenChamberIcon } from './Icons';
 import { PlanSection } from './PlanSection';
@@ -149,6 +150,11 @@ export function TaskInspector({ row, state, now, onClose }: Props) {
             {progress != null ? `${Math.round(progress)} %` : 'pas de plan'}
           </div>
         )}
+
+        <AnswersSection
+          sessionId={row.id}
+          refreshKey={`${row.lastUpdateAt ?? 0}:${row.unreadAnswers ?? 0}`}
+        />
 
         <DeliveryBlock
           sessionId={row.id}

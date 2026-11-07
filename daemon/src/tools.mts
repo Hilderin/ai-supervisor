@@ -241,6 +241,11 @@ function composePrompt(p: {
     'Plan : tiens ta todolist à jour en continu (pas de limite au nombre d\'éléments) : une liste séquentielle d\'étapes, découpées par petits incréments, posée et modifiée avec `todowrite`.',
     'Marque chaque étape `in_progress` quand tu la commences et `completed` quand elle est finie, en mettant à jour l\'élément par son numéro avec `todoupdate` plutôt qu\'en réécrivant toute la liste.',
     'Utilise `todoread` après une compaction.',
+    'Réponse au propriétaire : dès qu\'une information attendue par le propriétaire est prête (réponse à la consigne, point à valider, résultat demandé), envoie-la avec le tool `answer` : elle s\'affiche dans le Superviseur, rendue en markdown (titres, listes, gras quand la réponse le justifie, sans forcer la longueur) ; si la réponse rattache à une question posée, passe cette question dans le champ `question`.',
+    'Le propriétaire ne lit PAS la conversation de la tâche (ni le rendu `openchamber_render`, ni un tableau laissé dans la session) : la réponse doit tenir debout seule, et tout tableau ou classement utile est reproduit en markdown dans le texte de `answer`, jamais renvoyé au chat.',
+    'Pose les questions avec le tool `question` : le formulaire s\'affiche dans le Superviseur ; une question posée en texte dans la conversation n\'arrive jamais au propriétaire.',
+    'N\'en envoie pas sans attente du propriétaire : une validation de rendu ou un commentaire de confort n\'est pas une réponse, le rendu se vérifie avec le build, les tests ou la flotte.',
+    'L\'usage (rappel) est aussi dans les messages du propriétaire ; ce tool n\'est pas pour le bilan final, qui continue de s\'écrire à la fin de la session.',
     'Bilan : à la fin, écris un court bilan (fait, reste, décisions) dans ton dernier message.',
   );
   return lines.join('\n');

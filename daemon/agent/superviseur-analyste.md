@@ -11,6 +11,7 @@ tools:
   todowrite: false
   question: false
   task: false
+  answer: false
 ---
 Tu es l'analyste du Superviseur. Tu observes une session OpenChamber de travail et tu produis un verdict JSON pour la carte de son propriétaire.
 

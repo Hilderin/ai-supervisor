@@ -88,6 +88,18 @@ CREATE TABLE IF NOT EXISTS task_resume (
   updated_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_task_resume_session ON task_resume(session_id);
+-- Réponses des tâches au propriétaire (tool « answer » du plugin superviseur-task) :
+-- une ligne par appel, relue dans le panel de détails ; read_at vaut NULL tant
+-- que le propriétaire n'a pas lu la réponse (compteur de la carte).
+CREATE TABLE IF NOT EXISTS task_answer (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id TEXT NOT NULL,          -- task_id, suit la tâche une fois migrée
+  at INTEGER NOT NULL,               -- epoch ms
+  text TEXT NOT NULL,                -- réponse de l'agent (tronquée)
+  question TEXT,                     -- rattachement optionnel à une question posée
+  read_at INTEGER                    -- epoch ms de lecture (« Got it »), NULL = non lue
+);
+CREATE INDEX IF NOT EXISTS idx_task_answer_session ON task_answer(session_id, at);
 `);
 try { db.exec('ALTER TABLE task_verdict ADD COLUMN note TEXT'); } catch { /* colonne déjà présente */ }
 try { db.exec('ALTER TABLE companion_map ADD COLUMN version INTEGER'); } catch { /* colonne déjà présente */ }
@@ -423,6 +435,9 @@ export function migrateTaskSession(oldId: string, newId: string) {
     db.query('UPDATE task_state SET session_id = ? WHERE session_id = ?').run(newId, oldId);
     db.query('UPDATE task_brief SET session_id = ? WHERE session_id = ?').run(newId, oldId);
     db.query('UPDATE task_log SET session_id = ? WHERE session_id = ?').run(newId, oldId);
+    // les réponses au propriétaire suivent la tâche : elles restent visibles
+    // dans le détail (rien ne dit qu'elles ont déjà été lues)
+    db.query('UPDATE task_answer SET session_id = ? WHERE session_id = ?').run(newId, oldId);
     db.query('DELETE FROM task_verdict WHERE session_id = ?').run(oldId);
     // Le compagnon enfant est détruit avec son parent : la mapping ne doit pas
     // ressusciter une session morte, le nouveau parent refabrique le sien.

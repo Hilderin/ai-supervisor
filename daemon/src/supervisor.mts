@@ -423,10 +423,17 @@ export async function getSupervisorState(): Promise<SupervisorState> {
  * les messages du daemon lui-même (ordres système, annulations vers les tâches)
  * ne passent pas par là.
  *
+ * Préfixe UNIQUE combiné : remise à jour de la todolist + instructions du tool
+ * `answer`. Il est appliqué à toutes les unités d'écriture du propriétaire
+ * (chat de supervision ET panel d'une tâche existante), là où l'encadrement
+ * existe déjà ; SuperviseurTodoList n'y touche pas.
+ *
  * Le texte encadré part tel quel à OpenChamber, donc la bulle du chat le
  * porte aussi : `stripOwnerWrap` ne fait le retirer que pour l'affichage.
  */
-export const OWNER_WRAP = 'Nouvelle instruction de l\u2019utilisateur, mets ta todolist à jour au besoin :';
+export const OWNER_WRAP =
+  "Nouvelle instruction de l\u2019utilisateur : mets ta todolist à jour au besoin ; "
+  + "les réponses pour le propriétaire partent avec le tool `answer` (elles s\u2019affichent dans le Superviseur) :";
 
 export function wrapOwnerPrompt(text: string): string {
   return `${OWNER_WRAP}\n\n${text}`;

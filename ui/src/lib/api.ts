@@ -1,4 +1,4 @@
-import type { Delivery, Fleet, SupervisorState } from '../types';
+import type { Delivery, Fleet, SupervisorState, TaskAnswer } from '../types';
 
 async function post(path: string, body: unknown): Promise<void> {
   const res = await fetch(path, {
@@ -94,6 +94,22 @@ export async function sendPrompt(sessionId: string, text: string): Promise<void>
 /** Fermer = retirer du Superviseur (pas d'archivage ; une activité future rouvre la carte). */
 export async function closeConversation(sessionId: string, force = false): Promise<void> {
   await post('/api/fleet/done', { sessionId, force });
+}
+
+/** Réponses au propriétaire de cette tâche (lues et non lues), les plus anciennes d'abord. */
+export async function fetchAnswers(sessionId: string, signal?: AbortSignal): Promise<TaskAnswer[]> {
+  const res = await fetch(`/api/fleet/answers?sessionId=${encodeURIComponent(sessionId)}`, {
+    cache: 'no-store',
+    signal,
+  });
+  if (!res.ok) throw new Error(String(res.status));
+  const body = (await res.json()) as { answers?: TaskAnswer[] };
+  return body.answers ?? [];
+}
+
+/** « Got it » : marque lues les réponses (toutes par défaut, sinon les ids donnés). */
+export async function ackAnswers(sessionId: string, ids?: number[]): Promise<void> {
+  await post('/api/fleet/answers/ack', { sessionId, ids });
 }
 
 /** Annule un formulaire en attente : l'agent reprend sans réponse. */
