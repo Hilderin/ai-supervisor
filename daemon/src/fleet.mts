@@ -209,8 +209,14 @@ async function runPoll(): Promise<void> {
         if (Array.isArray(fresh?.data)) sessionsIndex = new Map(fresh.data.map(s => [s.id, s]));
       } catch { /* garde l'ancien annuaire */ }
     }
-    cachedFleet = buildFleet(status);
-    await enrichTodoProgress(cachedFleet);
+    // Publier UNIQUEMENT des snapshots entièrement enrichis : entre buildFleet
+    // et enrichTodoProgress, la flotte exposait des frames sans `todo` (progress
+    // du verdict au lieu du plan). Cette fenêtre (~500 ms du fetch /message) était
+    // échantillonnée par le SSE 500 ms et le poll 3 s de l'UI : barres qui se
+    // relancent (38 % → 0 → 38 %) et section Plan du détail démontée/remontée.
+    const fleet = buildFleet(status);
+    await enrichTodoProgress(fleet);
+    cachedFleet = fleet;
     lastGood = Date.now();
     // l'attente humaine est décidée par les formulaires/permissions réels, pas par le LLM
     const waitingMap = new Map<string, WaitInfo>();
