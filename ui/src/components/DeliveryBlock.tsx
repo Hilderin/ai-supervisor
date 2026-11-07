@@ -15,6 +15,10 @@ interface Props {
   done: boolean;
   /** change quand le tour ou la dernière activité change (refetch ciblé) */
   refreshKey: string;
+  /** aperçu de 2 lignes dans la carte ; le détail complet vit dans l'inspecteur */
+  compact?: boolean;
+  /** déplié d'office dans l'inspecteur : pas de « Voir plus » à cliquer d'abord */
+  defaultExpanded?: boolean;
 }
 
 function Shell({ children, title }: { children: ReactNode; title?: string }) {
@@ -36,16 +40,16 @@ function Shell({ children, title }: { children: ReactNode; title?: string }) {
  * Le composant est mémoïsé : les re-rendus 1 s / 2 s de la carte ne relancent
  * ni la requête ni le parsing du markdown.
  */
-export const DeliveryBlock = memo(function DeliveryBlock({ sessionId, enabled, done, refreshKey }: Props) {
+export const DeliveryBlock = memo(function DeliveryBlock({ sessionId, enabled, done, refreshKey, compact = false, defaultExpanded = false }: Props) {
   const [delivery, setDelivery] = useState<Delivery | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
   const [attempt, setAttempt] = useState(0);
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(defaultExpanded);
 
   useEffect(() => {
-    setExpanded(false);
-  }, [sessionId, refreshKey]);
+    setExpanded(defaultExpanded);
+  }, [sessionId, refreshKey, defaultExpanded]);
 
   useEffect(() => {
     if (!enabled) {
@@ -71,6 +75,27 @@ export const DeliveryBlock = memo(function DeliveryBlock({ sessionId, enabled, d
 
   const view = deliveryView({ enabled, loading, error, delivery, done });
   if (view === 'hidden') return null;
+
+  if (compact) {
+    if (view === 'loading') {
+      return <div className="text-[11.5px] text-muted">Chargement du résultat…</div>;
+    }
+    if (view === 'empty') {
+      return done ? <div className="text-[11.5px] text-muted">Aucune réponse textuelle pour ce tour.</div> : null;
+    }
+    if (view === 'error' || !delivery) {
+      return <div className="text-[11.5px] text-muted">Résultat indisponible.</div>;
+    }
+    return (
+      <div className="max-h-[42px] overflow-hidden pb-[3px] text-[11.5px] leading-[1.4] text-muted">
+        {delivery.render?.title ? (
+          <div className="truncate font-semibold">{delivery.render.title}</div>
+        ) : null}
+        {delivery.markdown ? <DeliveryMarkdown markdown={delivery.markdown} sessionId={sessionId} /> : null}
+      </div>
+    );
+  }
+
   if (view === 'loading') {
     return (
       <Shell>

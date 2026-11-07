@@ -323,7 +323,7 @@ export function SupervisorChat({ onCollapse }: Props) {
   return (
     <aside
       data-testid="supervisor-chat"
-      className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-[12px] border border-border bg-card"
+      className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden border border-border bg-card"
     >
       <header className="flex items-center gap-[8px] border-b border-border px-[13px] py-[10px]">
         <span

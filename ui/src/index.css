@@ -57,7 +57,8 @@
     font-size: 14.5px;
     /* la maquette n'a pas de line-height global : Tailwind met 1.5, on rétablit normal */
     line-height: normal;
-    padding: 20px 26px;
+    /* contenu collé aux bords de l'écran : la marge de page est retirée */
+    padding: 0;
   }
 }
 

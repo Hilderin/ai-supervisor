@@ -2,8 +2,10 @@ import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { FleetBoard } from './components/FleetBoard';
 import { PanelLeftIcon } from './components/Icons';
 import { SupervisorChat } from './components/SupervisorChat';
+import { TaskInspector } from './components/TaskInspector';
 import { useFleetStream } from './hooks/useFleetStream';
 import { useNow } from './hooks/useNow';
+import { cardState } from './lib/cardState';
 import { cx } from './lib/cx';
 import { useFleetStore } from './store/fleetStore';
 
@@ -11,17 +13,31 @@ const MIN_CHAT = 320;
 const MAX_CHAT = 480;
 const DEFAULT_CHAT = 380;
 
+const MIN_INSPECTOR = 280;
+const MAX_INSPECTOR = 680;
+const DEFAULT_INSPECTOR = 460;
+
 function clampWidth(n: number): number {
   return Math.max(MIN_CHAT, Math.min(MAX_CHAT, Math.round(n)));
+}
+
+function clampInspector(n: number): number {
+  return Math.max(MIN_INSPECTOR, Math.min(MAX_INSPECTOR, Math.round(n)));
 }
 
 export default function App() {
   useFleetStream();
   const fleet = useFleetStore((s) => s.fleet);
   const error = useFleetStore((s) => s.error);
+  const selected = useFleetStore((s) => s.selected);
+  const setSelected = useFleetStore((s) => s.setSelected);
+  const placements = useFleetStore((s) => s.placements);
   const now = useNow(1000);
   const [chatOpen, setChatOpen] = useState(() => localStorage.getItem('superviseur.chat') !== 'closed');
   const [chatWidth, setChatWidth] = useState(() => clampWidth(Number(localStorage.getItem('superviseur.chatWidth')) || DEFAULT_CHAT));
+  const [inspectorWidth, setInspectorWidth] = useState(
+    () => clampInspector(Number(localStorage.getItem('superviseur.inspectorWidth')) || DEFAULT_INSPECTOR),
+  );
   const [view, setView] = useState<'chat' | 'fleet'>('chat');
   const layoutRef = useRef<HTMLDivElement>(null);
 
@@ -32,6 +48,15 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('superviseur.chatWidth', String(chatWidth));
   }, [chatWidth]);
+
+  useEffect(() => {
+    localStorage.setItem('superviseur.inspectorWidth', String(inspectorWidth));
+  }, [inspectorWidth]);
+
+  const selectedRow = selected
+    ? (fleet?.rows.find((row) => row.id === selected) ?? null)
+    : null;
+  const selectedState = selectedRow ? cardState(selectedRow, placements[selectedRow.id]?.section) : null;
 
   // un clic hors des composers (menu de la carte, question, ailleurs) libère
   // le focus mémorisé : sans ce garde-fou, on rendrait le curseur bien après
@@ -63,8 +88,26 @@ export default function App() {
     window.addEventListener('pointerup', up);
   };
 
+  // Le détail est la colonne de droite : tirer la poignée vers la gauche l'élargit.
+  const startInspectorResize = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = inspectorWidth;
+    const move = (ev: PointerEvent) => setInspectorWidth(clampInspector(startWidth - (ev.clientX - startX)));
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
+
   return (
-    <div className="flex h-[calc(100vh-40px)] min-h-0 flex-col">
+    <div className="flex h-screen min-h-0 flex-col">
       {chatOpen ? (
         <div
           data-testid="narrow-tabs"
@@ -154,7 +197,7 @@ export default function App() {
         <main
           data-testid="fleet-pane"
           className={cx(
-            'min-h-0 min-w-0 flex-1 overflow-y-auto pr-[1px]',
+            'min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto pr-[1px]',
             chatOpen && view === 'chat' ? 'max-[1100px]:hidden' : null,
           )}
         >
@@ -165,6 +208,47 @@ export default function App() {
             </div>
           ) : null}
         </main>
+
+        {selectedRow && selectedState ? (
+          <div
+            data-testid="inspector-resizer"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Redimensionner le détail de la tâche"
+            tabIndex={0}
+            title="Redimensionner le détail (flèches gauche/droite)"
+            onPointerDown={startInspectorResize}
+            onKeyDown={(e) => {
+              if (e.key === 'ArrowLeft') { e.preventDefault(); setInspectorWidth((w) => clampInspector(w + 10)); }
+              if (e.key === 'ArrowRight') { e.preventDefault(); setInspectorWidth((w) => clampInspector(w - 10)); }
+              if (e.key === 'Home') { e.preventDefault(); setInspectorWidth(MIN_INSPECTOR); }
+              if (e.key === 'End') { e.preventDefault(); setInspectorWidth(MAX_INSPECTOR); }
+            }}
+            className="group hidden w-[15px] shrink-0 cursor-col-resize touch-none select-none items-stretch justify-center outline-none min-[1100px]:flex"
+          >
+            <span className="relative flex w-[1px] items-center justify-center bg-border transition-colors group-hover:bg-green">
+              <span className="h-[26px] w-[4px] rounded-full bg-[#d5dad5] transition-colors group-hover:bg-green" />
+            </span>
+          </div>
+        ) : null}
+
+        {selectedRow && selectedState ? (
+          <aside
+            data-testid="inspector-pane"
+            style={{ '--inspector-width': `${inspectorWidth}px` } as CSSProperties}
+            className={cx(
+              'h-full min-h-0 w-[var(--inspector-width)] shrink-0 overflow-hidden border-l border-border bg-card max-[1100px]:w-full',
+              chatOpen && view === 'chat' ? 'max-[1100px]:hidden' : null,
+            )}
+          >
+            <TaskInspector
+              row={selectedRow}
+              state={selectedState}
+              now={now}
+              onClose={() => setSelected(null)}
+            />
+          </aside>
+        ) : null}
       </div>
     </div>
   );
