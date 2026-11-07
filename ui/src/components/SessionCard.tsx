@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { closeConversation, replyPermission } from '../lib/api';
 import { cx } from '../lib/cx';
-import { briefRow, dirName, isStaleTurn } from '../lib/fleet';
+import { BUSY_BRIEF, briefRow, dirName, isStaleTurn, planLabel } from '../lib/fleet';
 import { BTN_PRIMARY } from '../lib/ui';
 import { useFleetStore } from '../store/fleetStore';
 import type { FleetRow } from '../types';
@@ -9,6 +9,7 @@ import { Composer } from './Composer';
 import { ConfidenceDots } from './ConfidenceDots';
 import { DeliveryBlock } from './DeliveryBlock';
 import { CloseConversationIcon, OpenChamberIcon } from './Icons';
+import { PlanPopover } from './PlanPopover';
 import { QuestionBox } from './QuestionBox';
 
 interface Props {
@@ -26,7 +27,7 @@ export function SessionCard({ row, waiting, done, now }: Props) {
   const kebabRef = useRef<HTMLButtonElement>(null);
 
   const stale = isStaleTurn(row);
-  const brief = stale ? 'Réflexion en cours…' : row.sup?.resume || briefRow(row, waiting, now);
+  const brief = stale ? BUSY_BRIEF : row.sup?.resume || briefRow(row, waiting, now);
   const dir = dirName(row.dir);
 
   const form = row.pendingForms?.[0];
@@ -35,6 +36,8 @@ export function SessionCard({ row, waiting, done, now }: Props) {
   const hasProgress = row.sup?.progress != null || !!row.todo;
   const progress = row.sup?.progress != null ? Math.max(0, Math.min(100, Number(row.sup.progress))) : 0;
   const shownDone = !!row.sup?.termine && row.status !== 'busy';
+  const todoSteps = row.todo?.steps ?? [];
+  const progressLabel = planLabel(row.todo, shownDone, progress);
   const rawConf = row.sup?.confiance;
   const conf = rawConf == null ? null : Math.max(0, Math.min(1, rawConf));
   const showBars = !!row.sup && (hasProgress || conf != null);
@@ -152,13 +155,22 @@ export function SessionCard({ row, waiting, done, now }: Props) {
           )}
           <ConfidenceDots conf={conf} note={row.sup?.note} />
           {hasProgress ? (
-            <span
-              data-testid="progress"
-              title={row.todo ? `${row.todo.done} étape(s) sur ${row.todo.total}` : `${Math.round(progress)} %`}
-              className="w-[38px] text-right text-[12px] font-[650] tabular-nums"
-            >
-              {row.todo && !shownDone ? `${row.todo.done}/${row.todo.total}` : `${Math.round(progress)} %`}
-            </span>
+            row.todo && todoSteps.length ? (
+              <PlanPopover
+                label={progressLabel}
+                steps={todoSteps}
+                done={row.todo.done}
+                total={row.todo.total}
+              />
+            ) : (
+              <span
+                data-testid="progress"
+                title={row.todo ? `${row.todo.done} étape(s) sur ${row.todo.total}` : `${Math.round(progress)} %`}
+                className="w-auto min-w-[38px] shrink-0 whitespace-nowrap text-right text-[12px] font-[650] tabular-nums"
+              >
+                {progressLabel}
+              </span>
+            )
           ) : null}
         </div>
       ) : null}

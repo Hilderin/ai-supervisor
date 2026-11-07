@@ -110,7 +110,7 @@ export default function App() {
         ) : (
           <div
             data-testid="chat-rail"
-            className="flex w-[34px] shrink-0 flex-col items-center border-r border-border bg-card pt-[5px]"
+            className="mr-[8px] flex w-[34px] shrink-0 flex-col items-center border-r border-border bg-card pt-[5px]"
           >
             <button
               type="button"

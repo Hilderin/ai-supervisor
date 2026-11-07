@@ -44,6 +44,13 @@ export interface PendingPermission {
   [key: string]: unknown;
 }
 
+export type TodoStatus = 'pending' | 'in_progress' | 'completed';
+
+export interface TodoStep {
+  text: string;
+  status: TodoStatus;
+}
+
 export interface FleetRow {
   id: string;
   title: string;
@@ -59,7 +66,7 @@ export interface FleetRow {
   /** ajouté par GET /api/fleet (pas par le SSE) */
   task?: { closed_at?: number } | null;
   /** plan de la session de travail (`todowrite`) */
-  todo?: { done: number; total: number };
+  todo?: { done: number; total: number; steps: TodoStep[] };
 }
 
 export interface Fleet {
@@ -73,6 +80,10 @@ export interface ChatTool {
   status: string;
   label: string;
   ok?: boolean;
+  /** `send_task` : tâche destinataire et texte réellement envoyé (non tronqué). */
+  taskId?: string;
+  title?: string;
+  text?: string;
 }
 
 export interface SupervisorMessage {
@@ -83,12 +94,19 @@ export interface SupervisorMessage {
   tools: ChatTool[];
 }
 
+export interface QueuedSupervisorMessage {
+  id: string;
+  text: string;
+  at: number;
+}
+
 export interface SupervisorState {
   sessionId: string | null;
   status: 'idle' | 'busy' | 'unknown';
   agent: string | null;
   directory: string;
   messages: SupervisorMessage[];
+  queued: QueuedSupervisorMessage[];
   error?: string;
 }
 

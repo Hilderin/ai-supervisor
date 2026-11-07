@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { isClosedRow } from '../store/fleetStore';
-import type { FleetRow } from '../types';
-import { briefRow, fmtAge, isDone, isStaleTurn, confidenceColor, confidenceLevel } from './fleet';
+import type { Fleet, FleetRow } from '../types';
+import { briefRow, fmtAge, isDone, isStaleTurn, confidenceColor, confidenceLevel, planLabel, taskTitleOf } from './fleet';
 
 const row = (over: Partial<FleetRow>): FleetRow => ({
   id: 'ses_test',
@@ -48,6 +48,58 @@ describe('isDone / isStaleTurn', () => {
   });
 });
 
+describe('planLabel', () => {
+  const todo = (done: number, statuses: Array<'pending' | 'in_progress' | 'completed'>) => ({
+    done,
+    total: statuses.length,
+    steps: statuses.map((status) => ({ text: 'étape', status })),
+  });
+
+  test('plan non commencé → taille du plan, jamais 0/N', () => {
+    expect(planLabel(todo(0, ['pending', 'pending', 'pending', 'pending', 'pending']), false, 0)).toBe(
+      '5 étapes',
+    );
+  });
+
+  test('une étape en cours → 0/N est honnête', () => {
+    expect(planLabel(todo(0, ['in_progress', 'pending']), false, 0)).toBe('0/2');
+  });
+
+  test('plan commencé → étapes faites / total', () => {
+    expect(planLabel(todo(2, ['completed', 'completed', 'pending']), false, 66)).toBe('2/3');
+  });
+
+  test('tâche terminée → pourcentage', () => {
+    expect(planLabel(todo(2, ['completed', 'completed', 'pending']), true, 100)).toBe('100 %');
+  });
+
+  test('sans plan → pourcentage du verdict', () => {
+    expect(planLabel(undefined, false, 40)).toBe('40 %');
+  });
+});
+
+describe('taskTitleOf', () => {
+  const fleetWith = (title: string): Fleet => ({
+    at: 1,
+    concern: null,
+    rows: [{ ...row({ id: 'ses_task' }), title }],
+  });
+
+  test('résout le titre courant de la flotte (renommage)', () => {
+    expect(taskTitleOf(fleetWith('Nom actuel'), 'ses_task', 'Ancien nom')).toBe('Nom actuel');
+  });
+
+  test('tâche absente de la flotte → repli lisible', () => {
+    expect(taskTitleOf({ at: 1, concern: null, rows: [] }, 'ses_task', 'Ancien nom')).toBe(
+      'une tâche qui n’est plus dans la flotte',
+    );
+  });
+
+  test('flotte pas encore chargée → titre mémorisé', () => {
+    expect(taskTitleOf(null, 'ses_task', 'Ancien nom')).toBe('Ancien nom');
+  });
+});
+
 describe('briefRow / fmtAge', () => {
   test('question en attente', () => {
     expect(briefRow(row({ pendingForms: [{ id: 'f' }] }), true, 0)).toBe('une question t’attend');
@@ -59,8 +111,8 @@ describe('briefRow / fmtAge', () => {
     );
   });
 
-  test('busy → travaille', () => {
-    expect(briefRow(row({ status: 'busy' }), false, 0)).toBe('travaille');
+  test('busy → réflexion en cours', () => {
+    expect(briefRow(row({ status: 'busy' }), false, 0)).toBe('Réflexion en cours...');
   });
 
   test('idle → âge du dernier update', () => {

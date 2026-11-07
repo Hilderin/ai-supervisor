@@ -129,7 +129,7 @@ L'orchestrateur **consomme** les verdicts du compagnon via `list_tasks`. Il ne r
 - **Exclusion** : la session est filtrée par id, et tout le dossier `~/.superviseur` est exclu de `buildFleet` et de `companionTick`. Elle ne reçoit pas de compagnon et ne déclenche pas de livraison.
 - **Pas de session enfant** : une session enfant serait cachée automatiquement de la flotte, mais aussi de la liste OpenChamber. L'exclusion par id garde la session visible dans OpenChamber.
 - **Cycle de vie** : si la session est archivée ou supprimée, le daemon la recrée et prévient l'utilisateur. La conversation précédente reste dans OpenChamber si elle est seulement archivée.
-- **Nouvelle conversation** : crée une nouvelle session, sans archiver l'ancienne. Une liste des conversations de supervision passées pourra venir plus tard.
+- **Nettoyer le chat** : vide l'écran et crée une nouvelle session, sans archiver l'ancienne (elle reste visible dans OpenChamber). Une liste des conversations de supervision passées pourra venir plus tard.
 - **Ouverture dans OpenChamber** : la session reste une session normale ; un bouton « Ouvrir dans OpenChamber » sert de soupape pour les fonctions absentes de notre chat (pièces jointes, formulaires complexes, historique long).
 
 ### 4.2 Agent `superviseur-orchestrateur`
@@ -456,17 +456,18 @@ L'agent doit lister explicitement ses outils. Les noms exacts dépendent du tran
 
 ### 8.2 Panneau de chat
 
-- **En-tête** : « Superviseur », une petite indication de l'agent ou du modèle, une icône `+` pour « Nouvelle conversation », l'icône de panneau pour replier, et une petite flèche « Ouvrir dans OpenChamber » à droite, comme sur les cartes de conversation.
+- **En-tête** : « Superviseur », une petite indication de l'agent ou du modèle, une icône de balai avec l'infobulle « Nettoyer le chat » (vide le chat et démarre une conversation neuve ; l'ancienne reste dans OpenChamber), l'icône de panneau pour replier, et une petite flèche « Ouvrir dans OpenChamber » à droite, comme sur les cartes de conversation.
 - **État vide** : une phrase et une phrase d'aide, pas de suggestions. Pas de mur de texte.
 - **Messages utilisateur** : bulle discrète à droite, texte simple, horodatage sous la bulle.
 - **Messages assistant** : à gauche, markdown GFM, `skipHtml`, pas de `rehype-raw`, liens `target="_blank" rel="noreferrer noopener"`. Code et tableaux stylés avec les jetons existants.
-- **Appels d'outils** : une ligne compacte, pas le JSON brut. Exemples : « a consulté la flotte », « a lancé Audit du module auth », « échec : projet inconnu ». En cas d'erreur, la ligne est rouge et l'agent explique.
+- **Actions de message** : sur la ligne de l'heure, à gauche et à côté d'elle, deux icônes avec infobulle et libellé accessible. « Copier le message » copie le texte dans le presse-papiers ; « Revenir à partir d'ici » supprime les messages à partir de ce point (stage puis commit OpenCode, avec arrêt du tour en cours). Le texte d'un message utilisateur revient dans le composer pour être corrigé et renvoyé.
+- **Appels d'outils** : une ligne compacte, pas le JSON brut. Exemples : « a consulté la flotte », « a lancé Audit du module auth », « échec : projet inconnu ». En cas d'erreur, la ligne est rouge et l'agent explique. Pour `send_task`, un bloc sous la puce affiche `Envoyé à « titre »` puis le texte complet envoyé ; le titre est relu dans la flotte à l'affichage (un renommage reste correct) et remplacé par « une tâche qui n’est plus dans la flotte » si elle a disparu.
 - **Streaming** : poll 1,2 s quand le superviseur travaille, 4 s au repos. Le compagnon a déjà un pattern de lecture ; le chat a besoin d'un flux plus réactif. Un SSE filtré pourra remplacer le poll si l'usage le réclame.
-- **État occupé** : indicateur « réfléchit », bouton « Arrêter ». Le composer est désactivé pendant le tour, ou accepte une file si l'endpoint le permet. Le plus simple en phase 1 : désactiver l'envoi et proposer l'arrêt.
+- **État occupé** : indicateur « réfléchit », le composer reste actif. Un message soumis pendant le tour est mis en file (file OpenChamber, visible au-dessus du champ, retirable par ×) et livré à la fin. Le bouton Envoyer apparaît à gauche du carré Stop dès qu'il y a du texte ; sans texte, seul le Stop occupe la place du bouton d'envoi.
 - **Défilement** : coller en bas sauf si l'utilisateur a remonté ; bouton « nouveaux messages » dans ce cas.
-- **Composer** : auto-grow jusqu'à 120 px, Enter envoie, Shift+Enter saute une ligne. Reprendre le pattern de `Composer.tsx`, avec un état séparé de la flotte.
+- **Composer** : auto-grow jusqu'à 120 px, Enter envoie ou met en file, Shift+Enter saute une ligne. La hauteur est réglable à la souris par une poignée au-dessus du champ (34 à 360 px, mémorisée dans `localStorage`).
 - **État séparé** : un store `supervisor` distinct du store `fleet` ; un token de chat ne doit pas re-rendre les cartes.
-- **Nouvelle conversation** : l'écran se vide immédiatement, puis la nouvelle session est créée ; l'ancienne reste dans OpenChamber. Ce n'est pas un tour LLM : pas d'indicateur « réfléchit », pas de spinner de travail. Un sélecteur d'historique pourra venir plus tard.
+- **Nettoyer le chat** : l'écran se vide immédiatement, puis une nouvelle session est créée ; l'ancienne reste dans OpenChamber, ce qui rend le mot « Nettoyer » plus juste que « Nouvelle ». Ce n'est pas un tour LLM : pas d'indicateur « réfléchit », pas de spinner de travail. Le focus revient dans le champ de saisie dès que la nouvelle session est prête. Un sélecteur d'historique pourra venir plus tard.
 - **Erreurs** : daemon injoignable, OpenChamber injoignable, session perdue, outil en échec. Toujours un message clair, jamais un faux succès.
 - **Focus** : quand l'agent parle d'une tâche, la carte correspondante peut être mise en évidence et scrollée. Un outil `focus_task` ou un lien dans le message suffit.
 - **Pas de pièces jointes, pas de vocal, pas de threads, pas de réactions** en phase 1. Pour ces besoins, « Ouvrir dans OpenChamber ».
@@ -535,6 +536,7 @@ Les messages du chat ne sont pas dupliqués en SQLite. Le plan de la tâche n'es
 - `companionTick` ignore le même id.
 - La livraison n'est jamais demandée pour cet id.
 - L'exclusion couvre l'id courant **et tout le dossier** `~/.superviseur` : les anciennes conversations de supervision restent hors flotte. Une session ouverte volontairement dans ce dossier est donc aussi hors flotte ; c'est le prix à payer pour ne pas laisser de vieilles conversations de chat réapparaître comme des tâches.
+- OpenChamber ajoute une session à « In work » du home **dès qu'un message lui est envoyé**, même si son dossier est `~/.superviseur` : le marqueur est `metadata.openchamber.work`. Le daemon le retire après la création et après chaque envoi (`work: null`), et fait une passe au démarrage pour les anciennes conversations du dossier. Sinon le chat de supervision revient dans le home à chaque tour. Le changement de dossier seul ne suffit pas.
 - Un test dédié vérifie que la session de chat n'apparaît ni dans `GET /api/fleet` ni dans les analyses du compagnon.
 
 ### 9.5 Cycle de vie
@@ -697,6 +699,7 @@ Les décisions ci-dessous viennent de la conversation ou des constats ci-dessus.
 | Les outils sont maison, pas les outils OpenChamber directs | 2026-11-06 | Outils |
 | Plugin projet-local `superviseur-tools`, dossier `~/.superviseur` approuvé via `/api/opencode/trust` | 2026-11-06 | Implémentation |
 | Tout le dossier `~/.superviseur` est exclu de la flotte et du compagnon | 2026-11-06 | Implémentation |
+| Le chat superviseur est retiré de « In work » (`metadata.openchamber.work = null`) après création, réutilisation et chaque envoi : le dossier `~/.superviseur` ne suffit pas à le sortir du home | 2026-11-06 | Implémentation |
 | Le compagnon ne produit plus de plan ; le `todowrite` de la tâche est la source | 2026-11-06 | Progression |
 
 ### 15.2 Ouvertes

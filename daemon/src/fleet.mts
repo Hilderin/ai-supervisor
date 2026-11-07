@@ -53,7 +53,7 @@ export interface FleetRow {
   busy?: number | null; idle?: number | null;
   pendingForms: PendingForm[]; pendingPermissions: unknown[];
   /** plan de la session de travail (`todowrite`) */
-  todo?: { done: number; total: number };
+  todo?: { done: number; total: number; steps: Array<{ text: string; status: string }> };
 }
 export interface Verdict {
   resume?: string; confiance?: number | null; progress?: number | null; termine?: boolean;
@@ -172,7 +172,11 @@ async function enrichTodoProgress(fleet: Fleet): Promise<void> {
   for (const row of fleet.rows) {
     const snap = await getTodoSnapshot(row.id, row.lastUpdateAt);
     if (snap.total > 0) {
-      row.todo = { done: snap.done, total: snap.total };
+      row.todo = {
+        done: snap.done,
+        total: snap.total,
+        steps: snap.items.map(i => ({ text: i.content, status: i.status })),
+      };
       row.sup = {
         ...(row.sup ?? {}),
         progress: row.sup?.termine ? 100 : (snap.progress ?? 0),

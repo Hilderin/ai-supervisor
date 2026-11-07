@@ -32,6 +32,20 @@ export async function sendSupervisor(text: string): Promise<SupervisorState> {
   return postJson<SupervisorState>('/api/supervisor/send', { text });
 }
 
+/** Message pendant un tour : file OpenChamber, livrée à la fin. */
+export async function queueSupervisor(text: string): Promise<SupervisorState> {
+  return postJson<SupervisorState>('/api/supervisor/queue', { text });
+}
+
+export async function cancelQueuedSupervisor(itemId: string): Promise<SupervisorState> {
+  return postJson<SupervisorState>('/api/supervisor/queue/cancel', { itemId });
+}
+
+/** « Revenir à partir d'ici » : supprime les messages à partir de celui-ci. */
+export async function revertSupervisor(messageId: string): Promise<SupervisorState> {
+  return postJson<SupervisorState>('/api/supervisor/revert', { messageId });
+}
+
 export async function newSupervisor(): Promise<SupervisorState> {
   return postJson<SupervisorState>('/api/supervisor/new', {});
 }

@@ -11,7 +11,7 @@ import { getDelivery } from './delivery.mts';
 import { readSessionAsset } from './assets.mts';
 import { companionSessionOf } from './companion.mts';
 import { getSupervisorSession, logEvent, upsertTaskState, getTaskState, reopenTaskState } from './state.mts';
-import { abortSupervisor, getSupervisorState, newSupervisorConversation, sendSupervisor, SUPERVISOR_DIR } from './supervisor.mts';
+import { abortSupervisor, cancelQueuedSupervisor, getSupervisorState, newSupervisorConversation, queueSupervisor, revertSupervisor, sendSupervisor, SUPERVISOR_DIR } from './supervisor.mts';
 import { cancelPendingForms, pendingFor, runTool } from './tools.mts';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -109,13 +109,40 @@ async function handleApi(req: http.IncomingMessage, res: http.ServerResponse, ur
   }
   if (path === '/api/supervisor/messages' && req.method === 'GET') {
     const state = await getSupervisorState();
-    json(res, 200, { sessionId: state.sessionId, status: state.status, messages: state.messages, error: state.error });
+    json(res, 200, { sessionId: state.sessionId, status: state.status, messages: state.messages, queued: state.queued, error: state.error });
     return;
   }
   if (path === '/api/supervisor/send' && req.method === 'POST') {
     const body = await readBody(req);
     try {
       json(res, 200, await sendSupervisor(String(body.text ?? '')));
+    } catch (e) {
+      json(res, 502, { error: String(e) });
+    }
+    return;
+  }
+  if (path === '/api/supervisor/queue' && req.method === 'POST') {
+    const body = await readBody(req);
+    try {
+      json(res, 200, await queueSupervisor(String(body.text ?? '')));
+    } catch (e) {
+      json(res, 502, { error: String(e) });
+    }
+    return;
+  }
+  if (path === '/api/supervisor/queue/cancel' && req.method === 'POST') {
+    const body = await readBody(req);
+    try {
+      json(res, 200, await cancelQueuedSupervisor(String(body.itemId ?? '')));
+    } catch (e) {
+      json(res, 502, { error: String(e) });
+    }
+    return;
+  }
+  if (path === '/api/supervisor/revert' && req.method === 'POST') {
+    const body = await readBody(req);
+    try {
+      json(res, 200, await revertSupervisor(String(body.messageId ?? '')));
     } catch (e) {
       json(res, 502, { error: String(e) });
     }

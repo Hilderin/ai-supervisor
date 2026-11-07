@@ -59,7 +59,7 @@ ui/
 2. **TERMINÉ** : `isDone(row)` ;
 3. **EN COURS** : le reste.
 
-`isDone` n'est vrai que si `sup.termine`, que la session n'est pas `busy` et que le verdict n'est pas antérieur au tour en cours. Un job relancé (verdict « done » du tour précédent, même reconfirmé pendant le nouveau tour) reste donc EN COURS, avec « Réflexion en cours… » si le verdict est périmé.
+`isDone` n'est vrai que si `sup.termine`, que la session n'est pas `busy` et que le verdict n'est pas antérieur au tour en cours. Un job relancé (verdict « done » du tour précédent, même reconfirmé pendant le nouveau tour) reste donc EN COURS, avec « Réflexion en cours... » si le verdict est périmé.
 
 Le placement est en plus **stabilisé par une hystérésis de 8 s** (`lib/placement.ts`) : un verdict `termine` qui oscille d'une analyse à l'autre ne fait plus sauter la carte entre EN COURS et TERMINÉ, ni décaler les titres au-dessus. Un job `busy`, un nouveau tour (`turnStartedAt`) et une attente (question/permission) s'appliquent immédiatement.
 
@@ -130,14 +130,14 @@ Le bloc est mémoïsé : les re-rendus 1 s / 2 s de la carte ne relancent ni la 
 
 - **Dot** : orange clignotant si attente, anneau vert tournant si `busy`, vert plein si idle, vert pâle si terminé.
 - **Chip** : « attends ta réponse » sur les cartes en attente.
-- **Résumé** : `sup.resume`, sinon la phrase d'activité (`travaille`, `tour terminé · il y a …`, `une question t’attend`).
+- **Résumé** : `sup.resume`, sinon la phrase d'activité (`Réflexion en cours...`, `tour terminé · il y a …`, `une question t’attend`).
 - **Attend** : la ligne `sup.attend` en orange sous le résumé.
-- **Progression** : barre verte, ambre entre 1 et 65 %, pourcentage à droite.
+- **Progression** : barre verte, ambre entre 1 et 65 %. Le compteur à droite (`x/y`) est un bouton qui ouvre un popup listant les étapes du plan (`todowrite`) avec leur statut. Tant qu'aucune étape n'a commencé, il affiche `N étapes` au lieu de `0/N` ; une tâche terminée affiche `100 %`.
 - **Confiance** : trois pastilles (rouge < 35 %, ambre < 70 %, vert ensuite) et bulle HTML avec `Confiance N %` puis `sup.note` (le `confidence_reason` du compagnon). La bulle est un portail en `position:fixed` (`width:max-content`, 300 px max), ouverte au survol et au focus clavier.
 - **Question** : un bloc par champ, options (mono ou multiselect) et champ libre, un seul bouton « Répondre ».
 - **Permission** : « Permission demandée » + bouton « Autoriser » (`decision: once`).
 - **Résultat** : bloc de livraison sur les cartes TERMINÉ et au repos (texte markdown + rendu `openchamber_render`), aperçu replié, jamais sur une carte busy ou en attente.
-- **Composer** : hauteur auto jusqu'à 120 px, Enter envoie, Shift+Enter saute une ligne, flèche verte dès qu'il y a du texte.
+- **Composer** : hauteur auto jusqu'à 120 px, Enter envoie, Shift+Enter saute une ligne, flèche verte dès qu'il y a du texte. Dans le chat de supervision, la hauteur est aussi réglable à la souris (poignée au-dessus du champ, 34 à 360 px, mémorisée) ; le composer reste actif pendant un tour, le texte part alors dans la file d'attente OpenChamber.
 - **Fermer** : la donebox et le menu kebab appellent `POST /api/fleet/done` puis masquent la carte. Une activité ultérieure dans OpenChamber la rouvre (règle du daemon).
 - **Ouvrir** : `openchamber-ui://session/{id}` dans un nouvel onglet, comme la maquette.
 
@@ -153,7 +153,7 @@ Deux écarts de comportement volontaires :
 ## 8. Vérification
 
 - `bun run typecheck` : TypeScript strict, aucune erreur.
-- `bun test` : 48 tests UI (construction des réponses, placement TERMINÉ / périmé / busy, hystérésis de section, fermeture / réouverture, âges, garde d'horodatage, états de livraison, markdown, images locales, CSP du rendu).
+- `bun test` : 71 tests UI (construction des réponses, placement TERMINÉ / périmé / busy, hystérésis de section, fermeture / réouverture, âges, garde d'horodatage, états de livraison, markdown, images locales, CSP du rendu, libellés de plan, envoi direct / file, boutons Envoyer et Stop, sens de « Nettoyer », actions de message, bloc `send_task`).
 - `bun test daemon/test` : 27 tests (dont 16 livraison et 7 assets : dernier texte, tour courant, rendu, refus, troncature, cache, single-flight, invalidation, course événement/lecture, chemins d'image).
 - `bun run build` : build Vite dans `ui/dist`.
 - Vérification visuelle : captures Playwright de la référence et du build sur une flotte factice, diff au pixel. Les zones communes sont identiques ; les seules différences sont le chip, la permission et la couleur de la ligne ✋ (écarts assumés ci-dessus).
@@ -189,20 +189,25 @@ Le chat de gauche remplace la barre de saisie du haut. Il vit dans `~/.supervise
 
 ### Composants
 
-- `SupervisorChat.tsx` : panneau vertical, messages, tool chips, composer, erreurs, bouton Nouvelle, Ouvrir, Replier.
+- `SupervisorChat.tsx` : panneau vertical, messages, tool chips, composer, erreurs, icône balai « Nettoyer le chat », Ouvrir, Replier. Chaque message expose deux icônes (copier, revenir à partir d'ici) à gauche, sur la ligne de l'heure, avec infobulle et libellé accessible ; un `send_task` réussi ajoute un bloc « Envoyé à « titre » » avec le texte complet, le titre étant résolu dans la flotte à l'affichage. Le composer se redimensionne à la souris, reste actif pendant un tour et reprend le focus après « Nettoyer ».
 - `ChatMarkdown.tsx` : markdown GFM, `skipHtml`, pas d'images locales dans le chat.
-- `supervisorStore.ts` : état du chat ; `sendError` séparé de `refreshError` pour qu'un poll ne masque pas un échec d'envoi ; `draft` restauré après échec.
+- `supervisorStore.ts` : état du chat ; `sendError` séparé de `refreshError` pour qu'un poll ne masque pas un échec d'envoi ; `draft` restauré après échec ; envoi direct au repos, mise en file pendant un tour.
 - `useSupervisor.ts` : poll 1,2 s quand le superviseur travaille, 4 s au repos.
-- `App.tsx` : chat 380 px redimensionnable (320 à 480, largeur mémorisée), onglets Chat/Tâches sous 1100 px, flotte à droite. L'icône Envoyer est `SendIcon`, comme les composers de carte.
+- `App.tsx` : chat 380 px redimensionnable (320 à 480, largeur mémorisée), onglets Chat/Tâches sous 1100 px, flotte à droite. L'icône Envoyer est `SendIcon`, comme les composers de carte ; pendant un tour, le carré Stop occupe le bord droit et Envoyer apparaît à sa gauche dès qu'un texte est saisi.
 
 ### Routes
 
 | Route | Usage |
 | --- | --- |
-| `GET /api/supervisor` | session, statut, messages transformés (texte + tool chips) |
-| `POST /api/supervisor/send` | envoyer un texte au chat |
+| `GET /api/supervisor` | session, statut, messages transformés (texte + tool chips), file d'attente |
+| `POST /api/supervisor/send` | envoyer un texte au chat (session au repos) |
+| `POST /api/supervisor/queue` | mettre un texte en file pendant un tour (`POST /api/message-queue/sessions/:id/items`) |
+| `POST /api/supervisor/queue/cancel` | retirer un message de la file (`DELETE /api/message-queue/sessions/:id/items/:itemId`) |
+| `POST /api/supervisor/revert` | « Revenir à partir d'ici » (`POST /api/session/:id/revert/stage` puis `/revert/commit`) |
 | `POST /api/supervisor/new` | nouvelle conversation |
 | `POST /api/supervisor/abort` | arrêter le tour |
 | `POST /api/tools/:name` | outils du plugin (`list_projects`, `list_tasks`, `get_task`, `start_task`, `send_task`, `close_task`) |
+
+La file est celle d'OpenChamber : elle exige le modèle de la session (`providerID`, `modelID`) et survit à la fermeture de l'onglet. Le daemon reprend ces valeurs de `/api/session/:id`. Le retour en arrière est un `stage` puis un `commit` immédiat, après un `abort` si un tour est en cours.
 
 Le détail du contrat, du plugin, du trust du dossier et des tests est dans [chat-superviseur.md](chat-superviseur.md) et [chat-superviseur-tests.md](chat-superviseur-tests.md). `bun test daemon/test ui/src` couvre 110 tests ; les campagnes Playwright ont validé C1 à C17.

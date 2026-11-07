@@ -25,7 +25,7 @@
 | C9 | `close_task` | La tâche fermée disparaît de la flotte ; une activité ultérieure la rouvre | OK | Carte supprimée après `close_task` ; réouverture après réponse au formulaire. `chat-c9.png` |
 | C10 | Exclusion du chat | La session de supervision n'apparaît pas dans la flotte et ne reçoit pas de compagnon | OK | Aucun `dir` `~/.superviseur` dans `/api/fleet` ; chat courant sans enfant |
 | C11 | Persistance | Un rechargement de la page recharge le chat et la flotte sans perdre les messages | OK | Même fin de conversation après reload. `chat-c11-after.png` |
-| C12 | Nouvelle conversation | Le bouton crée une nouvelle session, vide, et laisse l'ancienne dans OpenChamber | OK | Écran vide immédiat, nouvel id, 0 message, ancienne conservée. `new-conversation-final.png` |
+| C12 | Nettoyer le chat | Le bouton « Nettoyer » (balai) crée une nouvelle session, vide, et laisse l'ancienne dans OpenChamber | OK | Écran vide immédiat, nouvel id, 0 message, ancienne conservée. `new-conversation-final.png` |
 | C13 | Repli du chat | L'icône de panneau masque le chat, un rail étroit le restaure, la flotte prend la largeur | OK | Chat absent, rail de 34 px, flotte 1354 px ; le rail rouvre le chat. `layout-no-header.png` |
 | C14 | Erreur visible | Daemon/outil en échec : message d'erreur clair, aucun faux succès | OK | Envoi en panne : bandeau persistant, brouillon restauré, pas de bulle fantôme ; GET en panne : point gris/hors ligne. `verify-ui2-sendfail.png`, `chat-c14.png` |
 | C15 | Sans todo | Une tâche sans `todowrite` n'affiche pas de barre de progression | OK | `todo` null, `progress` null sur « Test sans todo » |
@@ -35,7 +35,7 @@
 | C19 | Annulation carte | Le bouton « Annuler la question » de la carte annule le formulaire et l'agent reprend sans réponse | OK | `DELETE /form/:id` via `/api/fleet/cancel-question` ; pendingForms vidé, carte toujours vivante. `verify-cancel-ui.png` |
 | C20 | Recherche explicite | « cherche la météo à Montréal » lance une tâche de recherche dans `chats`, avec un goal et sans modification de fichier | OK | `start_task` direct, carte « Météo demain à Montréal » avec `chats` ; goal et critère de source datée. `weather-explicit.png` |
 | C21 | Question de connaissance | Une question à laquelle l'agent peut répondre ne devient pas une tâche | OK | « Quelle est la capitale de la France ? » répond « Paris. », aucun nouvel outil, aucune carte. `knowledge-question.png` |
-| C22 | Nouvelle sans LLM | L'icône `+` ne déclenche aucun tour LLM, n'affiche pas « le superviseur travaille », et vide le chat immédiatement | OK | `creating` séparé de `sending` ; écran vide à 150 ms, aucun `supervisor-busy`, 0 message, session créée en 0,4 à 1,3 s à chaud. `new-conversation-final.png` |
+| C22 | Nettoyer sans LLM | Le bouton « Nettoyer » (balai) ne déclenche aucun tour LLM, n'affiche pas « le superviseur travaille », et vide le chat immédiatement | OK | `creating` séparé de `sending` ; écran vide à 150 ms, aucun `supervisor-busy`, 0 message, session créée en 0,4 à 1,3 s à chaud. `new-conversation-final.png` |
 
 ## Notes de campagne
 
@@ -79,8 +79,20 @@ Dernière vérification sur le build final : les quatre chemins A/B/C/D de `veri
 6. **Fin de tour** : un kick `end` (exécution terminée ou `session.idle`) n'est pas bloqué par l'intervalle de 20 s ; un verdict antérieur à la dernière activité est masqué en attendant le bilan.
 7. **`start_task`** : session top-level sans `parentID`, brief stocké immédiatement ; doublon vérifié dans `task_brief` avant la flotte ; plafond par défaut 8.
 8. **`send_task`** : seul outil d'écriture dans une tâche ; annule une question en attente puis envoie le texte ; une permission reste bloquante. `cancel_question` et le bouton de carte utilisent le même `DELETE /form/:id`. `close_task` refuse une attente sauf `force`. Pas de `reply_task`, pas de `merge_pr`.
-9. **UI** : chat 380 px redimensionnable (320..480, mémorisé), onglets Chat/Tâches sous 1100 px, icône Envoyer identique aux cartes, erreurs d'envoi séparées du poll, auto-grow 120 px.
-10. **Tests** : 110 tests unitaires UI/daemon, campagnes Playwright et quatre revues indépendantes.
+9. **UI** : chat 380 px redimensionnable (320..480, mémorisé), onglets Chat/Tâches sous 1100 px, icône Envoyer identique aux cartes, erreurs d'envoi séparées du poll, auto-grow 120 px. Le composer du chat se règle aussi en hauteur (34..360, mémorisé), reste actif pendant un tour (file d'attente avec Envoyer + Stop), affiche les icônes Copier / Revenir à gauche sur la ligne de l'heure, reprend le focus après « Nettoyer », affiche le bloc `send_task` avec le titre résolu et le texte complet, et le compteur d'étapes ouvre le plan.
+10. **Tests** : 133 tests unitaires (71 UI + 62 daemon), campagnes Playwright et quatre revues indépendantes.
+
+## Ajouts du 2026-11-06 (soir)
+
+| # | Cas | Attendu | Statut | Feedback |
+|---|---|---|---|---|
+| C23 | Étapes du plan | Le compteur `x/y` ouvre un popup listant les étapes et leur statut, sans dépasser la fenêtre | OK | Vérifié sur une copie d'essai du daemon (5199), capture `plan-popup-test`. Portail fixe, repli au-dessus, fermeture au clic hors de la bulle et par Échap. |
+| C24 | Plan non commencé | Aucune étape commencée → `N étapes`, jamais `0/N` | OK | `planLabel` testé (57 tests UI) : plan vide, étape `in_progress`, plan partiel et tâche terminée. |
+| C25 | File pendant un tour | Saisie active, Envoyer met le message en file, Stop reste à droite, la file affiche les messages en attente et permet de les retirer | À faire | Contrat OpenChamber vérifié dans le code serveur (`/api/message-queue/sessions/:id/items`, `sendConfig` obligatoire). Reste à rejouer sur un vrai tour busy. |
+| C26 | Actions de message | Les icônes « Copier le message » et « Revenir à partir d'ici » (sur la ligne de l'heure) copient le texte et suppriment les messages à partir du point choisi en restaurant le texte utilisateur | En cours | Icônes seules avec infobulle et libellé accessible ; copie câblée ; `revert/stage` puis clear vérifiés sur l'API, le commit complet n'a pas été exercé pour ne pas tronquer la conversation de supervision réelle. |
+| C27 | Hauteur du composer | La poignée au-dessus du champ règle la hauteur à la souris, entre 34 et 360 px, et la valeur est mémorisée | À faire | Poignée et bornes câblées ; glissement non automatisé dans la campagne. |
+| C28 | Bloc `send_task` | Sous « a envoyé un message à une tâche », afficher le nom courant de la tâche destinataire et le texte complet envoyé, avec repli si la tâche a quitté la flotte | OK | `taskTitleOf` résout le titre dans la flotte à l'affichage ; tests unitaires : renommage, tâche absente, texte de 600 caractères non tronqué. |
+| C29 | Focus après « Nettoyer » | Après le nettoyage, le curseur revient dans le champ de saisie | À faire | Effet câblé sur la fin de `creating`, pas encore vérifié au clavier dans la campagne. |
 
 ## Questions à trancher
 

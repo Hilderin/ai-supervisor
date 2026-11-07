@@ -1,8 +1,11 @@
-import type { FleetRow } from '../types';
+import type { Fleet, FleetRow } from '../types';
+
+/** Phrase d'activité quand aucun résumé n'est disponible pour le tour en cours. */
+export const BUSY_BRIEF = 'Réflexion en cours...';
 
 /**
  * Le verdict appartient au tour précédent (un prompt a été renvoyé depuis l'analyse) :
- * le daemon a déjà retiré resume/confiance/attend, la carte repasse en « Réflexion en cours ».
+ * le daemon a déjà retiré resume/confiance/attend, la carte repasse en « Réflexion en cours... ».
  */
 export function isStaleTurn(row: FleetRow): boolean {
   return (
@@ -45,8 +48,40 @@ export function briefRow(row: FleetRow, waiting: boolean, now: number): string {
   if (waiting) {
     return (row.pendingForms?.length ?? 0) > 0 ? 'une question t’attend' : 'une permission t’attend';
   }
-  if (row.status === 'busy') return 'travaille';
+  if (row.status === 'busy') return BUSY_BRIEF;
   return 'tour terminé · ' + fmtAge(now - (row.lastUpdateAt ?? now));
+}
+
+/**
+ * Libellé de progression : « 0/5 » est trompeur tant qu'aucune étape n'a
+ * commencé, on annonce alors la taille du plan. Un plan terminé affiche 100 %.
+ */
+export function planLabel(
+  todo: FleetRow['todo'],
+  shownDone: boolean,
+  progress: number,
+): string {
+  if (!todo || shownDone) return `${Math.round(progress)} %`;
+  const steps = todo.steps ?? [];
+  const started = todo.done > 0 || steps.some((step) => step.status === 'in_progress');
+  return started ? `${todo.done}/${todo.total}` : `${todo.total} étapes`;
+}
+
+/**
+ * Titre courant de la tâche destinataire d'un `send_task`. Le titre est
+ * relu dans la flotte à l'affichage (un renommage reste donc correct) ; si la
+ * tâche n'y est plus, un repli lisible remplace l'ancien titre stocké.
+ */
+export function taskTitleOf(
+  fleet: Fleet | null,
+  taskId?: string,
+  storedTitle?: string,
+): string {
+  if (!taskId) return 'une tâche inconnue';
+  const row = fleet?.rows.find((r) => r.id === taskId);
+  if (row) return row.title;
+  if (!fleet) return storedTitle || 'une tâche inconnue';
+  return 'une tâche qui n’est plus dans la flotte';
 }
 
 export function dirName(dir?: string): string {
