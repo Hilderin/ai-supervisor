@@ -238,8 +238,14 @@ async function runPoll(): Promise<void> {
     );
     companionTick(tickSessions, status.sessions ?? {}, waitingMap);
     // auto-restart : une tâche armée dont la session a été détruite repart sur
-    // une session neuve (modèle default courant), registre task_resume
-    void resumeTick(new Set(sessionsIndex.keys()))
+    // une session neuve (modèle default courant), registre task_resume.
+    // Les archivées ne comptent pas comme vivantes : être dans l'annuaire avec
+    // time.archived n'est pas être vivante (sinon l'archive ressemble à un
+    // contact et la reprise la traite comme vivante).
+    const liveIds = new Set(
+      [...sessionsIndex.values()].filter(s => !s.time?.archived).map(s => s.id),
+    );
+    void resumeTick(liveIds)
       .catch(() => { /* un tick raté réessaie au prochain poll */ });
   } catch {
     /* garde la dernière flotte connue, réessaie au prochain tick */

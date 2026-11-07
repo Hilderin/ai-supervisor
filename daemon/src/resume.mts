@@ -14,7 +14,7 @@
  */
 
 import {
-  armTaskResume, db, disableTaskResume, getTaskBrief, getTaskResume,
+  armTaskResume, db, disableTaskResume, getTaskBrief, getTaskResume, getTaskResumeBySession,
   getTaskState, listTaskResume, listTaskBriefs, logEvent, migrateTaskSession,
   noteResumeAlive, noteResumeAttempt, resetResumeAttempts,
 } from './state.mts';
@@ -211,7 +211,9 @@ let backfilled = false;
 export function backfillResumeTasks(liveIds: Set<string>, cfg: ResumeConfig, now = Date.now()): { armed: number; disabled: number } {
   let armed = 0, disabled = 0;
   for (const brief of listTaskBriefs()) {
-    if (getTaskResume(brief.session_id)) continue;
+    // lignage : un brief peut déjà être porté par une ligne de registre créée
+    // sous l'id de la session d'origine (après une reprise), pas un doublon
+    if (getTaskResume(brief.session_id) || getTaskResumeBySession(brief.session_id)) continue;
     const st = getTaskState(brief.session_id) as { closed_at?: number } | null;
     if (st?.closed_at) continue;
     const live = liveIds.has(brief.session_id);

@@ -28,12 +28,14 @@ Un registre par tâche, `task_resume` :
 
 Chaque poll de flotte (3 s) balaye le registre (`resumeTick`) :
 
-1. La session est dans l'annuaire vivant : on note le contact ; si la session
-   tourne depuis 10 min, le budget de tentatives revient à zéro.
+1. La session est dans l'annuaire vivant (hors `time.archived`) : on note le
+   contact ; si la session tourne depuis 10 min, le budget de tentatives
+   revient à zéro.
 2. La session est absente : on confirme par une **lecture directe**
    `GET /api/session/:id` (la pagination du répertoire peut cacher une session :
    jamais de décision sur la seule absence du listing). Une session absente de
-   deux balayages et en 404 est réellement détruite.
+   deux balayages et en 404 est réellement détruite ; une session archivée
+   (toujours listée, marquée `time.archived`) fait désactiver la reprise.
 3. Détruite confirmée : nouvelle session créée sur `POST /api/openchamber/sessions`
    avec le **modèle default courant**, puis toutes les données locales suivent
    (`migrateTaskSession`) : brief, état de carte, journal.
