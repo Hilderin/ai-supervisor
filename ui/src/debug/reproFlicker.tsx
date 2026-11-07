@@ -206,11 +206,11 @@ function App() {
       <div style={{ display: 'flex', gap: 12 }}>
         <div style={{ width: 470 }}>
           <DiagMachine fen={fen} cycle={cycle} />
-          <FleetBoard fleet={fleet} now={Date.now()} />
+          <FleetBoard fleet={fleet} now={Date.now()} onOpenChamber={() => {}} />
         </div>
         <div style={{ width: 480 }}>
           {sel && selState ? (
-            <TaskInspector row={sel} state={selState} now={Date.now()} onClose={() => setSelected(null)} />
+            <TaskInspector row={sel} state={selState} now={Date.now()} onClose={() => setSelected(null)} onOpenChamber={() => {}} />
           ) : null}
         </div>
       </div>

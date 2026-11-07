@@ -24,6 +24,7 @@ function renderCard(r: FleetRow): string {
       flash={false}
       now={0}
       onOpen={() => {}}
+      onOpenChamber={() => {}}
     />,
   );
 }
@@ -41,5 +42,26 @@ describe('SessionCard sans composer', () => {
     const html = renderCard({ ...row(), sup: { resume: 'r', at: 1 } });
     expect(html).toContain('h-[190px]');
     expect(html).toContain('grid-rows-[24px_minmax(0,1fr)_30px]');
+  });
+
+  test('affiche un échec OpenCode sur la carte au lieu du faux signal de réflexion', () => {
+    const html = renderCard(row({
+      status: 'busy',
+      issue: { state: 'error', message: 'Le fournisseur est indisponible', errorType: 'ProviderError', updatedAt: 2 },
+    }));
+    expect(html).toContain('Le fournisseur est indisponible');
+    expect(html).toContain('Erreur OpenCode');
+    expect(html).not.toContain('Réflexion en cours');
+    expect(html).toContain('Détail');
+  });
+
+  test('distingue le retry planifié et son numéro de tentative', () => {
+    const html = renderCard(row({
+      status: 'idle',
+      issue: { state: 'retry', message: 'Connexion interrompue', attempt: 3, updatedAt: 2 },
+    }));
+    expect(html).toContain('Nouvel essai');
+    expect(html).toContain('Retry OpenCode · tentative 3');
+    expect(html).toContain('Connexion interrompue');
   });
 });

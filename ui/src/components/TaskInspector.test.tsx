@@ -22,11 +22,22 @@ function renderInspector(r: FleetRow): string {
       state={cardState(r, 'running' as Section)}
       now={0}
       onClose={() => {}}
+      onOpenChamber={() => {}}
     />,
   );
 }
 
 describe('TaskInspector', () => {
+  test('le détail présente le message et le numéro du retry OpenCode', () => {
+    const html = renderInspector(row({
+      issue: { state: 'retry', message: 'Connexion interrompue', errorType: 'NetworkError', attempt: 2, updatedAt: 3 },
+    }));
+    expect(html).toContain('data-testid="session-issue"');
+    expect(html).toContain('Nouvelle tentative OpenCode · tentative 2');
+    expect(html).toContain('Connexion interrompue');
+    expect(html).toContain('NetworkError');
+  });
+
   test('le résumé porte un encadré titré « Résumé »', () => {
     const html = renderInspector(row({ sup: { resume: 'Voici le résumé du tour.', at: 1 } }));
     expect(html).toContain('Résumé');

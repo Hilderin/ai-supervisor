@@ -13,6 +13,20 @@ export function CardStateIcon({ state }: { state: CardState }) {
       />
     );
   }
+  if (state === 'error') {
+    return (
+      <span aria-hidden="true" className="flex h-[15px] w-[15px] shrink-0 items-center justify-center rounded-full bg-danger/10 text-[11px] font-bold leading-none text-danger">
+        !
+      </span>
+    );
+  }
+  if (state === 'retry') {
+    return (
+      <span aria-hidden="true" className="flex h-[15px] w-[15px] shrink-0 items-center justify-center rounded-full bg-amber/10 text-[11px] font-bold leading-none text-amber">
+        ↻
+      </span>
+    );
+  }
   if (state === 'done') {
     return (
       <span

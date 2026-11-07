@@ -20,7 +20,10 @@ import { setBase as setResumeBase, resumeTick } from './resume.mts';
 import { getSupervisorSession } from './state.mts';
 import { SUPERVISOR_DIR } from './supervisor.mts';
 import { getTodoSnapshot } from './todos.mts';
+import { SessionIssueTracker, type SessionIssue } from './session-issues.mts';
 import type { WaitInfo } from './verdict.mts';
+
+const sessionIssues = new SessionIssueTracker();
 
 function supOf(id: string): Verdict | undefined {
   const v = verdictOf(id) as {
@@ -48,6 +51,7 @@ export interface PendingForm {
 }
 export interface FleetRow {
   id: string; title: string; status: string;
+  issue?: SessionIssue;
   dir?: string;
   sup?: Verdict;
   turnStartedAt?: number; lastUpdateAt?: number;
@@ -128,6 +132,7 @@ function buildFleet(status: StatusPayload): Fleet {
       id,
       title: meta.title ?? id.slice(0, 18),
       status: s.status,
+      issue: sessionIssues.get(id),
       dir: meta.location?.directory,
       sup,
       turnStartedAt: s.turnStartedAt,
@@ -242,7 +247,8 @@ async function runPoll(): Promise<void> {
     const tickSessions = [...sessionsIndex.values()].filter(
       s => s.id !== supervisorId && s.location?.directory !== SUPERVISOR_DIR,
     );
-    companionTick(tickSessions, status.sessions ?? {}, waitingMap);
+    void companionTick(tickSessions, status.sessions ?? {}, waitingMap)
+      .catch(() => { /* l'analyse compagnon réessaie au prochain tick */ });
     // auto-restart : une tâche armée dont la session a été détruite repart sur
     // une session neuve (modèle default courant), registre task_resume.
     // Les archivées ne comptent pas comme vivantes : être dans l'annuaire avec
@@ -291,6 +297,7 @@ let sseBusy = false;          // reconnexion déjà planifiée
 let pollDebounce: ReturnType<typeof setTimeout> | null = null;
 
 function onEventLine(type: string, data: Record<string, unknown>) {
+  sessionIssues.ingest({ type, data });
   ingestEvent({ type, data });
   const relevant = /^(session\.|permission\.|form\.|project\.|workspace\.|message\.)/.test(type);
   if (!relevant) return;

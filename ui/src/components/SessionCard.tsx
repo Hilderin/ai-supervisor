@@ -20,6 +20,7 @@ interface Props {
   flash: boolean;
   now: number;
   onOpen: () => void;
+  onOpenChamber: (sessionId: string) => void;
 }
 
 const CARD_BTN =
@@ -30,7 +31,7 @@ const CARD_BTN =
  * détail. Toutes les zones sont réservées dans tous les états : l'état ne
  * change que l'icône, le contenu interne et l'action du pied.
  */
-export function SessionCard({ row, state, selected, flash, now, onOpen }: Props) {
+export function SessionCard({ row, state, selected, flash, now, onOpen, onOpenChamber }: Props) {
   const closeSession = useFleetStore((s) => s.closeSession);
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
@@ -41,11 +42,12 @@ export function SessionCard({ row, state, selected, flash, now, onOpen }: Props)
   const waiting = state === 'waiting';
   const done = state === 'done';
   const busy = state === 'busy';
+  const issue = row.issue;
   const stale = isStaleTurn(row);
-  const brief = stale ? BUSY_BRIEF : row.sup?.resume || briefRow(row, waiting, now);
   const form = row.pendingForms?.[0];
   const perm = row.pendingPermissions?.[0];
   const waitingKind = form ? 'form' : perm ? 'permission' : undefined;
+  const brief = issue?.message || (issue ? cardStateLabel(state, waitingKind) : stale ? BUSY_BRIEF : row.sup?.resume || briefRow(row, waiting, now));
   const stateLabel = cardStateLabel(state, waitingKind);
 
   const hasProgress = row.sup?.progress != null || !!row.todo;
@@ -117,11 +119,20 @@ export function SessionCard({ row, state, selected, flash, now, onOpen }: Props)
       ? { label: 'Répondre', primary: true, run: onOpen }
       : state === 'busy'
         ? { label: 'Détail', primary: false, run: onOpen }
-        : { label: 'Terminé', primary: true, run: () => void close() };
+        : state === 'error' || state === 'retry'
+          ? { label: 'Détail', primary: false, run: onOpen }
+          : { label: 'Terminé', primary: true, run: () => void close() };
 
   let detail: ReactNode = null;
   if (state === 'waiting') {
     detail = <span className="text-attend">✋ {questionText}</span>;
+  } else if (state === 'error' || state === 'retry') {
+    const attempt = issue?.attempt ? ` · tentative ${issue.attempt}` : '';
+    detail = (
+      <span title={[issue?.message, issue?.errorType, issue?.errorStatus ? `HTTP ${issue.errorStatus}` : ''].filter(Boolean).join(' · ')}>
+        {state === 'error' ? 'Échec OpenCode' : `Retry OpenCode${attempt}`}
+      </span>
+    );
   } else if (busy) {
     detail = currentStep ? (
       <span>Étape : {currentStep.text}</span>
@@ -201,10 +212,10 @@ export function SessionCard({ row, state, selected, flash, now, onOpen }: Props)
         </button>
         <button
           type="button"
-          title="Ouvrir dans OpenChamber"
+          title="Ouvrir dans le mini chat OpenChamber"
           onClick={(e) => {
             e.stopPropagation();
-            window.open(`openchamber-ui://session/${row.id}`);
+            onOpenChamber(row.id);
           }}
           className="flex h-[22px] w-[22px] shrink-0 cursor-pointer items-center justify-center rounded-[6px] bg-transparent text-muted hover:bg-green-soft hover:text-green"
         >

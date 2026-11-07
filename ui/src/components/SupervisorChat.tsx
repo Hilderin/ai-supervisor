@@ -4,13 +4,13 @@ import { cx } from '../lib/cx';
 import { taskTitleOf } from '../lib/fleet';
 import { useFleetStore } from '../store/fleetStore';
 import { useSupervisorStore } from '../store/supervisorStore';
-import { fetchSupervisorProjects } from '../lib/api';
-import type { ChatTool, Fleet, SupervisorMessage, SupervisorProject } from '../types';
+import type { ChatTool, Fleet, SupervisorMessage } from '../types';
 import { ChatMarkdown } from './ChatMarkdown';
 import { BroomIcon, CopyIcon, OpenChamberIcon, PanelLeftIcon, RevertIcon, SendIcon, StopIcon } from './Icons';
 
 interface Props {
   onCollapse: () => void;
+  onOpenMiniChat: (sessionId: string) => void;
 }
 
 const MIN_COMPOSER = 34;
@@ -210,7 +210,7 @@ export function MessageMeta({
   );
 }
 
-export function SupervisorChat({ onCollapse }: Props) {
+export function SupervisorChat({ onCollapse, onOpenMiniChat }: Props) {
   useSupervisor();
   const state = useSupervisorStore((s) => s.state);
   const fleet = useFleetStore((s) => s.fleet);
@@ -226,12 +226,10 @@ export function SupervisorChat({ onCollapse }: Props) {
   const removeQueued = useSupervisorStore((s) => s.removeQueued);
   const revert = useSupervisorStore((s) => s.revert);
   const reverting = useSupervisorStore((s) => s.reverting);
-  const modeUpdating = useSupervisorStore((s) => s.modeUpdating);
   const newConversation = useSupervisorStore((s) => s.newConversation);
   const stop = useSupervisorStore((s) => s.stop);
   const refresh = useSupervisorStore((s) => s.refresh);
   const clearErrors = useSupervisorStore((s) => s.clearErrors);
-  const setMode = useSupervisorStore((s) => s.setMode);
 
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -241,8 +239,6 @@ export function SupervisorChat({ onCollapse }: Props) {
   const [composerHeight, setComposerHeight] = useState(() =>
     clampComposer(Number(localStorage.getItem('superviseur.composerHeight')) || MIN_COMPOSER),
   );
-  const [projects, setProjects] = useState<SupervisorProject[]>([]);
-  const [modeError, setModeError] = useState<string | null>(null);
 
   const messages = state?.messages ?? [];
   const queued = state?.queued ?? [];
@@ -250,23 +246,9 @@ export function SupervisorChat({ onCollapse }: Props) {
   const canStop = !sending && state?.status === 'busy';
   const offline = !!refreshError;
 
-  useEffect(() => {
-    let active = true;
-    void fetchSupervisorProjects().then((items) => {
-      if (active) setProjects(items);
-    }).catch(() => {
-      if (active) setModeError('Impossible de charger les projets.');
-    });
-    return () => { active = false; };
-  }, []);
-
   const mode = state?.mode ?? 'pilot';
   const projectDirectory = state?.projectDirectory ?? '';
-  const changeMode = async (nextMode: 'pilot' | 'investigation', nextProject = projectDirectory || null) => {
-    setModeError(null);
-    try { await setMode(nextMode, nextProject); }
-    catch (e) { setModeError(e instanceof Error ? e.message : 'Changement de mode impossible.'); }
-  };
+  const projectName = projectDirectory.split(/[\\/]/).filter(Boolean).at(-1) ?? 'projet sélectionné';
 
   useEffect(() => {
     localStorage.setItem('superviseur.composerHeight', String(composerHeight));
@@ -303,7 +285,7 @@ export function SupervisorChat({ onCollapse }: Props) {
 
   const submit = () => {
     const value = draft.trim();
-    if (!value || creating || reverting || modeUpdating) return;
+    if (!value || creating || reverting) return;
     void send(value);
     setStick(true);
   };
@@ -383,46 +365,15 @@ export function SupervisorChat({ onCollapse }: Props) {
           <button
             type="button"
             data-testid="supervisor-open"
-            title="Ouvrir dans OpenChamber"
-            onClick={() => window.open(`openchamber-ui://session/${state.sessionId}`)}
+            aria-label="Ouvrir dans le mini chat OpenChamber"
+            title="Ouvrir dans le mini chat OpenChamber"
+            onClick={() => onOpenMiniChat(state.sessionId!)}
             className="flex h-[22px] w-[22px] shrink-0 cursor-pointer items-center justify-center rounded-[6px] bg-transparent text-muted hover:bg-green-soft hover:text-green"
           >
             <OpenChamberIcon />
           </button>
         ) : null}
       </header>
-
-      <div className="flex items-center gap-[6px] border-b border-border px-[10px] py-[6px]">
-        <label className="sr-only" htmlFor="supervisor-mode">Mode du chat</label>
-        <select
-          id="supervisor-mode"
-          data-testid="supervisor-mode"
-          value={mode}
-          disabled={loading || !state || busy || modeUpdating || creating}
-          onChange={(event) => void changeMode(event.target.value as 'pilot' | 'investigation')}
-          title="Piloter lance et pilote des tâches. Investigation lit le projet sélectionné sans pouvoir le modifier."
-          className="h-[27px] min-w-0 rounded-[6px] border border-border bg-white px-[6px] text-[11.5px] text-text outline-none disabled:opacity-60"
-        >
-          <option value="pilot">Piloter</option>
-          <option value="investigation" disabled={!projectDirectory}>Investigation</option>
-        </select>
-        <label className="sr-only" htmlFor="supervisor-project">Projet d’investigation</label>
-        <select
-          id="supervisor-project"
-          data-testid="supervisor-project"
-          value={projectDirectory}
-          disabled={loading || !state || busy || modeUpdating || creating || projects.length === 0}
-          onChange={(event) => void changeMode(mode, event.target.value || null)}
-          title="Projet autorisé en mode Investigation"
-          className="h-[27px] min-w-0 flex-1 rounded-[6px] border border-border bg-white px-[6px] text-[11.5px] text-text outline-none disabled:opacity-60"
-        >
-          <option value="">Choisir un projet…</option>
-          {projects.map((project) => (
-            <option key={project.id} value={project.directory}>{project.name}</option>
-          ))}
-        </select>
-      </div>
-      {modeError ? <div data-testid="supervisor-mode-error" className="px-[12px] pt-[5px] text-[10.5px] text-danger">{modeError}</div> : null}
 
       <div
         ref={listRef}
@@ -440,7 +391,7 @@ export function SupervisorChat({ onCollapse }: Props) {
             <div className="text-[14px] font-semibold">{mode === 'investigation' ? 'Explorons le projet avant de cadrer.' : 'Décris ce que tu veux lancer.'}</div>
             <div className="text-[12.5px] text-muted">
               {mode === 'investigation'
-                ? `Lecture seule de ${projects.find((project) => project.directory === projectDirectory)?.name ?? 'projet sélectionné'} : je peux lire, chercher et proposer un cadrage, sans lancer ni modifier.`
+                ? `Lecture seule de ${projectName} : je peux lire, chercher et proposer un cadrage, sans lancer ni modifier.`
                 : 'Je précise le besoin si c\'est flou, je crée la tâche dans le bon projet, et la carte apparaît à droite.'}
             </div>
           </div>
@@ -580,7 +531,7 @@ export function SupervisorChat({ onCollapse }: Props) {
               data-testid="supervisor-composer"
               rows={1}
               value={draft}
-              disabled={creating || modeUpdating}
+              disabled={creating}
               placeholder={
                 creating
                   ? 'Nettoyage…'
@@ -605,7 +556,7 @@ export function SupervisorChat({ onCollapse }: Props) {
             <ComposerActions
               canStop={canStop && !creating && !reverting}
               hasText={!!draft.trim()}
-              disabled={sending || creating || reverting || modeUpdating || !draft.trim()}
+              disabled={sending || creating || reverting || !draft.trim()}
               onSend={submit}
               onStop={() => void stop()}
             />

@@ -95,6 +95,9 @@ l'autre : pas de départ.
 - Il ne recopie pas l'historique de la session morte (pas de fork) : la
   continuité vient du brief et du plan, pas du transcript.
 - Il ne redémarre ni la session de supervision du chat, ni les sessions enfant
-  (le compagnon suivant est refabriqué par le nouveau parent, la mapping
-  `companion_map` de l'ancien parent est supprimée).
+  dans le cadre de la reprise de tâche. Un compagnon supprimé est toutefois
+  détecté et recréé par son propre cycle (`companionTick`) tant que sa session
+  parente existe. Si le parent lui-même est détruit puis repris, sa nouvelle
+  session reçoit un nouveau compagnon et la mapping de l'ancien parent est
+  supprimée.
 - Il ne touche pas aux tâches fermées, ni aux sessions archivées.

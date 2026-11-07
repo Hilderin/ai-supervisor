@@ -35,6 +35,7 @@ const REPAIR_WAIT_MS = 60_000;
 const MAX_INJECT_CHARS = 6000;
 const MAX_DIGEST_MESSAGES = 6;
 const MAX_ACTIONS = 8;
+const COMPANION_CHECK_INTERVAL_MS = 15_000;
 
 interface CompanionState {
   compSession?: string;
@@ -48,6 +49,8 @@ interface CompanionState {
 }
 const st = new Map<string, CompanionState>();
 let active = 0;
+let ticking = false;
+const lastCompanionCheck = new Map<string, { id: string; at: number }>();
 
 function get(sid: string): CompanionState {
   let s = st.get(sid);
@@ -67,6 +70,25 @@ async function jget(path: string) {
   const res = await fetch(`${base}${path}`);
   if (!res.ok) throw new Error(`${path} → ${res.status}`);
   return res.json();
+}
+
+type CompanionPresence = 'alive' | 'gone' | 'archived' | 'unknown';
+
+/** Vérifie directement la session : le répertoire peut être paginé ou en retard. */
+async function companionPresence(compId: string): Promise<CompanionPresence> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+  try {
+    const res = await fetch(`${base}/api/session/${encodeURIComponent(compId)}`, { signal: controller.signal });
+    if (res.status === 404) return 'gone';
+    if (!res.ok) return 'unknown';
+    const body = await res.json() as {
+      data?: { id?: string; time?: { archived?: number } };
+    };
+    if (body?.data?.id !== compId) return 'unknown';
+    return body.data.time?.archived ? 'archived' : 'alive';
+  } catch { return 'unknown'; }
+  finally { clearTimeout(timeout); }
 }
 
 interface ToolPart {
@@ -179,7 +201,6 @@ function persistedCompanion(sid: string) { return getCompanion(sid); }
 function rememberCompanion(sid: string, compId: string, agent: string) { putCompanion(sid, compId, agent); }
 
 async function ensureCompanion(sid: string, s: CompanionState) {
-  if (s.compSession) return s.compSession;
   const known = persistedCompanion(sid);
   const currentV = getAgentVersion();
   const currentAgent = ensureAgentDefinition(currentV);
@@ -191,8 +212,14 @@ async function ensureCompanion(sid: string, s: CompanionState) {
     } catch { /* garde le jeton */ }
     s.compSession = undefined;
   } else if (known) {
-    s.compSession = known.compId;
-    return known.compId;
+    const presence = await companionPresence(known.compId);
+    if (presence === 'alive') {
+      s.compSession = known.compId;
+      return known.compId;
+    }
+    if (presence === 'unknown') throw new Error('état de la session compagnon inconnu');
+    s.compSession = undefined;
+    logEvent(sid, 'note', `compagnon ${presence === 'gone' ? 'supprimé' : 'archivé'} : recréation`);
   }
   // l'agent est fixé dès la création : l'API send ne l'impose pas toujours aux sessions enfants
   const r = await jpost('/api/session', { parentID: sid, title: 'comp. supervision', agent: currentAgent });
@@ -425,14 +452,26 @@ interface TickSession {
 
 /**
  * Appelé à chaque tick de flotte. Le compagnon ne tourne que sur un déclencheur :
- * kick start/end, migration de prompt, ou période busy. Un digest inchangé est ignoré.
+ * kick start/end, migration de prompt, période busy ou réparation d'un enfant perdu.
+ * Un digest inchangé est ignoré.
  */
-export function companionTick(
+export async function companionTick(
   sessions: TickSession[],
   statusMap: Record<string, { status: string; lastUpdateAt?: number }>,
   waitingMap: Map<string, WaitInfo> = new Map(),
-): void {
+): Promise<void> {
   if (process.env.SUPERVISEUR_COMPANION === 'off') return;
+  if (ticking) return;
+  ticking = true;
+  try { await runCompanionTick(sessions, statusMap, waitingMap); }
+  finally { ticking = false; }
+}
+
+async function runCompanionTick(
+  sessions: TickSession[],
+  statusMap: Record<string, { status: string; lastUpdateAt?: number }>,
+  waitingMap: Map<string, WaitInfo>,
+): Promise<void> {
   const currentV = getAgentVersion();
   const currentAgent = ensureAgentDefinition(currentV);
 
@@ -440,11 +479,31 @@ export function companionTick(
   // tous les créneaux et affamer la migration des sessions au repos.
   const candidates = sessions.filter(s => !s.parentID && !s.time?.archived && !!statusMap[s.id]);
   const staleIds = new Set<string>();
+  const missingIds = new Set<string>();
   const stale: TickSession[] = [];
   const normal: TickSession[] = [];
+  const listedSessions = new Map(sessions.map(sess => [sess.id, sess]));
   for (const sess of candidates) {
     const known = getCompanion(sess.id);
-    if (!known || known.version !== currentV || known.agent !== currentAgent) {
+    const stalePrompt = !known || known.version !== currentV || known.agent !== currentAgent;
+    let missing = false;
+    const listedCompanion = known ? listedSessions.get(known.compId) : undefined;
+    if (known && (!listedCompanion || listedCompanion.time?.archived)) {
+      const check = lastCompanionCheck.get(sess.id);
+      if (!check || check.id !== known.compId || Date.now() - check.at >= COMPANION_CHECK_INTERVAL_MS) {
+        lastCompanionCheck.set(sess.id, { id: known.compId, at: Date.now() });
+        const presence = await companionPresence(known.compId);
+        if (presence === 'gone' || presence === 'archived') {
+          missing = true;
+          missingIds.add(sess.id);
+          get(sess.id).compSession = undefined;
+          logEvent(sess.id, 'note', `compagnon ${presence === 'gone' ? 'supprimé' : 'archivé'} détecté : réparation`);
+        }
+      }
+    } else if (known && listedCompanion) {
+      lastCompanionCheck.delete(sess.id);
+    }
+    if (stalePrompt || missing) {
       staleIds.add(sess.id);
       stale.push(sess);
     } else {
@@ -467,6 +526,10 @@ export function companionTick(
     const dispatch = (force: boolean) => {
       void analyseOnce(sess.id, sess.title ?? sess.id.slice(0, 12), sess.location?.directory, stt.status, wait, force);
     };
+
+    // La suppression du compagnon est indépendante de l'activité du parent :
+    // réparer immédiatement même si la tâche est idle et n'a reçu aucun message.
+    if (missingIds.has(sess.id)) { dispatch(true); continue; }
 
     // Un kick de début ou de fin de tour est un signal réel : il ne doit pas
     // être perdu parce qu'une analyse de cadrage vient d'avoir lieu. Le

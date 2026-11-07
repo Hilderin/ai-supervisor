@@ -55,6 +55,15 @@ export interface FleetRow {
   id: string;
   title: string;
   status: string;
+  /** Dernier échec OpenCode ou retry planifié, reçu par le SSE. */
+  issue?: {
+    state: 'error' | 'retry';
+    message?: string;
+    errorType?: string;
+    errorStatus?: number;
+    attempt?: number;
+    updatedAt: number;
+  };
   dir?: string;
   sup?: Verdict;
   turnStartedAt?: number;

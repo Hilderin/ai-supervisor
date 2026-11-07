@@ -139,7 +139,7 @@ Le bloc est mémoïsé : les re-rendus 1 s / 2 s de la carte ne relancent ni la 
 - **Résultat** : bloc de livraison sur les cartes TERMINÉ et au repos (texte markdown + rendu `openchamber_render`), aperçu replié, jamais sur une carte busy ou en attente.
 - **Composer** : retiré des cartes le 2026-11-07 (demande du propriétaire, voir §13) : l'écriture à une tâche passe par le détail. Le composer du détail garde hauteur auto jusqu'à 120 px, Entrée envoie, Maj+Entrée saute une ligne, flèche verte dès qu'il y a du texte. Dans le chat de supervision, la hauteur est aussi réglable à la souris (poignée au-dessus du champ, 34 à 360 px, mémorisée) ; le composer reste actif pendant un tour, le texte part alors dans la file d'attente OpenChamber.
 - **Fermer** : la donebox et le menu kebab appellent `POST /api/fleet/done` puis masquent la carte. Une activité ultérieure dans OpenChamber la rouvre (règle du daemon).
-- **Ouvrir** : `openchamber-ui://session/{id}` dans un nouvel onglet, comme la maquette.
+- **Ouvrir** : les liens de carte et du détail ouvrent le mini chat web ciblé dans un panneau à droite du détail. L'endpoint daemon `GET /api/openchamber/mini-chat?sessionId=…` construit le lien avec le port OpenChamber découvert ; l'URL OpenChamber est `/mini-chat.html?mode=session&sessionId=…`. Le chat du Superviseur reste visible si la place suffit ; sinon il est replié automatiquement puis restauré quand le mini chat se ferme. L'iframe requiert l'origine du Superviseur dans `OPENCHAMBER_FRAME_ANCESTORS` (voir le [README racine](../../../README.md)).
 
 ## 7. Écarts assumés avec la référence vanilla
 
@@ -189,7 +189,9 @@ Le chat de gauche remplace la barre de saisie du haut. Il vit dans `~/.supervise
 
 ### Composants
 
-- `SupervisorChat.tsx` : panneau vertical, messages, tool chips, composer, erreurs, icône balai « Nettoyer le chat », Ouvrir, Replier. Chaque message expose deux icônes (copier, revenir à partir d'ici) sur la ligne de l'heure (à droite côté utilisateur, à gauche côté agent), avec infobulle et libellé accessible ; un `send_task` réussi ajoute un bloc « Envoyé à « titre » » avec le texte complet, le titre étant résolu dans la flotte à l'affichage. Le composer se redimensionne à la souris, reste actif pendant un tour et reprend le focus après « Nettoyer ».
+- `SupervisorChat.tsx` : panneau vertical, messages, tool chips, composer, erreurs, icône balai « Nettoyer le chat », repli et flèche mini chat à droite de « Replier ». Les sélecteurs mode/projet ne sont pas affichés. Chaque message expose deux icônes (copier, revenir à partir d'ici) sur la ligne de l'heure (à droite côté utilisateur, à gauche côté agent), avec infobulle et libellé accessible ; un `send_task` réussi ajoute un bloc « Envoyé à « titre » » avec le texte complet, le titre étant résolu dans la flotte à l'affichage. Le composer se redimensionne à la souris, reste actif pendant un tour et reprend le focus après « Nettoyer ».
+- `App.tsx` : orchestre le mini chat en panneau adjacent au détail, le repli automatique du chat superviseur selon l'espace et sa restauration à la fermeture.
+- `OpenChamberPanel.tsx` : iframe du mini chat, URL de session fournie par le daemon, panneau sans arrondi et fermeture par X.
 - `ChatMarkdown.tsx` : markdown GFM, `skipHtml`, pas d'images locales dans le chat.
 - `supervisorStore.ts` : état du chat ; `sendError` séparé de `refreshError` pour qu'un poll ne masque pas un échec d'envoi ; `draft` restauré après échec ; envoi direct au repos, mise en file pendant un tour.
 - `useSupervisor.ts` : poll 1,2 s quand le superviseur travaille, 4 s au repos.
@@ -200,6 +202,7 @@ Le chat de gauche remplace la barre de saisie du haut. Il vit dans `~/.supervise
 | Route | Usage |
 | --- | --- |
 | `GET /api/supervisor` | session, statut, messages transformés (texte + tool chips), file d'attente |
+| `GET /api/openchamber/mini-chat?sessionId=…` | URL web du mini chat ciblé, construite à partir du port OpenChamber découvert |
 | `POST /api/supervisor/send` | envoyer un texte au chat (session au repos) |
 | `POST /api/supervisor/queue` | mettre un texte en file pendant un tour (`POST /api/message-queue/sessions/:id/items`) |
 | `POST /api/supervisor/queue/cancel` | retirer un message de la file (`DELETE /api/message-queue/sessions/:id/items/:itemId`) |
@@ -237,3 +240,9 @@ Conséquence sur la note de conception : la ligne d'état décrite dans [panneau
 - Les boutons du pied ne changent pas : `Répondre` (attente), `Détail` (busy), `Terminé` (fini). Le clic d'ouverture du détail reste un clic sur le corps de la carte : voir le piège noté dans AGENTS.md sur le second bouton du pied, qui clôture sur une carte « fini, à valider ».
 
 Tests : `ui/src/components/SessionCard.test.tsx` (plus de `textarea` sur la carte, hauteur et grille à trois rangées). Vérifié en direct sur la flotte : aucune zone de saisie dans les cartes, en-tête à en-tête d'environ 199 px.
+
+## 14. Finition du mini chat OpenChamber (2026-11-07)
+
+- Le panneau iframe n'a pas d'arrondi. Son en-tête ferme avec un bouton X, qui démonte l'iframe et restaure le chat superviseur s'il avait été replié automatiquement.
+- L'en-tête de `SupervisorChat` place la flèche Mini chat immédiatement à droite du bouton « Replier ». Le bouton distinct au-dessus du chat est retiré. Les sélecteurs mode et projet ne sont pas affichés. Le panneau affiche maintenant la session `OpenChamber - [titre]` avec troncature visuelle ; le X reste à droite.
+- Vérification : `bun run typecheck`, `bun test` UI et `bun run build:ui`. Le navigateur confirme la fermeture X et le retour au chat.

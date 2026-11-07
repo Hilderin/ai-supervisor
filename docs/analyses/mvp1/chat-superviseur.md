@@ -130,7 +130,7 @@ L'orchestrateur **consomme** les verdicts du compagnon via `list_tasks`. Il ne r
 - **Pas de session enfant** : une session enfant serait cachée automatiquement de la flotte, mais aussi de la liste OpenChamber. L'exclusion par id garde la session visible dans OpenChamber.
 - **Cycle de vie** : si la session est archivée ou supprimée, le daemon la recrée et prévient l'utilisateur. La conversation précédente reste dans OpenChamber si elle est seulement archivée.
 - **Nettoyer le chat** : vide l'écran et crée une nouvelle session, sans archiver l'ancienne (elle reste visible dans OpenChamber). Une liste des conversations de supervision passées pourra venir plus tard.
-- **Ouverture dans OpenChamber** : la session reste une session normale ; un bouton « Ouvrir dans OpenChamber » sert de soupape pour les fonctions absentes de notre chat (pièces jointes, formulaires complexes, historique long).
+- **Ouverture dans OpenChamber** : la session reste une session normale ; le mini chat web s'ouvre dans le panneau latéral du Superviseur, sans remplacer la conversation de supervision. La CSP doit autoriser l'origine du Superviseur via `OPENCHAMBER_FRAME_ANCESTORS`. OpenChamber reste disponible comme soupape pour les fonctions absentes du mini chat (pièces jointes, formulaires complexes, historique long).
 
 ### 4.2 Agent `superviseur-orchestrateur`
 

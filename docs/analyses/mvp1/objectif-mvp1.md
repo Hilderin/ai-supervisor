@@ -11,7 +11,7 @@
 | 3 | Réponse inline | ✔ | questions mono et multi-parts (multiselect, champ libre, Répondre) testées de bout en bout ; **permissions : mode YOLO, parcours non développé** ([permissions-yolo.md](permissions-yolo.md)) |
 | 4 | Livraison inline | ✔ | bloc « Résultat » dans la carte : dernier texte markdown + rendu `openchamber_render` sandboxé, route dédiée `GET /api/fleet/delivery`, cache invalidé par événements (détail : `implementation-ui-react.md` §5) |
 | 5 | Clôture | ◐ | endpoint daemon `/api/fleet/done` existe ; fermeture carte + `close_task` du chat ; **Repartir pas encore** |
-| 6 | ↗ OpenChamber | ◐ | ouvre `openchamber-ui://session/{id}` — schéma **deviné, jamais vérifié** (à capturer depuis l'app) |
+| 6 | ↗ OpenChamber | ✔ | mini chat web dans un panneau latéral, deep-link `/mini-chat.html?mode=session&sessionId={id}`, CSP autorisée via `OPENCHAMBER_FRAME_ANCESTORS` |
 | — | SSE instantané | ✖ | le poll 3 s porte tout (tuile planifiée I5) |
 
 > Design tranché et implémenté le 2026-11-06 : chat de supervision à gauche

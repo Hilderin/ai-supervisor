@@ -22,6 +22,7 @@ interface Props {
   state: CardState;
   now: number;
   onClose: () => void;
+  onOpenChamber: (sessionId: string) => void;
 }
 
 /**
@@ -29,7 +30,7 @@ interface Props {
  * Le corps défile ; le composer reste collé en bas, comme un chat.
  * La fermeture du panneau et la clôture de la tâche sont deux gestes distincts.
  */
-export function TaskInspector({ row, state, now, onClose }: Props) {
+export function TaskInspector({ row, state, now, onClose, onOpenChamber }: Props) {
   const closeSession = useFleetStore((s) => s.closeSession);
   const [actionError, setActionError] = useState<string | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -102,8 +103,8 @@ export function TaskInspector({ row, state, now, onClose }: Props) {
         </span>
         <button
           type="button"
-          title="Ouvrir dans OpenChamber"
-          onClick={() => window.open(`openchamber-ui://session/${row.id}`)}
+          title="Ouvrir dans le mini chat OpenChamber"
+          onClick={() => onOpenChamber(row.id)}
           className="flex h-[24px] w-[24px] shrink-0 cursor-pointer items-center justify-center rounded-[6px] bg-transparent text-muted hover:bg-green-soft hover:text-green"
         >
           <OpenChamberIcon />
@@ -131,6 +132,26 @@ export function TaskInspector({ row, state, now, onClose }: Props) {
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-[14px] pb-[12px] pt-[10px]">
+        {row.issue ? (
+          <div
+            role="status"
+            data-testid="session-issue"
+            className={cx(
+              'mb-[10px] rounded-[9px] border px-[12px] py-[9px] text-[12.5px]',
+              row.issue.state === 'error' ? 'border-danger/30 bg-danger/10 text-danger' : 'border-amber/30 bg-amber/10 text-text',
+            )}
+          >
+            <div className="font-semibold">
+              {row.issue.state === 'error' ? 'Échec OpenCode' : `Nouvelle tentative OpenCode${row.issue.attempt ? ` · tentative ${row.issue.attempt}` : ''}`}
+            </div>
+            {row.issue.message ? <div className="mt-[3px] whitespace-pre-wrap">{row.issue.message}</div> : null}
+            {row.issue.errorType || row.issue.errorStatus ? (
+              <div className="mt-[3px] text-[11px] opacity-80">
+                {[row.issue.errorType, row.issue.errorStatus ? `HTTP ${row.issue.errorStatus}` : ''].filter(Boolean).join(' · ')}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
         <div className="rounded-[9px] border border-border bg-render px-[12px] py-[10px]">
           <div className="mb-[6px] text-[12px] font-semibold text-muted">Résumé</div>
           <div className="whitespace-pre-wrap text-[13.5px] leading-[1.45] text-text">{brief}</div>
@@ -191,7 +212,7 @@ export function TaskInspector({ row, state, now, onClose }: Props) {
       </div>
 
       <div className="flex shrink-0 flex-wrap items-center justify-end gap-[8px] border-t border-border px-[14px] py-[9px]">
-        {state !== 'busy' ? (
+        {state !== 'busy' && state !== 'retry' ? (
           <button
             type="button"
             title="Retirer la tâche de la flotte"

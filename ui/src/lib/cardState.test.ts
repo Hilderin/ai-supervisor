@@ -19,6 +19,15 @@ describe('état visuel d’une carte', () => {
     expect(cardStateLabel('waiting', 'permission')).toBe('permission demandée');
   });
 
+  test('les états OpenCode error et retry sont distincts de busy', () => {
+    const failed = row({ status: 'idle', issue: { state: 'error', message: 'indisponible', updatedAt: 1 } });
+    const retry = row({ status: 'busy', issue: { state: 'retry', attempt: 2, updatedAt: 2 } });
+    expect(cardState(failed)).toBe('error');
+    expect(cardState(retry, 'running')).toBe('retry');
+    expect(cardStateLabel('error')).toBe('Erreur OpenCode');
+    expect(cardStateLabel('retry')).toBe('Nouvel essai');
+  });
+
   test('busy gagne sur un verdict done', () => {
     const busy = row({ status: 'busy', sup: { termine: true, at: 60 } });
     expect(cardState(busy, 'running')).toBe('busy');

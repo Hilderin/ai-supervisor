@@ -10,6 +10,7 @@ import { SessionCard } from './SessionCard';
 interface Props {
   fleet: Fleet | null;
   now: number;
+  onOpenChamber: (sessionId: string) => void;
 }
 
 /**
@@ -17,7 +18,7 @@ interface Props {
  * l'attention est portée par une barre fixe et par la carte elle-même.
  * Le détail d'une tâche est la colonne de droite (montée par App).
  */
-export function FleetBoard({ fleet, now }: Props) {
+export function FleetBoard({ fleet, now, onOpenChamber }: Props) {
   const closed = useFleetStore((s) => s.closed);
   const placements = useFleetStore((s) => s.placements);
   const order = useFleetStore((s) => s.order);
@@ -101,6 +102,7 @@ export function FleetBoard({ fleet, now }: Props) {
               flash={flashId === row.id}
               now={now}
               onOpen={() => setSelected(row.id)}
+              onOpenChamber={onOpenChamber}
             />
           ))
         ) : (

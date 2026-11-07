@@ -3,6 +3,7 @@ import { FleetBoard } from './components/FleetBoard';
 import { PanelLeftIcon } from './components/Icons';
 import { SupervisorChat } from './components/SupervisorChat';
 import { TaskInspector } from './components/TaskInspector';
+import { OpenChamberPanel } from './components/OpenChamberPanel';
 import { useFleetStream } from './hooks/useFleetStream';
 import { useNow } from './hooks/useNow';
 import { cardState } from './lib/cardState';
@@ -16,6 +17,10 @@ const DEFAULT_CHAT = 380;
 const MIN_INSPECTOR = 280;
 const MAX_INSPECTOR = 680;
 const DEFAULT_INSPECTOR = 460;
+const MIN_OPENCHAMBER = 320;
+const MAX_OPENCHAMBER = 680;
+const DEFAULT_OPENCHAMBER = 380;
+const MIN_FLEET = 320;
 
 function clampWidth(n: number): number {
   return Math.max(MIN_CHAT, Math.min(MAX_CHAT, Math.round(n)));
@@ -23,6 +28,10 @@ function clampWidth(n: number): number {
 
 function clampInspector(n: number): number {
   return Math.max(MIN_INSPECTOR, Math.min(MAX_INSPECTOR, Math.round(n)));
+}
+
+function clampOpenChamber(n: number): number {
+  return Math.max(MIN_OPENCHAMBER, Math.min(MAX_OPENCHAMBER, Math.round(n)));
 }
 
 export default function App() {
@@ -38,8 +47,15 @@ export default function App() {
   const [inspectorWidth, setInspectorWidth] = useState(
     () => clampInspector(Number(localStorage.getItem('superviseur.inspectorWidth')) || DEFAULT_INSPECTOR),
   );
-  const [view, setView] = useState<'chat' | 'fleet'>('chat');
+  const [openChamberWidth, setOpenChamberWidth] = useState(
+    () => clampOpenChamber(Number(localStorage.getItem('superviseur.openChamberWidth')) || DEFAULT_OPENCHAMBER),
+  );
+  const [view, setView] = useState<'chat' | 'fleet' | 'openchamber'>('chat');
+  const [openChamberSessionId, setOpenChamberSessionId] = useState<string | null>(null);
+  const [openChamberTitle, setOpenChamberTitle] = useState<string | null>(null);
   const layoutRef = useRef<HTMLDivElement>(null);
+  const autoCollapsedChat = useRef(false);
+  const viewBeforeOpenChamber = useRef<'chat' | 'fleet'>('chat');
 
   useEffect(() => {
     localStorage.setItem('superviseur.chat', chatOpen ? 'open' : 'closed');
@@ -53,10 +69,71 @@ export default function App() {
     localStorage.setItem('superviseur.inspectorWidth', String(inspectorWidth));
   }, [inspectorWidth]);
 
+  useEffect(() => {
+    localStorage.setItem('superviseur.openChamberWidth', String(openChamberWidth));
+  }, [openChamberWidth]);
+
   const selectedRow = selected
     ? (fleet?.rows.find((row) => row.id === selected) ?? null)
     : null;
   const selectedState = selectedRow ? cardState(selectedRow, placements[selectedRow.id]?.section) : null;
+
+  const openChamber = (sessionId: string) => {
+    if (!openChamberSessionId) viewBeforeOpenChamber.current = view === 'openchamber' ? 'chat' : view;
+    const task = fleet?.rows.find((row) => row.id === sessionId);
+    const isTaskSession = Boolean(task);
+    if (isTaskSession) setSelected(sessionId);
+    setOpenChamberTitle(task?.title ?? 'Superviseur');
+    const hasInspector = isTaskSession || Boolean(selectedRow);
+    const requiredWidth =
+      MIN_FLEET + openChamberWidth + 15 +
+      (hasInspector ? inspectorWidth + 15 : 0) +
+      (chatOpen ? chatWidth + 15 : 34);
+    const availableWidth = layoutRef.current?.clientWidth ?? window.innerWidth;
+    if (chatOpen && requiredWidth > availableWidth) {
+      autoCollapsedChat.current = true;
+      setChatOpen(false);
+    }
+    setOpenChamberSessionId(sessionId);
+    if (window.innerWidth <= 1100) setView('openchamber');
+  };
+
+  const closeOpenChamber = () => {
+    setOpenChamberSessionId(null);
+    setOpenChamberTitle(null);
+    if (view === 'openchamber') setView(viewBeforeOpenChamber.current);
+    if (autoCollapsedChat.current) {
+      autoCollapsedChat.current = false;
+      setChatOpen(true);
+    }
+  };
+
+  const collapseChat = () => {
+    autoCollapsedChat.current = false;
+    setChatOpen(false);
+  };
+
+  const expandChat = () => {
+    autoCollapsedChat.current = false;
+    setChatOpen(true);
+  };
+
+  const startOpenChamberResize = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = openChamberWidth;
+    const move = (ev: PointerEvent) => setOpenChamberWidth(clampOpenChamber(startWidth - (ev.clientX - startX)));
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
 
   // un clic hors des composers (menu de la carte, question, ailleurs) libère
   // le focus mémorisé : sans ce garde-fou, on rendrait le curseur bien après
@@ -108,14 +185,17 @@ export default function App() {
 
   return (
     <div className="flex h-screen min-h-0 flex-col">
-      {chatOpen ? (
+      {chatOpen || openChamberSessionId ? (
         <div
           data-testid="narrow-tabs"
           className="mb-[8px] flex shrink-0 self-start overflow-hidden rounded-[7px] border border-border bg-white min-[1100px]:hidden"
         >
           <button
             type="button"
-            onClick={() => setView('chat')}
+            onClick={() => {
+              setView('chat');
+              expandChat();
+            }}
             aria-pressed={view === 'chat'}
             className={cx(
               'cursor-pointer px-[9px] py-[4px] text-[11.5px]',
@@ -133,8 +213,21 @@ export default function App() {
               view === 'fleet' ? 'bg-green text-white' : 'bg-white text-muted',
             )}
           >
-            Tâches
-          </button>
+              Tâches
+            </button>
+          {openChamberSessionId ? (
+            <button
+              type="button"
+              onClick={() => setView('openchamber')}
+              aria-pressed={view === 'openchamber'}
+              className={cx(
+                'cursor-pointer px-[9px] py-[4px] text-[11.5px]',
+                view === 'openchamber' ? 'bg-green text-white' : 'bg-white text-muted',
+              )}
+            >
+              OpenChamber
+            </button>
+          ) : null}
         </div>
       ) : null}
 
@@ -145,15 +238,20 @@ export default function App() {
             style={{ '--chat-width': `${chatWidth}px` } as CSSProperties}
             className={cx(
               'h-full w-[var(--chat-width)] min-h-0 min-w-0 shrink-0 max-[1100px]:w-full',
-              view === 'fleet' ? 'max-[1100px]:hidden' : null,
+              view !== 'chat' ? 'max-[1100px]:hidden' : null,
             )}
           >
-            <SupervisorChat onCollapse={() => setChatOpen(false)} />
+            <div className="h-full min-h-0">
+              <SupervisorChat onCollapse={collapseChat} onOpenMiniChat={openChamber} />
+            </div>
           </div>
         ) : (
           <div
             data-testid="chat-rail"
-            className="mr-[8px] flex w-[34px] shrink-0 flex-col items-center border-r border-border bg-card pt-[5px]"
+            className={cx(
+              'mr-[8px] flex w-[34px] shrink-0 flex-col items-center border-r border-border bg-card pt-[5px]',
+              view !== 'chat' ? 'max-[1100px]:hidden' : null,
+            )}
           >
             <button
               type="button"
@@ -162,7 +260,7 @@ export default function App() {
               title="Afficher le chat"
               onClick={() => {
                 setView('chat');
-                setChatOpen(true);
+                expandChat();
               }}
               className="flex h-[26px] w-[26px] cursor-pointer items-center justify-center rounded-[6px] bg-transparent text-muted hover:bg-hover hover:text-text"
             >
@@ -198,10 +296,10 @@ export default function App() {
           data-testid="fleet-pane"
           className={cx(
             'min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto pr-[1px]',
-            chatOpen && view === 'chat' ? 'max-[1100px]:hidden' : null,
+            (chatOpen && view === 'chat') || view === 'openchamber' ? 'max-[1100px]:hidden' : null,
           )}
         >
-          <FleetBoard fleet={fleet} now={now} />
+          <FleetBoard fleet={fleet} now={now} onOpenChamber={openChamber} />
           {error ? (
             <div className="mt-[10px] rounded-[8px] bg-orange-soft px-[12px] py-[8px] text-[12px] text-attend">
               {error}
@@ -238,7 +336,7 @@ export default function App() {
             style={{ '--inspector-width': `${inspectorWidth}px` } as CSSProperties}
             className={cx(
               'h-full min-h-0 w-[var(--inspector-width)] shrink-0 overflow-hidden border-l border-border bg-card max-[1100px]:w-full',
-              chatOpen && view === 'chat' ? 'max-[1100px]:hidden' : null,
+              (chatOpen && view === 'chat') || view === 'openchamber' ? 'max-[1100px]:hidden' : null,
             )}
           >
             <TaskInspector
@@ -246,8 +344,47 @@ export default function App() {
               state={selectedState}
               now={now}
               onClose={() => setSelected(null)}
+              onOpenChamber={openChamber}
             />
           </aside>
+        ) : null}
+        {openChamberSessionId ? (
+          <>
+            <div
+              data-testid="openchamber-resizer"
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Redimensionner le panneau OpenChamber"
+              tabIndex={0}
+              title="Redimensionner OpenChamber (flèches gauche/droite)"
+              onPointerDown={startOpenChamberResize}
+              onKeyDown={(e) => {
+                if (e.key === 'ArrowLeft') { e.preventDefault(); setOpenChamberWidth((w) => clampOpenChamber(w + 10)); }
+                if (e.key === 'ArrowRight') { e.preventDefault(); setOpenChamberWidth((w) => clampOpenChamber(w - 10)); }
+                if (e.key === 'Home') { e.preventDefault(); setOpenChamberWidth(MIN_OPENCHAMBER); }
+                if (e.key === 'End') { e.preventDefault(); setOpenChamberWidth(MAX_OPENCHAMBER); }
+              }}
+              className="group hidden w-[15px] shrink-0 cursor-col-resize touch-none select-none items-stretch justify-center outline-none min-[1100px]:flex"
+            >
+              <span className="relative flex w-[1px] items-center justify-center bg-border transition-colors group-hover:bg-green">
+                <span className="h-[26px] w-[4px] rounded-full bg-[#d5dad5] transition-colors group-hover:bg-green" />
+              </span>
+            </div>
+            <aside
+              data-testid="openchamber-pane"
+              style={{ '--openchamber-width': `${openChamberWidth}px` } as CSSProperties}
+              className={cx(
+                'h-full min-h-0 w-[var(--openchamber-width)] shrink-0 overflow-hidden border-l border-border bg-card max-[1100px]:w-full',
+                view !== 'openchamber' ? 'max-[1100px]:hidden' : null,
+              )}
+            >
+              <OpenChamberPanel
+                sessionId={openChamberSessionId}
+                sessionTitle={openChamberTitle ?? 'Superviseur'}
+                onClose={closeOpenChamber}
+              />
+            </aside>
+          </>
         ) : null}
       </div>
     </div>

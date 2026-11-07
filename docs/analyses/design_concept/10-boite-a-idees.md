@@ -120,6 +120,8 @@ Constat sur le code actuel :
 
 Lien : idée « une ligne action en cours » (la ligne peut porter la mention quand il n'y a pas de tool call), doc 03 (états et signaux), leçons sig et hystérésis dans `ui/src/lib/placement.ts`.
 
+> Fait le 2026-11-07 : le daemon retient les événements `session.execution.failed` et `session.retry.scheduled` par session. Les cartes distinguent « Erreur OpenCode » et « Nouvel essai », le détail expose message/type/code et numéro de tentative. La reprise, la réussite, l'interruption ou un nouveau prompt efface le signal. Tests : `daemon/test/session-issues.test.mts`, `ui/src/lib/cardState.test.ts`, `ui/src/components/SessionCard.test.tsx` et `ui/src/components/TaskInspector.test.tsx`.
+
 ### Envoyer des instructions pendant qu'une tâche travaille
 
 Comme le fait OpenChamber : pouvoir envoyer un message à une session **même quand sa tâche est en cours d'exécution**, sans attendre qu'elle se termine ou qu'elle pose une question.

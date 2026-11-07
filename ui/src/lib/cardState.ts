@@ -6,10 +6,11 @@ import type { Section } from './placement';
  * Quatre états visibles. La section de placement ne sert qu'à la décoration :
  * l'ordre et la hauteur des cartes n'en dépendent jamais.
  */
-export type CardState = 'waiting' | 'busy' | 'done' | 'idle';
+export type CardState = 'waiting' | 'busy' | 'done' | 'idle' | 'error' | 'retry';
 
 export function cardState(row: FleetRow, placement?: Section): CardState {
   if (isWaiting(row)) return 'waiting';
+  if (row.issue?.state === 'error' || row.issue?.state === 'retry') return row.issue.state;
   if (row.status === 'busy') return 'busy';
   if (placement === 'done') return 'done';
   if (placement === 'running' || placement === 'waiting') return 'idle';
@@ -22,6 +23,8 @@ export function cardStateLabel(
   waitingKind?: 'form' | 'permission',
 ): string {
   if (state === 'waiting') return waitingKind === 'permission' ? 'permission demandée' : 'attend ta réponse';
+  if (state === 'error') return 'Erreur OpenCode';
+  if (state === 'retry') return 'Nouvel essai';
   if (state === 'busy') return 'travaille';
   if (state === 'done') return 'terminé';
   return 'fini, à valider';

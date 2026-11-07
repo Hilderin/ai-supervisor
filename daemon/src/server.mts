@@ -11,6 +11,7 @@ import { ackAnswers, AnswerError, listAnswers, recordAnswer, unreadAnswerCounts 
 import { getDelivery } from './delivery.mts';
 import { readSessionAsset } from './assets.mts';
 import { companionSessionOf } from './companion.mts';
+import { openChamberMiniChatUrl } from './openchamber-link.mts';
 import { getSupervisorSession, logEvent, upsertTaskState, getTaskState, reopenTaskState } from './state.mts';
 import { abortSupervisor, cancelQueuedSupervisor, getSupervisorState, newSupervisorConversation, queueSupervisor, revertSupervisor, sendSupervisor, SUPERVISOR_DIR, wrapOwnerPrompt } from './supervisor.mts';
 import { cancelPendingForms, configureSupervisorMode, pendingFor, runTool, supervisorProjects } from './tools.mts';
@@ -113,12 +114,21 @@ async function handleApi(req: http.IncomingMessage, res: http.ServerResponse, ur
     json(res, 200, await getSupervisorState());
     return;
   }
+  if (path === '/api/openchamber/mini-chat' && req.method === 'GET') {
+    const sessionId = url.searchParams.get('sessionId')?.trim() ?? '';
+    const target = openChamberMiniChatUrl(openchamberUrl('/'), sessionId);
+    if (!target) {
+      json(res, 400, { error: 'sessionId invalide' });
+      return;
+    }
+    json(res, 200, { url: target });
+    return;
+  }
   if (path === '/api/supervisor/projects' && req.method === 'GET') {
     try { json(res, 200, { projects: await supervisorProjects() }); }
     catch (e) { json(res, 502, { error: String(e) }); }
     return;
   }
-
   if (path === '/api/supervisor/mode' && req.method === 'POST') {
     const body = await readBody(req);
     try {
@@ -129,7 +139,6 @@ async function handleApi(req: http.IncomingMessage, res: http.ServerResponse, ur
     }
     return;
   }
-
   if (path === '/api/supervisor/messages' && req.method === 'GET') {
     const state = await getSupervisorState();
     json(res, 200, { sessionId: state.sessionId, status: state.status, messages: state.messages, queued: state.queued, error: state.error });

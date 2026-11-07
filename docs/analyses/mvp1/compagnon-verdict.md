@@ -83,6 +83,11 @@ Le verdict JSON du compagnon contient :
     antérieur à la dernière activité de la session, son résumé et sa confiance
     sont masqués jusqu'au bilan suivant : la carte ne montre pas « rien n'a
     encore été produit » à côté d'une livraison fraîche.
+13. **Un compagnon supprimé est réparé même si le parent est idle.** Quand la
+    session compagnon mappée manque du répertoire, le daemon vérifie son état
+    par lecture directe (`GET /api/session/:id`) ; une suppression ou un
+    archivage confirmé déclenche une analyse forcée qui crée et mappe un nouveau
+    compagnon. Une erreur réseau ou une réponse ambiguë ne crée pas de doublon.
 
 ## Fichiers
 
