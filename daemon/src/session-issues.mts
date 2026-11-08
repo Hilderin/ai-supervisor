@@ -5,6 +5,8 @@ export interface SessionIssue {
   errorType?: string;
   errorStatus?: number;
   attempt?: number;
+  /** Début prévu de la tentative relancée (epoch ms, champ `at` de l'événement). */
+  retryAt?: number;
   updatedAt: number;
 }
 
@@ -35,6 +37,14 @@ function errorFields(data: Record<string, unknown>) {
  * L'endpoint status ne donne que idle/busy. Ces événements complètent son état :
  * failed → error, retry.scheduled → retry, puis started/succeeded/interrupted
  * ou un nouveau prompt effacent l'information devenue périmée.
+ *
+ * Un retry n'émet PAS de `session.execution.started` quand la tentative reprend :
+ * cet événement marque le début du tour, pas de chaque tentative. Sans son
+ * échéance, « Nouvel essai » restait affiché pendant tout le travail rattrapé et
+ * ne disparaissait qu'à la fin du tour (constaté le 2026-11-08 : rate limit
+ * dépassé, session productive pendant plusieurs minutes, bandeau toujours là).
+ * Le champ `at` de l'événement donne l'heure de reprise : passé ce délai, le
+ * signal est périmé et la ligne d'activité reprend la main.
  */
 export class SessionIssueTracker {
   private readonly issues = new Map<string, SessionIssue>();
@@ -56,10 +66,12 @@ export class SessionIssueTracker {
 
     if (type === 'session.retry.scheduled') {
       const attempt = data.attempt;
+      const retryAt = data.at;
       this.issues.set(sessionId, {
         state: 'retry',
         ...errorFields(data),
         attempt: typeof attempt === 'number' && Number.isFinite(attempt) ? attempt : undefined,
+        retryAt: typeof retryAt === 'number' && Number.isFinite(retryAt) ? retryAt : undefined,
         updatedAt: now,
       });
       return;
@@ -75,7 +87,13 @@ export class SessionIssueTracker {
     }
   }
 
-  get(sessionId: string): SessionIssue | undefined {
-    return this.issues.get(sessionId);
+  get(sessionId: string, now = Date.now()): SessionIssue | undefined {
+    const issue = this.issues.get(sessionId);
+    if (!issue) return undefined;
+    if (issue.state === 'retry' && issue.retryAt !== undefined && now >= issue.retryAt) {
+      this.issues.delete(sessionId);
+      return undefined;
+    }
+    return issue;
   }
 }

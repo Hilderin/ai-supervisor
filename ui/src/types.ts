@@ -129,6 +129,8 @@ export interface FleetRow {
     errorType?: string;
     errorStatus?: number;
     attempt?: number;
+    /** Début prévu de la tentative relancée (epoch ms) : au-delà, le daemon a déjà effacé le signal. */
+    retryAt?: number;
     updatedAt: number;
   };
   dir?: string;

@@ -8,7 +8,7 @@ describe('SessionIssueTracker', () => {
       type: 'session.execution.failed',
       data: { sessionID: 'ses_a', error: { type: 'ProviderError', message: 'limite atteinte', status: 429 } },
     }, 100);
-    expect(tracker.get('ses_a')).toEqual({
+    expect(tracker.get('ses_a', 150)).toEqual({
       state: 'error', message: 'limite atteinte', errorType: 'ProviderError', errorStatus: 429, updatedAt: 100,
     });
 
@@ -16,9 +16,48 @@ describe('SessionIssueTracker', () => {
       type: 'session.retry.scheduled',
       data: { sessionID: 'ses_a', attempt: 2, at: 200, error: { type: 'ProviderError', message: 'limite atteinte', status: 429 } },
     }, 110);
-    expect(tracker.get('ses_a')).toEqual({
-      state: 'retry', message: 'limite atteinte', errorType: 'ProviderError', errorStatus: 429, attempt: 2, updatedAt: 110,
+    expect(tracker.get('ses_a', 150)).toEqual({
+      state: 'retry',
+      message: 'limite atteinte',
+      errorType: 'ProviderError',
+      errorStatus: 429,
+      attempt: 2,
+      retryAt: 200,
+      updatedAt: 110,
     });
+  });
+
+  test('le retry s’efface à l’heure de reprise, sans attendre la fin du tour', () => {
+    const tracker = new SessionIssueTracker();
+    tracker.ingest({
+      type: 'session.retry.scheduled',
+      data: { sessionID: 'ses_a', attempt: 2, at: 5_000, error: { message: 'Rate limit' } },
+    }, 1_000);
+
+    expect(tracker.get('ses_a', 4_999)?.state).toBe('retry');
+    // la tentative a repris : OpenCode n’émet pas execution.started pour elle
+    expect(tracker.get('ses_a', 5_000)).toBeUndefined();
+    // et l’effacement est durable, pas seulement à l’instant exact
+    expect(tracker.get('ses_a', 9_000)).toBeUndefined();
+  });
+
+  test('un nouvel échec repousse l’échéance du retry affiché', () => {
+    const tracker = new SessionIssueTracker();
+    tracker.ingest({ type: 'session.retry.scheduled', data: { sessionID: 'ses_a', attempt: 1, at: 5_000 } }, 1_000);
+    tracker.ingest(
+      { type: 'session.retry.scheduled', data: { sessionID: 'ses_a', attempt: 2, at: 20_000, error: { message: 'encore' } } },
+      6_000,
+    );
+    expect(tracker.get('ses_a', 10_000)).toMatchObject({ state: 'retry', attempt: 2, retryAt: 20_000 });
+    expect(tracker.get('ses_a', 20_000)).toBeUndefined();
+  });
+
+  test('sans échéance, le retry reste jusqu’au prochain événement de tour', () => {
+    const tracker = new SessionIssueTracker();
+    tracker.ingest({ type: 'session.retry.scheduled', data: { sessionID: 'ses_a', attempt: 1 } }, 1_000);
+    expect(tracker.get('ses_a', 999_000)?.state).toBe('retry');
+    tracker.ingest({ type: 'session.execution.succeeded', data: { sessionID: 'ses_a' } }, 1_000_000);
+    expect(tracker.get('ses_a', 1_000_001)).toBeUndefined();
   });
 
   test.each([

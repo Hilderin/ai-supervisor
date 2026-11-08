@@ -128,7 +128,7 @@ Constat sur le code actuel :
 
 Lien : idée « une ligne action en cours » (la ligne peut porter la mention quand il n'y a pas de tool call), doc 03 (états et signaux), leçons sig et hystérésis dans `ui/src/lib/placement.ts`.
 
-> Fait le 2026-11-07 : le daemon retient les événements `session.execution.failed` et `session.retry.scheduled` par session. Les cartes distinguent « Erreur OpenCode » et « Nouvel essai », le détail expose message/type/code et numéro de tentative. La reprise, la réussite, l'interruption ou un nouveau prompt efface le signal. Tests : `daemon/test/session-issues.test.mts`, `ui/src/lib/cardState.test.ts`, `ui/src/components/SessionCard.test.tsx` et `ui/src/components/TaskInspector.test.tsx`.
+> Fait le 2026-11-07 : le daemon retient les événements `session.execution.failed` et `session.retry.scheduled` par session. Les cartes distinguent « Erreur OpenCode » et « Nouvel essai », le détail expose message/type/code et numéro de tentative. La reprise, la réussite, l'interruption ou un nouveau prompt efface le signal. Un retry ne republie pas `session.execution.started` (il marque le tour, pas la tentative) : le signal « Nouvel essai » porte donc son échéance `at` et s'efface quand la tentative reprend, au lieu de rester pendant tout le travail rattrapé jusqu'à la fin du tour (corrigé le 2026-11-08). Tests : `daemon/test/session-issues.test.mts`, `ui/src/lib/cardState.test.ts`, `ui/src/components/SessionCard.test.tsx` et `ui/src/components/TaskInspector.test.tsx`.
 
 ### Envoyer des instructions pendant qu'une tâche travaille
 
