@@ -547,3 +547,21 @@ Constat sur le code actuel :
 - **après revert** : restaurer le texte utilisateur dans le composer du détail si l'instruction doit être corrigée et renvoyée (le brouillon vit dans le store).
 
 Lien : idée 1 (stopper ou rediriger, le concept), idée 5 (les messages en attente visibles), `/api/supervisor/abort` et `revertSupervisor` (`daemon/src/supervisor.mts`) comme implémentations à généraliser, leçon « Revert depuis un message » dans `AGENTS.md`.
+
+### Remettre dans le board la carte d'une conversation terminée
+
+Idée du 8 nov : une conversation close (geste `Terminé`) sort de la flotte, et n'y revient que si elle reçoit une activité depuis OpenChamber. Demande : un geste dans le Superviseur pour remettre sa carte dans le board, sans recréer la conversation ; elle reste accessible avec son historique et reprend sa place comme une carte ordinaire.
+
+Constat sur le code actuel :
+
+- la clôture vit dans `task_state` (`closed_at`, `closure`) : `enrichedFleet` (`daemon/src/server.mts`) écarte ces cartes de la flotte, sauf si une activité postérieure à la fermeture les rouvre ;
+- `reopenTaskState` (`daemon/src/state.mts`) remet déjà `closed_at` et `closure` à NULL, efface le verdict et réarme la reprise : le chemin daemon existe, aucun geste ne l'appelle ;
+- une carte close n'est plus publiée dans la flotte, donc introuvable depuis le Superviseur une fois la frame passée : il faut rouvrir OpenChamber pour la retrouver.
+
+À creuser avant d'implémenter :
+
+- **où trouver la carte close** : une liste des fermées (titre, heure de clôture, projet) dans le board, ou un geste depuis le chat (« remets la tâche X dans le board »), qui suppose de la désigner par son titre ou son numéro (idée 11) ;
+- **ce que le geste fait** : `reopenTaskState` seul, ou une décision sur le verdict effacé et le brief : la carte revient au repos, avec son historique, sans bilan trompeur ;
+- **portée** : une session archivée ou supprimée dans OpenChamber n'est pas une conversation close ; le geste ne doit pas la ressusciter silencieusement.
+
+Lien : idée « un chat permanent » (la liste des gestes du MCP mentionne « réouvrir des sessions marquées terminées », sans entrée dédiée), idée « numéroter les tâches » (désigner une carte absente de l'écran), leçon « Fermer le détail n'est pas fermer la tâche » dans `AGENTS.md`, `reopenTaskState` (`daemon/src/state.mts`).
