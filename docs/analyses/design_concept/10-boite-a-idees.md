@@ -12,6 +12,11 @@ Les idées à faire sont triées par priorité. Les idées complétées ou close
 
 | # | Idée | Pourquoi ce rang | Coût | État |
 |---|------|------------------|------|------|
+| 18 | Supporter Markdown dans le chat du superviseur | Lisibilité de ce qu'écrivent les agents, d'abord dans le chat du superviseur où le texte d'agent est le plus dense (brief, questions et tooltips restent l'analyse de fond) ; coût faible | faible | Partiel : chat seulement |
+| 22 | Rendre les blocs `openui-lang` des agents : chat du superviseur, réponses `answer`, résultat | OpenChamber sait dessiner ces blocs nativement ; le Superviseur les laisse en texte brut, alors que Steps, Table ou Callout disent mieux qu'un paragraphe ce qu'un agent a fait | moyen | À faire |
+| 23 | Le chat du superviseur gère le tool `question` (et le préfère aux blocs openui-lang) | Une question de l'orchestrateur est aujourd'hui du texte à recopier ; le tool `question` donne une carte répondable, et l'instruction évite des blocs openui-lang inertes dans le Superviseur | faible à moyen | À faire |
+| 19 | Un petit bouton config dans la conversation | Confort (modèle et agent à chaud), le plus simple des deux réglages de modèle ; utile dès que la flotte tourne | faible | À faire |
+| 20 | Choisir le modèle du chat, des tâches et du compagnon | Le modèle est un levier de coût et de qualité invisible aujourd'hui ; il manque un geste simple pour régler chaque type de conversation | faible à moyen | À faire |
 | 1 | Le superviseur fixe l'objectif, et peut stopper ou rediriger un agent qui dérape | Protège du travail qui part dans la mauvaise direction, né d'un cas réel : c'est la raison d'être du Superviseur (porter l'attention) | moyen | À faire |
 | 24 | Stop et revert pour une tâche (comme pour le chat) | Une erreur sur une tâche ne se rattrape pas : ni stop du tour, ni retrait de la file, ni revert, alors que le chat sait déjà faire les deux et que l'idée 1 suppose ce geste | moyen | À faire |
 | 5 | Envoyer des instructions pendant qu'une tâche travaille | Capacité de pilotage centrale (queue, direct, fork, btw), mais dépend de ce que l'API permet réellement | moyen à élevé | Partiel : file d'attente |
@@ -20,12 +25,9 @@ Les idées à faire sont triées par priorité. Les idées complétées ou close
 | 12 | Notifications desktop + badge d'attention sur l'icône | Le Superviseur doit venir vers l'utilisateur quand il n'est pas devant ; sans ça, tout le reste suppose l'œil sur la fenêtre | moyen | À faire |
 | 13 | Chemins de fichiers et URL cliquables dans les résultats | Aller du résultat au fichier sans copier-coller ; s'appuie sur le rendu existant de la livraison et sur `/api/fleet/asset` | faible à moyen | À faire |
 | 15 | Always on top + une UI qui tient dans un coin | Définit le mode d'usage (patch d'écran) ; à faire une fois les signaux essentiels arrêtés | moyen | À faire |
-| 18 | Markdown dans l'affichage (hors livraison) | Lisibilité de ce qu'écrivent les agents partout (brief, questions, tooltips), pour un coût faible ; c'est du confort, pas du pilotage | faible | Partiel : chat seulement |
-| 22 | Rendre les blocs `openui-lang` des agents (étapes, tableaux, graphiques) | OpenChamber sait dessiner ces blocs nativement ; le Superviseur les laisse en texte brut, alors que Steps, Table ou Callout disent mieux qu'un paragraphe ce qu'un agent a fait | moyen | À faire |
-| 23 | Le chat gère le tool `question` (et le préfère aux blocs openui-lang) | Une question de l'orchestrateur est aujourd'hui du texte à recopier ; le tool `question` donne une carte répondable, et l'instruction évite des blocs openui-lang inertes dans le Superviseur | faible à moyen | À faire |
-| 19 | Un petit bouton config dans la conversation | Confort (modèle et agent à chaud), le plus simple ; n'a d'intérêt qu'une fois le pilotage en place | faible | À faire |
-| 20 | Choisir le modèle du chat, des tâches et du compagnon | Le modèle est un levier de coût et de qualité invisible aujourd'hui ; il manque un geste simple pour régler chaque type de conversation | faible à moyen | À faire |
 | 21 | Coller des images dans le chat et les cartes | Le presse-papiers est le chemin le plus court pour montrer une maquette, une erreur ou un rendu cassé ; confort réel, mais secondaire face au pilotage | faible à moyen | À faire |
+
+> Ordre révisé le 2026-11-08 : le markdown du chat, les blocs `openui-lang`, le tool `question` du chat puis les deux réglages de modèle passent en tête ; le reste garde son ordre d'origine. Les raisons de rang sont celles d'origine, ajustées seulement là où elles contredisaient la nouvelle position.
 
 ### Complétées / closes
 
@@ -392,6 +394,8 @@ Questions à trancher plus tard : ce chat est-il un agent distinct (quel modèle
 ### Markdown dans l'affichage (hors livraison)
 
 Discussion du 6 nov : les agents écrivent du markdown par nature (gras, `code`, listes, liens, chemins), et le Superviseur ne le rend qu'à un seul endroit : la livraison. Partout ailleurs le texte sort brut, avec ses astérisques et ses backticks, ce qui rend les chemins et les commandes moins lisibles.
+
+> Périmètre resserré le 2026-11-08 : le rang vise d'abord le chat du superviseur (entrée renommée « Supporter Markdown dans le chat du superviseur ») ; le brief de carte, les questions et les tooltips restent l'analyse de fond, pas l'objet du rang.
 
 Constat sur le code actuel :
 
