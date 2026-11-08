@@ -1,4 +1,6 @@
 /** Icônes SVG de la maquette, plus les ajouts du chat (Stop, copier, revenir, balai). */
+import type { ReactNode } from 'react';
+import type { ActivityKind } from '../types';
 
 export function OpenChamberIcon() {
   return (
@@ -146,4 +148,111 @@ export function ChevronIcon() {
       <path d="M6 9l6 6 6-6" />
     </svg>
   );
+}
+
+/**
+ * Icônes de la ligne d'activité. Même langage qu'OpenChamber
+ * (`toolPresentation.tsx` de son UI) : trait fin, 14 px, un pictogramme par
+ * type (cerveau, crayon, fichier, loupe, terminal). Les composants d'OpenChamber
+ * ne sont pas importables depuis ce dépôt : ce sont des équivalents dessinés
+ * avec les mêmes métaphores, documentés dans activite-carte.md.
+ */
+function ActivitySvg({ children }: { children: ReactNode }) {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {children}
+    </svg>
+  );
+}
+
+function ThinkingActivityIcon() {
+  return (
+    <ActivitySvg>
+      <path d="M12 4.5a3 3 0 0 0-5.7-1.3A3 3 0 0 0 4 9.4a3 3 0 0 0 .7 4.9A3 3 0 0 0 9 20a3 3 0 0 0 3-2V4.5Z" />
+      <path d="M12 4.5a3 3 0 0 1 5.7-1.3A3 3 0 0 1 20 9.4a3 3 0 0 1-.7 4.9A3 3 0 0 1 15 20a3 3 0 0 1-3-2V4.5Z" />
+    </ActivitySvg>
+  );
+}
+
+function WritingActivityIcon() {
+  return (
+    <ActivitySvg>
+      <path d="M4 6h16M4 11h10M4 16h13M4 21h7" />
+    </ActivitySvg>
+  );
+}
+
+function ReadActivityIcon() {
+  return (
+    <ActivitySvg>
+      <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5Z" />
+      <path d="M14 3v5h5M9 13h6M9 17h4" />
+    </ActivitySvg>
+  );
+}
+
+function EditActivityIcon() {
+  return (
+    <ActivitySvg>
+      <path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16v4Z" />
+      <path d="M14 6l4 4" />
+    </ActivitySvg>
+  );
+}
+
+function WriteActivityIcon() {
+  return (
+    <ActivitySvg>
+      <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5Z" />
+      <path d="M14 3v5h5M9 13h6M9 17h6" />
+    </ActivitySvg>
+  );
+}
+
+function SearchActivityIcon() {
+  return (
+    <ActivitySvg>
+      <circle cx="11" cy="11" r="6.5" />
+      <path d="M16 16l4 4" />
+    </ActivitySvg>
+  );
+}
+
+function ShellActivityIcon() {
+  return (
+    <ActivitySvg>
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M7 9l3 3-3 3M13 15h4" />
+    </ActivitySvg>
+  );
+}
+
+function ToolActivityIcon() {
+  return (
+    <ActivitySvg>
+      <path d="M14.5 6.5a3.5 3.5 0 0 0 4.7 4.7l-7.7 7.7a2.3 2.3 0 0 1-3.2-3.2l7.7-7.7Z" />
+      <path d="M14.5 6.5l3-3 3 3-3 3" />
+    </ActivitySvg>
+  );
+}
+
+export function ActivityIcon({ kind }: { kind: ActivityKind }) {
+  if (kind === 'thinking') return <ThinkingActivityIcon />;
+  if (kind === 'writing') return <WritingActivityIcon />;
+  if (kind === 'read') return <ReadActivityIcon />;
+  if (kind === 'edit') return <EditActivityIcon />;
+  if (kind === 'write') return <WriteActivityIcon />;
+  if (kind === 'search') return <SearchActivityIcon />;
+  if (kind === 'shell') return <ShellActivityIcon />;
+  return <ToolActivityIcon />;
 }

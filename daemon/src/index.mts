@@ -7,6 +7,7 @@ import { setBase, startPolling, pollOnce, baseOk, currentFleet } from './fleet.m
 import { setBase as setCompanionBase } from './companion.mts';
 import { setBase as setDeliveryBase } from './delivery.mts';
 import { setBase as setPlanBase } from './plan.mts';
+import { setActivityBase } from './activity.mts';
 import { setVerifierBase } from './verifier.mts';
 import { startIndexing } from './message-index.mts';
 import { ensureSupervisorSession, ensureSupervisorWorkspace, setBase as setSupervisorBase } from './supervisor.mts';
@@ -16,7 +17,7 @@ import { db } from './state.mts';
 async function main() {
   const port = await discoverOpenChamberPort();
   const base = `http://127.0.0.1:${port}`;
-  setBase(base); setCompanionBase(base); setDeliveryBase(base); setPlanBase(base); setSupervisorBase(base); setVerifierBase(base);
+  setBase(base); setCompanionBase(base); setDeliveryBase(base); setPlanBase(base); setSupervisorBase(base); setVerifierBase(base); setActivityBase(base);
   ensureSupervisorWorkspace();
   console.log(`[superviseur] OpenChamber découvert sur 127.0.0.1:${port}`);
   try {

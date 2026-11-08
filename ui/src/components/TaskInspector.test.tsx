@@ -28,6 +28,24 @@ function renderInspector(r: FleetRow): string {
 }
 
 describe('TaskInspector', () => {
+  test('la même ligne d’activité que la carte vit en haut du panneau', () => {
+    const html = renderInspector(row({
+      status: 'busy',
+      activity: { kind: 'shell', label: 'Commande', detail: 'bun test daemon/test/activity.test.mts', title: 'bun test daemon/test/activity.test.mts', at: 1 },
+    }));
+    expect(html.match(/data-testid="activity-line"/g)).toHaveLength(1);
+    expect(html).toContain('Commande');
+    expect(html).toContain('bun test daemon/test/activity.test.mts');
+  });
+
+  test('au repos, le détail ne garde pas de ligne d’activité', () => {
+    const html = renderInspector(row({
+      status: 'idle',
+      activity: { kind: 'edit', label: 'Édition', detail: 'a.ts', at: 2 },
+    }));
+    expect(html).not.toContain('data-testid="activity-line"');
+  });
+
   test('le détail présente le message et le numéro du retry OpenCode', () => {
     const html = renderInspector(row({
       issue: { state: 'retry', message: 'Connexion interrompue', errorType: 'NetworkError', attempt: 2, updatedAt: 3 },

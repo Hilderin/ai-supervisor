@@ -22,6 +22,7 @@ import { getSupervisorSession } from './state.mts';
 import { SUPERVISOR_DIR } from './supervisor.mts';
 import { getPlanSnapshot } from './plan.mts';
 import { criteriaCounts, listCriteria, type CriteriaCounts } from './criteria.mts';
+import { activityOf, activityTracker, type LiveActivity } from './activity.mts';
 import { SessionIssueTracker, type SessionIssue } from './session-issues.mts';
 import type { WaitInfo } from './verdict.mts';
 
@@ -61,6 +62,8 @@ export interface FleetRow {
   plan?: { done: number; total: number; steps: Array<{ text: string; status: string }> };
   /** critères d'acceptation : comptes par état (la liste détaillée se charge à la demande) */
   criteria?: CriteriaCounts;
+  /** ce que l'agent fait à l'instant (uniquement pendant un tour busy) */
+  activity?: LiveActivity;
 }
 export interface Verdict {
   resume?: string; progress?: number | null; termine?: boolean;
@@ -207,6 +210,19 @@ function enrichCriteriaCounts(fleet: Fleet): void {
   }
 }
 
+/**
+ * Activité courante des cartes busy. Les événements SSE du tour alimentent le
+ * tracker sans requête ; `activityOf` ne relit la conversation qu'en secours
+ * (démarrage, coupure SSE, outil très long). Les sessions au repos n'exposent
+ * jamais d'activité : le tracker est purgé au passage.
+ */
+async function enrichActivity(fleet: Fleet): Promise<void> {
+  for (const row of fleet.rows) {
+    const activity = await activityOf(row.id, row.status === 'busy');
+    if (activity) row.activity = activity;
+  }
+}
+
 async function runPoll(): Promise<void> {
   try {
     const [status, sessions] = await Promise.all([
@@ -233,6 +249,7 @@ async function runPoll(): Promise<void> {
     const fleet = buildFleet(status);
     await enrichPlanProgress(fleet);
     enrichCriteriaCounts(fleet);
+    await enrichActivity(fleet);
     cachedFleet = fleet;
     lastGood = Date.now();
     // l'attente humaine est décidée par les formulaires/permissions réels, pas par le LLM
@@ -315,6 +332,7 @@ let pollDebounce: ReturnType<typeof setTimeout> | null = null;
 
 function onEventLine(type: string, data: Record<string, unknown>) {
   sessionIssues.ingest({ type, data });
+  activityTracker.ingest(type, data);
   ingestEvent({ type, data });
   // événements message.* : la session est marquée pour réindexation (index
   // local, pleine couverture de recherche : message-index.mts)

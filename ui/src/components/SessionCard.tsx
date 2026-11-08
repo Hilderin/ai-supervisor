@@ -7,6 +7,7 @@ import { cx } from '../lib/cx';
 import { BUSY_BRIEF, briefRow, isStaleTurn, planLabel } from '../lib/fleet';
 import { useFleetStore } from '../store/fleetStore';
 import type { FleetRow } from '../types';
+import { ActivityLine } from './ActivityLine';
 import { CardStateIcon } from './CardStateIcon';
 import { CriteriaPopover } from './CriteriaPopover';
 import { DeliveryBlock } from './DeliveryBlock';
@@ -42,6 +43,9 @@ export function SessionCard({ row, state, selected, flash, now, onOpen, onOpenCh
   const waiting = state === 'waiting';
   const done = state === 'done';
   const busy = state === 'busy';
+  // au repos, jamais de ligne résiduelle : le daemon ne publie activity que
+  // pour une session busy, l'UI s'abstient aussi par sécurité
+  const activity = busy ? row.activity : undefined;
   const issue = row.issue;
   const stale = isStaleTurn(row);
   const form = row.pendingForms?.[0];
@@ -227,6 +231,7 @@ export function SessionCard({ row, state, selected, flash, now, onOpen, onOpenCh
       </div>
 
       <div className="min-h-0 min-w-0 overflow-hidden">
+        {activity ? <ActivityLine activity={activity} className="mb-[4px]" /> : null}
         <div className="line-clamp-2 pb-[2px] text-[13.5px] leading-[1.45] text-muted">{brief}</div>
         {detail ? (
           <div className="mt-[5px] max-h-[56px] pb-[2px] text-[12px] leading-[1.4] text-muted">

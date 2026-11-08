@@ -1,0 +1,44 @@
+Vérification réelle de l'activité en direct
+============================================
+
+Session supervisée : ses_e444058fbffeUeQNeCRdlGHxym
+Titre : Indicateur d'activité en direct sur la carte
+Instance : OpenChamber 2.6.1, port 57123 ; daemon Superviseur sur 5180
+Méthode : boucle externe qui interroge GET /api/fleet (même flotte que le SSE)
+toutes les 100 à 200 ms et journalise l'unique champ row.activity de la carte.
+Seules les transitions sont recopiées ci-dessous (une ligne = un changement réel ;
+les répétitions identiques sont omises). Les horodatages sont en ms epoch.
+
+Observation 1 (activity.log) : Réflexion puis Édition
+-----------------------------------------------------
+1794151492258  thinking  Réflexion
+1794151498064  edit      Édition
+              (sujet pas encore connu à cet échantillon : arguments en cours ;
+              l'observation 2 montre le même outil avec son nom de fichier)
+
+Observation 2 (activity2.log) : Commande, Écriture, Édition
+-----------------------------------------------------------
+1794151585837  shell     Commande · sleep 4; echo "commande de vérification terminée"
+1794151591401  write     Écriture · activite-verif.md
+1794151592352  edit      Édition · activite-verif.md
+
+Observation 3 (activity3.log) : Réflexion, Écriture, Commande, Lecture
+----------------------------------------------------------------------
+1794151601349  shell     Commande · cd /tmp/opencode && rm -f activity3.log && (...)
+1794151612197  write     Écriture · activite-carte.md
+1794151613216  shell     Commande · python3 - <<'EOF'
+1794151619934  read      Lecture
+1794151620372  read      Lecture · activity3.log
+1794151626721  thinking  Réflexion
+1794151626903  shell     Commande · which chromium chromium-browser google-chrome ...
+1794151638048  tool      Navigateur
+1794151653751  shell     Commande · cd ~/Documents/Projects/ai-supervisor && git diff ...
+1794151659697  thinking  Réflexion
+1794151660424  shell     Commande · cd ~/Documents/Projects/ai-supervisor && bun run build:ui
+
+Conclusion
+----------
+Les trois cas exigés ont été observés sur la vraie instance, pendant que la tâche
+était busy : Réflexion (observations 1 et 3), Édition avec nom de fichier
+(observations 1 et 2), Commande shell avec commande (observations 2 et 3).
+La ligne est unique et remplacée en place : aucun historique n'est conservé.

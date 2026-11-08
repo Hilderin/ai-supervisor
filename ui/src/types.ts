@@ -96,6 +96,28 @@ export interface CriteriaCounts {
   validated: number;
 }
 
+/** Activité courante d'une tâche busy (dérivée du SSE OpenChamber). */
+export type ActivityKind =
+  | 'thinking'
+  | 'writing'
+  | 'read'
+  | 'edit'
+  | 'write'
+  | 'search'
+  | 'shell'
+  | 'tool';
+
+export interface FleetActivity {
+  kind: ActivityKind;
+  /** Libellé court, déjà en français. */
+  label: string;
+  /** Sujet : nom de fichier, motif, commande. */
+  detail?: string;
+  /** Texte complet pour l'infobulle. */
+  title?: string;
+  at: number;
+}
+
 export interface FleetRow {
   id: string;
   title: string;
@@ -123,6 +145,8 @@ export interface FleetRow {
   plan?: { done: number; total: number; steps: PlanStep[] };
   /** critères d'acceptation : comptes par état (la liste détaillée se charge à la demande) */
   criteria?: CriteriaCounts;
+  /** ce que l'agent fait à l'instant (uniquement pendant un tour busy) */
+  activity?: FleetActivity;
   /** réponses au propriétaire (tool `answer`) pas encore lues (« Got it ») */
   unreadAnswers?: number;
 }

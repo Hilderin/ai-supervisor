@@ -8,6 +8,7 @@ import { briefRow, dirName } from '../lib/fleet';
 import { BTN_GHOST, BTN_PRIMARY } from '../lib/ui';
 import { useFleetStore } from '../store/fleetStore';
 import type { FleetRow } from '../types';
+import { ActivityLine } from './ActivityLine';
 import { CardStateIcon } from './CardStateIcon';
 import { Composer } from './Composer';
 import { AnswersSection } from './AnswersSection';
@@ -44,6 +45,8 @@ export function TaskInspector({ row, state, now, onClose, onOpenChamber }: Props
   const perm = row.pendingPermissions?.[0];
   const waitingKind = form ? 'form' : perm ? 'permission' : undefined;
   const stateLabel = cardStateLabel(state, waitingKind);
+  // même ligne que la carte, en haut du panneau ; rien au repos
+  const activity = state === 'busy' ? row.activity : undefined;
   const brief = row.sup?.resume || briefRow(row, waiting, now);
   const attend = row.sup?.attend && (waiting || row.sup?.humanSource === 'agent_ask')
     ? row.sup.attend
@@ -126,6 +129,7 @@ export function TaskInspector({ row, state, now, onClose, onOpenChamber }: Props
           {dir ? <span className="min-w-0 truncate text-muted" title={row.dir}>{dir}</span> : null}
           <span className="flex-1" />
         </div>
+        {activity ? <ActivityLine activity={activity} /> : null}
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-[14px] pb-[12px] pt-[10px]">

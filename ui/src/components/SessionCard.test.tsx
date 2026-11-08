@@ -66,6 +66,46 @@ describe('SessionCard sans composer', () => {
   });
 });
 
+describe('ligne d’activité', () => {
+  test('une carte busy affiche une seule ligne : type, sujet et infobulle', () => {
+    const html = renderCard(row({
+      status: 'busy',
+      activity: { kind: 'edit', label: 'Édition', detail: 'activity.mts', title: '/projet/daemon/src/activity.mts', at: 1 },
+    }));
+    expect(html.match(/data-testid="activity-line"/g)).toHaveLength(1);
+    expect(html).toContain('Édition');
+    expect(html).toContain('activity.mts');
+    expect(html).toContain('title="/projet/daemon/src/activity.mts"');
+  });
+
+  test('la ligne change de contenu sans empiler l’historique', () => {
+    const shell = renderCard(row({
+      status: 'busy',
+      activity: { kind: 'shell', label: 'Commande', detail: 'bun test', title: 'bun test', at: 2 },
+    }));
+    const search = renderCard(row({
+      status: 'busy',
+      activity: { kind: 'search', label: 'Recherche', detail: 'activityOf', title: 'activityOf', at: 3 },
+    }));
+    expect(shell).toContain('Commande');
+    expect(shell).not.toContain('Recherche');
+    expect(search).toContain('Recherche');
+    expect(search).not.toContain('Commande');
+    expect(search.match(/data-testid="activity-line"/g)).toHaveLength(1);
+  });
+
+  test('au repos, aucune ligne résiduelle même si le champ traîne', () => {
+    for (const status of ['idle', 'done']) {
+      const html = renderCard(row({
+        status,
+        activity: { kind: 'shell', label: 'Commande', detail: 'bun test', at: 4 },
+      }));
+      expect(html).not.toContain('data-testid="activity-line"');
+      expect(html).not.toContain('Commande');
+    }
+  });
+});
+
 describe('barres de progression', () => {
   const classOf = (html: string, testid: string): string => {
     const match = html.match(new RegExp(`data-testid="${testid}"[^>]*class="([^"]*)"`));
