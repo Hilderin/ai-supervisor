@@ -17,8 +17,6 @@ Les idées à faire sont triées par priorité. Les idées complétées ou close
 | 5 | Envoyer des instructions pendant qu'une tâche travaille | Capacité de pilotage centrale (queue, direct, fork, btw), mais dépend de ce que l'API permet réellement | moyen à élevé | Partiel : file d'attente |
 | 7 | Un mode plan pour le superviseur : lire le projet avant de cadrer une carte | Le brief d'une tâche est deviné à partir d'une phrase : sans lecture du projet, l'objectif et les critères restent génériques et l'humain corrige ce que l'agent n'a pas pu lire ; même outils que le mode discussion, autre intention | moyen | Partiel : mode Investigation et lecture bornée |
 | 8 | Un vrai mode conversationnel : brainstormer sans lancer de tâche | Le chat existe, mais son agent est un aiguilleur sans accès au projet : il manque la posture (discuter) et des outils de lecture ; le coût est surtout du prompt et une bascule explicite | faible à moyen | À faire |
-| 10 | Objectif courant affiché sur la carte, en plus du résumé | Complète les rangs 1 et 3 : savoir où va la carte, pas seulement ce qu'elle fait ; un champ à ajouter | faible | À faire |
-| 11 | Numéroter les tâches, avec un préfixe par projet | Une référence stable pour suivre et désigner une tâche (« reprends la 42 ») alors que le titre change ; peu coûteux et utile partout (carte, chat, notifications) | faible | À faire |
 | 12 | Notifications desktop + badge d'attention sur l'icône | Le Superviseur doit venir vers l'utilisateur quand il n'est pas devant ; sans ça, tout le reste suppose l'œil sur la fenêtre | moyen | À faire |
 | 13 | Chemins de fichiers et URL cliquables dans les résultats | Aller du résultat au fichier sans copier-coller ; s'appuie sur le rendu existant de la livraison et sur `/api/fleet/asset` | faible à moyen | À faire |
 | 15 | Always on top + une UI qui tient dans un coin | Définit le mode d'usage (patch d'écran) ; à faire une fois les signaux essentiels arrêtés | moyen | À faire |
@@ -38,6 +36,8 @@ Les idées à faire sont triées par priorité. Les idées complétées ou close
 | 4 | Voir une erreur de session sur la carte (et le retry qui suit) | Un tour qui échoue et réessaie ressemble à un tour qui avance : sans signal, on confond erreur et lenteur ; l'événement d'échec arrive déjà au daemon, il est simplement jeté | faible à moyen | Fait |
 | 6 | Un tool « dire à l'utilisateur » : informer sans arrêter le travail | Complète le canal utilisateur → tâche (rang 5) par le sens inverse : la tâche peut répondre ou signaler au fil du tour, sans tour ni question bloquante ; le récepteur existe déjà (le chat sait afficher), c'est la sortie qui manque | faible à moyen | Fait : tool `answer` |
 | 9 | Mettre à jour une étape du plan sans réécrire la liste | Répare un signal déjà affiché qui ment : la barre reste vide puis saute à 100 % ; une barre fausse coûte plus qu'une ligne absente | moyen | Fait : `todoupdate` |
+| 10 | Objectif courant affiché sur la carte, en plus du résumé | Complète les rangs 1 et 3 : savoir où va la carte, pas seulement ce qu'elle fait ; un champ à ajouter | faible | Clos : les critères d'acceptation portent l'objectif sur la carte |
+| 11 | Numéroter les tâches, avec un préfixe par projet | Une référence stable pour suivre et désigner une tâche (« reprends la 42 ») alors que le titre change ; peu coûteux et utile partout (carte, chat, notifications) | faible | Clos : les cartes sont fixes à l'écran |
 | 14 | Pinner des conversations / indiquer une priorité | Triage quand la flotte grossit ; secondaire tant que l'ordre des cartes n'est pas stabilisé | faible à moyen | Clos : l'ordre des cartes est stable |
 | 16 | Date et heure de la dernière activité sur une conversation | Petit signal complémentaire (session vivante ou morte), peu coûteux, non bloquant | faible | Fait |
 | 17 | Un chat permanent, à droite ? (le « poste de commandement » conversationnel) | Gros pari d'architecture, à trancher après les signaux de base : il peut réorienter toute l'UI | élevé | Fait : chat à gauche |
@@ -270,6 +270,8 @@ Lien : idée « une ligne action en cours » (même besoin de signal à chaud), 
 
 Discussion du 6 nov : ajouter une ligne « objectif courant » sur chaque carte, en plus du `resume` du compagnon. Le résumé dit ce qui se passe, pas où ça va ; sur une flotte, c'est l'info qui manque au retour (« c'est quoi le but de cette carte ? ») et l'entité Goal du doc 02 n'est jamais rendue à l'écran.
 
+> Clos le 2026-11-08 : les critères d'acceptation de la tâche (barre et compteur sur la carte, liste dans le détail) disent déjà où elle va ; une ligne « objectif » de plus ferait doublon sur une carte déjà dense.
+
 En l'état, le verdict du compagnon (`Verdict` dans `ui/src/types.ts`) n'a pas de champ goal : le digest passe le premier message humain comme contexte, et le prompt de l'analyste ne le réutilise qu'au détour d'un tour vide (« je travaille sur ta demande : <objectif court> »).
 
 Avis et réserves (à trancher avant d'implémenter) :
@@ -282,6 +284,8 @@ Avis et réserves (à trancher avant d'implémenter) :
 ### Numéroter les tâches, avec un préfixe par projet
 
 Discussion du 6 nov : dans la flotte, une tâche ne s'identifie que par son titre, qui peut changer (la session le réécrit) et se ressemble d'une carte à l'autre. Pour suivre la flotte, et surtout pour en parler (« reprends la 42 »), un identifiant court serait plus fiable qu'un titre. Demande : numéroter les tâches, avec éventuellement un préfixe par projet (`ais-42`, `mvp1-7`).
+
+> Clos le 2026-11-08 : les cartes sont désormais fixes à l'écran, une tâche se retrouve par sa position et se désigne par son titre ; un numéro n'apporterait pas la référence stable qui manquait.
 
 Ce que ça apporterait :
 
