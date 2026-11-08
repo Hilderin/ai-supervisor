@@ -75,6 +75,30 @@ export async function readProjectFile(directory: string, path: string, startLine
   }
 }
 
+/**
+ * Résout une IMAGE de preuve avec les MÊMES gardes que readProjectFile
+ * (relatif, sans sortie, sans lien symbolique, borné au projet) mais SANS le
+ * refus binaire : le vérificateur doit voir la capture réellement
+ * (retour du propriétaire, 2026-11-08). Le daemon renvoie le chemin absolu
+ * validé et le mime ; c'est le plugin vérificateur qui l'attache à la session
+ * (Tool.FileContent), pas une description.
+ */
+export async function resolveProjectImage(directory: string, path: string, allowedMimes: Record<string, string>) {
+  try {
+    const ext = String(path).split('.').pop()?.toLowerCase() ?? '';
+    const mime = allowedMimes[ext];
+    if (!mime) return { ok: false, error: 'format_image_refuse' };
+    const root = await projectRoot(directory);
+    const safe = validateRelativePath(path);
+    const file = await resolveProjectFile(root, safe);
+    const info = await stat(file);
+    if (info.size > MAX_READ_BYTES) return { ok: false, error: 'fichier_trop_volumineux', maxBytes: MAX_READ_BYTES };
+    return { ok: true, abs: file, mime, size: info.size, relative: safe.split(sep).join('/') };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : 'lecture_refusee' };
+  }
+}
+
 function globRegex(pattern: string): RegExp {
   if (pattern.length > MAX_PATTERN_CHARS || (pattern.match(/\*/g)?.length ?? 0) > 16) {
     throw new Error('motif trop complexe');

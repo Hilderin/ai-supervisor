@@ -167,11 +167,18 @@ describe('criteria : machine à états', () => {
     expect(updated.remove_reason).toBeNull();
   });
 
-  test('plafond de critères par tâche', () => {
+  test('plafond : porte sur les critères NON validés ; un validé libère une place', async () => {
     const before = listCriteria(TASK).length;
     try {
       for (let i = before; i < 12; i++) addCriterion(TASK, { title: `Critère ${i + 1}`, methods: ['text'] });
+      // 12 en attente (todo) : le plafond refuse
       expect(() => addCriterion(TASK, { title: 'Trop', methods: ['text'] })).toThrow(CriteriaError);
+      // une validation repasse la place : le critère validé est de l'histoire
+      const first = listCriteria(TASK)[0];
+      await submitEvidence(TASK, first.ref, [{ kind: 'command', text: 'sortie de test du plafond' }], projectDir);
+      approveCriterion(TASK, first.ref, 'validé pour le test');
+      const added = addCriterion(TASK, { title: 'Critère après validation', methods: ['text'] });
+      expect(added.status).toBe('todo');
     } finally {
       // nettoyage pour les tests suivants
       for (const r of listCriteria(TASK).slice(4)) removeCriterion(TASK, r.ref);

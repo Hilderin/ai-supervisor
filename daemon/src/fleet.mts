@@ -308,6 +308,7 @@ export function baseOk(): boolean { return base !== '' && lastGood > 0; }
 
 /* --- SSE : l'événement pousse un poll immédiat (le poll 3 s reste le filet) --- */
 import { ingestEvent } from './kicks.mts';
+import { noteMessageActivity } from './message-index.mts';
 
 let sseBusy = false;          // reconnexion déjà planifiée
 let pollDebounce: ReturnType<typeof setTimeout> | null = null;
@@ -315,6 +316,11 @@ let pollDebounce: ReturnType<typeof setTimeout> | null = null;
 function onEventLine(type: string, data: Record<string, unknown>) {
   sessionIssues.ingest({ type, data });
   ingestEvent({ type, data });
+  // événements message.* : la session est marquée pour réindexation (index
+  // local, pleine couverture de recherche : message-index.mts)
+  if (type.startsWith('message.')) {
+    noteMessageActivity(data.sessionID ?? (data.data as Record<string, unknown> | undefined)?.sessionID);
+  }
   const relevant = /^(session\.|permission\.|form\.|project\.|workspace\.|message\.)/.test(type);
   if (!relevant) return;
   if (pollDebounce) return;

@@ -106,4 +106,39 @@ describe('buildPhasePrompt : liste et objectif jamais coupés', () => {
     expect(cut.startsWith('Première phrase complète.')).toBe(true);
     expect(verifier.cutText('court', 40)).toBe('court');
   });
+
+  test('version du travail examinée : les trois marqueurs sont injectés, le daemon ne juge pas à la place du LLM', () => {
+    const COMMIT = 'a'.repeat(40);
+    const OTHER = 'b'.repeat(40);
+    const mk = (ref: string, commit: string | null): verifier.CriterionRowLite => ({
+      ref, title: `Critère ${ref}`, detail: null, methods: ['unit_test'],
+      status: 'validated', version: 1, evidence: [], review: null,
+      validated_at: Date.now(), validated_work: commit ? JSON.stringify({ commit, at: 1 }) : null,
+      remove_proposed_at: null, remove_reason: null,
+    });
+    const rows = [mk('AC-01', COMMIT), mk('AC-02', OTHER), mk('AC-03', null)];
+    const prompt = verifier.buildPhasePrompt({
+      title: 'Tâche', objective: 'objectif', rows,
+      counts: { validated: 3, total: 3 }, pending: 0, excerpt: 'extrait', currentCommit: COMMIT,
+    });
+    // commit identique : toujours applicable
+    expect(prompt).toContain(`AC-01 [${'validé'}]`);
+    expect(prompt).toContain("VALIDÉ SUR L'ÉTAT ACTUEL DU TRAVAIL (commit aaaaaaaaaa)");
+    // commit différent : changement potentiellement pertinent, le distinguo est au vérificateur
+    expect(prompt).toContain('VALIDÉ SUR UN AUTRE ÉTAT DU TRAVAIL (commit bbbbbbbbbb, actuel aaaaaaaaaa)');
+    expect(prompt).toContain('changement POTENTIELLEMENT pertinent');
+    // pas de commit : indéterminable
+    expect(prompt).toContain('VERSION DU TRAVAIL À LA VALIDATION : INDÉTERMINABLE');
+    // le daemon ne dégrade jamais un état sur ce marqueur seul : statuts inchangés
+    expect(prompt).not.toContain('à corriger');
+  });
+
+  test('currentWorkVersion : commit du dossier git, null hors git', () => {
+    // le dossier du repo courant EST un dépôt git
+    const here = verifier.currentWorkVersion(process.cwd());
+    expect(here.commit).toMatch(/^[0-9a-f]{40}$/);
+    const nowhere = verifier.currentWorkVersion('/tmp/opencode/inexistant-verifier-inject');
+    expect(nowhere.commit).toBeNull();
+    expect(nowhere.at).toBeGreaterThan(0);
+  });
 });

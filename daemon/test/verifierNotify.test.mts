@@ -55,12 +55,14 @@ import { describe, expect, test } from 'bun:test';
 const TASK = 'ses_test_notify';
 
 describe('notifications critères : structurées et fiables', () => {
-  test('la justification d approbation et le détail des ajouts partent dans le message', () => {
+  test('la justification d approbation et le détail des ajouts partent dans le message, jointes par \\n', () => {
     const lines = verifier.transitionLines([
       { ref: 'AC-02', op: 'approve', line: 'AC-02 validé : la sortie de test passe' },
       { ref: 'AC-05', op: 'add', line: 'AC-05 ajouté par le vérificateur : « aucune régression du build UI » : build passe après chaque lot (méthodes : unit_test) : le plan touche l UI' },
     ]);
-    const text = `[superviseur] Critères : ${lines.join('. ')}. Ne réponds pas à ce message : applique les corrections nécessaires.`;
+    // retour du propriétaire : plus d interpolation virgule, des lignes lisibles
+    const text = ['[superviseur] Critères :', ...lines.map(l => `- ${l}`), 'Ne réponds pas à ce message : applique les corrections nécessaires.'].join('\n');
+    expect(text).toContain('\n- AC-02 validé : la sortie de test passe\n');
     // la justification d'approbation est transmise
     expect(text).toContain('AC-02 validé : la sortie de test passe');
     // le détail de l'ajout aussi (titre, détail, méthodes, raison)
@@ -79,6 +81,11 @@ describe('notifications critères : structurées et fiables', () => {
     expect(calls.some(c => c.path.includes('message-queue'))).toBe(false);
     const sent = (prompts.at(-1)!.body as { text: string }).text;
     expect(sent).toContain('AC-01 validé : preuve acceptée');
+    // JOURNAL DURABLE : la notification porte un id, un statut et le texte exact
+    const row = (state.db as unknown as { query: Function }).query('SELECT * FROM notification WHERE session_id = ? ORDER BY id DESC').get(TASK) as { id: number; status: string; attempts: number; text: string };
+    expect(row.status).toBe('sent');
+    expect(row.attempts).toBe(3);
+    expect(row.text).toBe(sent);       // reprises sur la MÊME ligne, pas de doublon
   }, 20_000);
 
   test('steer toujours en échec : repli file d attente avec sendConfig repris de la session', async () => {
@@ -94,6 +101,10 @@ describe('notifications critères : structurées et fiables', () => {
     expect(item.directory).toBe('/tmp/projet');
     expect(item.item.sendConfig).toEqual({ providerID: 'prov', modelID: 'model-x' });
     expect(item.item.text).toContain('AC-02 à corriger');
+    // journal : le repli file d'attente est CONSIGNÉ (statut queued)
+    const row = (state.db as unknown as { query: Function }).query('SELECT * FROM notification WHERE session_id = ? ORDER BY id DESC').get(TASK) as { status: string; attempts: number };
+    expect(row.status).toBe('queued');
+    expect(row.attempts).toBe(3);
   }, 20_000);
 
   test('steer et file d attente en échec : rien ne crashe, journal au prochain kick', async () => {
@@ -103,5 +114,8 @@ describe('notifications critères : structurées et fiables', () => {
     await verifier.notifyMainAgent(TASK, [{ ref: 'AC-03', op: 'approve', line: 'AC-03 validé' }]);
     expect(calls.filter(c => c.path.endsWith('/prompt')).length).toBe(3);
     expect(calls.some(c => c.path.includes('message-queue'))).toBe(false);
+    // journal : échec final consigné (statut failed), reprise au prochain kick
+    const row = (state.db as unknown as { query: Function }).query('SELECT * FROM notification WHERE session_id = ? ORDER BY id DESC').get(TASK) as { status: string };
+    expect(row.status).toBe('failed');
   }, 20_000);
 });

@@ -3,11 +3,12 @@
  * 1. trouve le port d'OpenChamber, 2. start le polling, 3. start le serveur (UI + /api/fleet).
  */
 import { discoverOpenChamberPort } from './discover.mts';
-import { setBase, startPolling, pollOnce, baseOk } from './fleet.mts';
+import { setBase, startPolling, pollOnce, baseOk, currentFleet } from './fleet.mts';
 import { setBase as setCompanionBase } from './companion.mts';
 import { setBase as setDeliveryBase } from './delivery.mts';
 import { setBase as setPlanBase } from './plan.mts';
 import { setVerifierBase } from './verifier.mts';
+import { startIndexing } from './message-index.mts';
 import { ensureSupervisorSession, ensureSupervisorWorkspace, setBase as setSupervisorBase } from './supervisor.mts';
 import { startServer } from './server.mts';
 import { db } from './state.mts';
@@ -29,7 +30,14 @@ async function main() {
   // (pollOnce garde une flotte vide, la reconnexion est automatique au prochain tick)
   await pollOnce();
   console.log(`[superviseur] flotte initialisée : ${baseOk() ? 'OK' : 'instance injoignable (réessai auto)'} — db SQLite ouverte`);
+  // index local des messages : backfill des tâches vivantes, puis fenêtre
+  // glissante à chaque événement message.* (recherche pleine couverture)
+  startIndexing(fleetRows);
   startServer();
+}
+
+function fleetRows(): Array<{ id: string }> {
+  try { return currentFleet().rows.map(r => ({ id: r.id })).filter(r => r.id.startsWith('ses_')); } catch { return []; }
 }
 
 process.on('SIGINT', () => { try { db.close(); } finally { process.exit(0); } });

@@ -53,9 +53,11 @@ describe('vérificateur : application du JSON par le daemon', () => {
         { op: 'reject', ref: 'AC-02', submission_version: 1, reason: 'la sortie ne montre pas le bon fichier' },
       ],
     };
-    const applied = applyVerifierActions(TASK, json);
+    const applied = applyVerifierActions(TASK, json, '{"commit":"abc123","at":1}');
     expect(getCriterion(TASK, 'AC-01')!.status).toBe('validated');
     expect(getCriterion(TASK, 'AC-01')!.validated_at).toBeGreaterThan(0);
+    // version du travail examinée, enregistrée AVEC la validation (AC-17)
+    expect(getCriterion(TASK, 'AC-01')!.validated_work).toBe('{"commit":"abc123","at":1}');
     expect(getCriterion(TASK, 'AC-02')!.status).toBe('to_fix');
     expect(transitionLines(applied)).toEqual([
       'AC-01 validé : la sortie de test passe',
@@ -121,7 +123,7 @@ describe('vérificateur : application du JSON par le daemon', () => {
 
   test('update d\'un critère validé le repasse « à faire » (cohérence des états)', async () => {
     await pending('AC-04');
-    applyVerifierActions(TASK, { review: 'ok', actions: [{ op: 'approve', ref: 'AC-04' }] });
+    applyVerifierActions(TASK, { review: 'ok', actions: [{ op: 'approve', ref: 'AC-04', submission_version: 1 }] });
     expect(getCriterion(TASK, 'AC-04')!.status).toBe('validated');
     applyVerifierActions(TASK, { review: 'ok', actions: [{ op: 'update', ref: 'AC-04', title: 'Retitré' }] });
     expect(getCriterion(TASK, 'AC-04')!.status).toBe('todo');
@@ -132,5 +134,31 @@ describe('vérificateur : application du JSON par le daemon', () => {
     const actions = Array.from({ length: 40 }, (_, i) => ({ op: 'unknown', ref: `AC-${i}` }));
     const applied = applyVerifierActions(TASK, { review: 'ok', actions });
     expect(applied).toEqual([]);
+  });
+
+  test('P0 : submission_version absente : l action est REFUSÉE, jamais appliquée à la version courante', async () => {
+    addCriterion(TASK, { title: 'Sans version', methods: ['unit_test'] });
+    await pending('AC-05');   // version 1, à valider
+    // un jugement forgé sur une ANCIENNE phase, sans version : le daemon ne
+    // doit PAS le replier sur la version courante
+    const applied = applyVerifierActions(TASK, {
+      review: 'ok',
+      actions: [{ op: 'approve', ref: 'AC-05', comment: 'jugement sans version' }],
+    });
+    expect(applied).toEqual([]);
+    expect(getCriterion(TASK, 'AC-05')!.status).toBe('to_validate');
+    expect(getCriterion(TASK, 'AC-05')!.validated_at).toBeNull();
+    // même garde pour reject sans version
+    const applied2 = applyVerifierActions(TASK, {
+      review: 'issues',
+      actions: [{ op: 'reject', ref: 'AC-05', reason: 'sans version' }],
+    });
+    expect(applied2).toEqual([]);
+    expect(getCriterion(TASK, 'AC-05')!.status).toBe('to_validate');
+    // la compatibilité interne (fonction directe sans version) reste valable :
+    // c'est le chemin test, jamais le JSON du LLM
+    const internal = await import('../src/criteria.mts');
+    internal.approveCriterion(TASK, 'AC-05', 'compatibilité interne');
+    expect(getCriterion(TASK, 'AC-05')!.status).toBe('validated');
   });
 });

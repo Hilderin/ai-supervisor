@@ -19,6 +19,7 @@ import {
   CriteriaError, approveCriterion, addCriterion, criteriaCounts, criteriaSignature,
   listCriteria, proposeRemoval, rejectCriterion, statusLabel, updateCriterion,
 } from './criteria.mts';
+import { putNotification, setNotificationStatus } from './state.mts';
 import { takeVerifierKick } from './verifier-kicks.mts';
 import { toolActionLine } from './verdict.mts';
 
@@ -265,10 +266,11 @@ export interface CriterionRowLite {
   remove_proposed_at: number | null;
   remove_reason: string | null;
   validated_at: number | null;
+  validated_work: string | null;
 }
 
 /** Formatage de la liste des critères (jamais coupée : voir buildPhasePrompt). */
-function criteriaRowsText(rows: CriterionRowLite[], lastUpdateAt?: number): string {
+function criteriaRowsText(rows: CriterionRowLite[], lastUpdateAt?: number, currentCommit?: string | null): string {
   if (!rows.length) return '(aucun critère)';
   return rows.map(r => {
     const lines = [
@@ -286,6 +288,19 @@ function criteriaRowsText(rows: CriterionRowLite[], lastUpdateAt?: number): stri
     }
     if (r.status === 'validated' && r.validated_at != null && lastUpdateAt != null && r.validated_at < lastUpdateAt) {
       lines.push(`    VALIDÉ AVANT LES DERNIÈRES MODIFICATIONS : le travail a bougé depuis l'approbation : recoupe ou suggère une revalidation (update).`);
+    }
+    if (r.status === 'validated') {
+      // version du travail examinée (retour du propriétaire, 2026-11-08) :
+      // l'injection donne les FAITS (commit identique / différent / absent) ;
+      // le distinguo pertinent, non pertinent ou indéterminable est TON jugement
+      const work = workCommitOf(r.validated_work);
+      if (work.commit && currentCommit && work.commit === currentCommit) {
+        lines.push(`    VALIDÉ SUR L'ÉTAT ACTUEL DU TRAVAIL (commit ${work.commit.slice(0, 10)}) : toujours applicable, sauf changement non capté par git.`);
+      } else if (work.commit && currentCommit) {
+        lines.push(`    VALIDÉ SUR UN AUTRE ÉTAT DU TRAVAIL (commit ${work.commit.slice(0, 10)}, actuel ${currentCommit.slice(0, 10)}) : changement POTENTIELLEMENT pertinent : juge s'il touche ce critère (pertinent ou non pertinent) et dis-le en notes.`);
+      } else {
+        lines.push(`    VERSION DU TRAVAIL À LA VALIDATION : INDÉTERMINABLE${work.at ? ` (validé le ${new Date(work.at).toISOString()}, pas de commit disponible)` : ''} : recoupe avec la preuve elle-même si tu doutes.`);
+      }
     }
     return lines.filter(Boolean).join('\n');
   }).join('\n');
@@ -308,6 +323,34 @@ export interface PhasePromptInput {
   pending: number;
   excerpt: string;
   lastUpdateAt?: number;
+  /** commit courant du projet (version du travail) pour comparer aux validations */
+  currentCommit?: string | null;
+}
+
+/**
+ * Version du travail COURANTE : commit du dossier projet quand disponible
+ * (certaines tâches vivent hors git) + horodatage ; c'est la référence
+ * enregistrée avec chaque validation et comparée à l'injection suivante.
+ */
+export function currentWorkVersion(dir: string | undefined): { commit: string | null; at: number } {
+  let commit: string | null = null;
+  if (dir) {
+    try {
+      const out = Bun.spawnSync(['git', '-C', dir, 'rev-parse', 'HEAD'], { stdout: 'pipe', stderr: 'pipe' });
+      const hash = out.stdout.toString().trim();
+      if (out.exitCode === 0 && /^[0-9a-f]{40}$/.test(hash)) commit = hash;
+    } catch { /* pas git : indéterminable */ }
+  }
+  return { commit, at: Date.now() };
+}
+
+/** Commit d'une référence de travail enregistrée (JSON {commit?, at}), sinon null. */
+function workCommitOf(validatedWork: string | null): { commit: string | null; at: number | null } {
+  if (!validatedWork) return { commit: null, at: null };
+  try {
+    const parsed = JSON.parse(validatedWork) as { commit?: string | null; at?: number };
+    return { commit: parsed.commit ?? null, at: parsed.at ?? null };
+  } catch { return { commit: null, at: null }; }
 }
 
 export function buildPhasePrompt(p: PhasePromptInput): string {
@@ -315,11 +358,14 @@ export function buildPhasePrompt(p: PhasePromptInput): string {
     `Tâche : ${p.title}`,
     `Objectif actuel : ${p.objective || 'inconnu'}`,
     `Critères (${p.counts.validated}/${p.counts.total} validés) :`,
-    criteriaRowsText(p.rows, p.lastUpdateAt),
+    criteriaRowsText(p.rows, p.lastUpdateAt, p.currentCommit),
     p.pending ? `${p.pending} preuve(s) attend(ent) un jugement.` : 'Aucune preuve en attente de jugement.',
   ].join('\n\n');
   const tail = 'Consignes : juge les preuves « à valider » (recoupe avec les outils de lecture si nécessaire), propose les ajustements de la liste, surveille la cohérence. Réponds par le JSON seul.';
-  // l'extrait n'est là qu'en contexte : il cède la place à la liste, jamais l'inverse
+  // MAX_INJECT_CHARS n'est PAS une limite stricte : si l'objectif complet et
+  // la liste entière des critères dépassent déjà le budget, ils partent
+  // COMPLETS quand même (l'injection peut dépasser le budget, jamais tronquée)
+  // ; le budget ne borne QUE l'extrait de conversation, qui cède puis est omis
   const budget = MAX_INJECT_CHARS - head.length - tail.length;
   let excerptPart = '';
   if (budget > 200) {
@@ -371,7 +417,7 @@ function addRefOf(taskId: string): string {
   return rows[rows.length - 1]?.ref ?? 'AC-??';
 }
 
-export function applyVerifierActions(taskId: string, json: VerifierJson): AppliedTransition[] {
+export function applyVerifierActions(taskId: string, json: VerifierJson, workVersion?: string): AppliedTransition[] {
   const applied: AppliedTransition[] = [];
   const actions = Array.isArray(json.actions) ? json.actions.slice(0, MAX_ACTIONS) : [];
   for (const raw of actions) {
@@ -380,12 +426,26 @@ export function applyVerifierActions(taskId: string, json: VerifierJson): Applie
     const op = String(a.op ?? '').trim().toLowerCase();
     const ref = String(a.ref ?? '').trim();
     try {
-      if (op === 'approve') {
-        approveCriterion(taskId, ref, String(a.comment ?? ''), versionOf(a));
-        applied.push({ ref, op, line: actionLine('approve', ref, a) });
-      } else if (op === 'reject') {
-        rejectCriterion(taskId, ref, String(a.reason ?? ''), versionOf(a));
-        applied.push({ ref, op, line: actionLine('reject', ref, a) });
+      if (op === 'approve' || op === 'reject') {
+        // P0 (retour du propriétaire, 2026-11-08) : la version de soumission
+        // est OBLIGATOIRE dans le JSON du vérificateur. Sans elle, le repli
+        // `version ?? row.version` approuverait la version COURANTE depuis un
+        // jugement fait sur une ancienne soumission : le dernier trou de la
+        // garde anti-péremption. L'action est refusée et journalisée ; les
+        // fonctions internes (tests, appels daemon hors phase) gardent leur
+        // repli de compatibilité.
+        const v = versionOf(a);
+        if (v === undefined) {
+          logEvent(taskId, 'note', `vérificateur : ${op} ${ref} refusé (submission_version absente : action ignorée, le critère reste en l'état)`);
+          continue;
+        }
+        if (op === 'approve') {
+          approveCriterion(taskId, ref, String(a.comment ?? ''), v, workVersion);
+          applied.push({ ref, op, line: actionLine('approve', ref, a) });
+        } else {
+          rejectCriterion(taskId, ref, String(a.reason ?? ''), v);
+          applied.push({ ref, op, line: actionLine('reject', ref, a) });
+        }
       } else if (op === 'add') {
         const title = String(a.title ?? '').trim();
         addCriterion(taskId, { title, detail: String(a.detail ?? ''), methods: a.methods }, 'verifier');
@@ -425,17 +485,30 @@ export function applyVerifierActions(taskId: string, json: VerifierJson): Applie
  */
 /** Exportée pour verifierNotify.test.mts ; appelée par runPhase. */
 export async function notifyMainAgent(taskId: string, applied: AppliedTransition[]): Promise<void> {
-  const head = 'Ne réponds pas à ce message : applique les corrections nécessaires.';
-  const text = `[superviseur] Critères : ${transitionLines(applied)}. ${head}`;
+  const head = '[superviseur] Critères :';
+  const foot = 'Ne réponds pas à ce message : applique les corrections nécessaires.';
+  // lignes jointes par \n (retour du propriétaire : l'interpolation d'un
+  // tableau par des virgules donnait des instructions peu lisibles au LLM)
+  const text = [head, ...transitionLines(applied).map(l => `- ${l}`), foot].join('\n');
+  // journal durable : UN identifiant par notification, statut de livraison ;
+  // les reprises réutilisent la MÊME ligne, jamais de message en double
+  const notificationId = putNotification(taskId, text);
   for (let attempt = 1; attempt <= 3; attempt++) {
+    setNotificationStatus(notificationId, 'pending', attempt);
     const out = await jpost(`/api/session/${taskId}/prompt`, { text, delivery: 'steer' }, 8000);
-    if (out.ok) return;
+    if (out.ok) {
+      // 200 = steer ACCEPTÉ par l'instance ; le traitement par l'agent reste
+      // une hypothèse (pas d'accusé de réception) : le journal le documente
+      setNotificationStatus(notificationId, 'sent', attempt);
+      return;
+    }
     if (attempt < 3) await new Promise(r => setTimeout(r, attempt * 2000));
   }
   const queued = await queueFallback(taskId, text);
+  setNotificationStatus(notificationId, queued ? 'queued' : 'failed', 3);
   logEvent(taskId, 'note', queued
-    ? 'notification critères : steer échoué, mise dans la file d\'attente'
-    : 'notification critères : steer ET file d\'attente échoués (reprise au prochain kick)');
+    ? `notification critères #${notificationId} : steer échoué, mise dans la file d'attente`
+    : `notification critères #${notificationId} : steer ET file d'attente échoués (reprise au prochain kick)`);
 }
 
 async function queueFallback(taskId: string, text: string): Promise<boolean> {
@@ -480,6 +553,9 @@ async function runPhase(taskId: string, title: string, dir: string | undefined, 
     const counts = criteriaCounts(rows);
     const objective = (getTaskState(taskId) as { objective?: string } | null)?.objective ?? '';
     const excerpt = await conversationExcerpt(taskId);
+    // version du travail COURANTE : comparée aux validations à l'injection,
+    // enregistrée avec chaque approbation de cette phase
+    const work = currentWorkVersion(dir);
     const inject = buildPhasePrompt({
       title,
       objective,
@@ -488,6 +564,7 @@ async function runPhase(taskId: string, title: string, dir: string | undefined, 
       pending,
       excerpt,
       lastUpdateAt,
+      currentCommit: work.commit,
     });
 
     const verifierId = await ensureVerifier(taskId, s);
@@ -511,7 +588,7 @@ async function runPhase(taskId: string, title: string, dir: string | undefined, 
       }
     }
 
-    const applied = applyVerifierActions(taskId, json);
+    const applied = applyVerifierActions(taskId, json, JSON.stringify(work));
     const notes = String(json.notes ?? '').trim().slice(0, 300);
     s.lastRunAt = Date.now();
     s.failures = 0;

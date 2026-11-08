@@ -2,12 +2,14 @@
  * SuperviseurVerifier
  * -----------------------------------------------------------------------------
  * Plugin OpenCode v2 chargé globalement : expose au sous-agent vérificateur
- * trois outils de lecture bornée de la conversation de l'agent principal de la
+ * cinq outils de lecture bornée de la conversation de l'agent principal de la
  * tâche qu'il vérifie :
  *
- *   - `verifier_messages` : liste des messages (60 max), textes tronqués
- *   - `verifier_tools`    : tool calls récents (40 max) : nom, statut, entrée résumée
- *   - `verifier_search`   : recherche d'un texte (30 matches max)
+ *   - `verifier_messages`    : liste des messages (60 max), textes tronqués
+ *   - `verifier_tools`       : tool calls récents (40 max), callId stable
+ *   - `verifier_tool_result` : entrée/sortie d'un call, sortie par plages
+ *   - `verifier_artifact`    : artefact de preuve ; image TRANSMISE (vue)
+ *   - `verifier_search`      : recherche sur l'index local puis le listing
  *
  * Le vérificateur n'a AUCUN tool de gestion des critères : il répond par un
  * JSON que le daemon applique. Les appels partent vers le daemon
@@ -93,16 +95,19 @@ export default {
         description: [
           "Inspecte UN tool call précis de l'agent principal avec son entrée et sa sortie COMPLÈTES : la façon de vérifier une preuve « sortie de test » plutôt que sa description.",
           ...LIMITS,
-          "Entrée : {index} (position dans la liste récente, du plus récent au plus ancien) ou {tool} + {query?} (premier call du nom donné dont l'entrée contient la requête) ; {since?}.",
-          "Résultat : {toolCall: {at, name, status, input, output, outputTruncated?, detail}, count}.",
+          "Entrée : {callId} (identifiant STABLE renvoyé par verifier_tools, à privilégier) ou {index} ou {tool} + {query?} ; la sortie se lit PAR PAGES : {offset?, length?} (page par défaut 2000, max 10000) : un résumé en fin de sortie volumineuse se lit en pages successives, pas de plafond fixe.",
+          "Résultat : {toolCall: {callId, at, name, status, input, output, total, offset, truncated?, nextOffset?, detail}, count}.",
         ].join(" "),
         options: { codemode: false, permission: "verifier_tool_result" },
         input: {
           type: "object",
           properties: {
-            index: { type: "number", description: "Position dans la liste des tool calls récents (0 = le plus récent)." },
+            callId: { type: "string", description: "Identifiant stable du tool call (messageId:partIndex), renvoyé par verifier_tools." },
+            index: { type: "number", description: "Position dans la liste des tool calls récents (0 = le plus récent), repli sans callId." },
             tool: { type: "string", description: "Nom du tool cherché (shell, read, criteria_add...) ; avec query, premier call correspondant." },
             query: { type: "string", description: "Texte que l'entrée du tool call doit contenir." },
+            offset: { type: "number", description: "Décalage de lecture dans la sortie (0 par défaut) ; passe nextOffset pour la page suivante." },
+            length: { type: "number", description: "Longueur de la page de sortie (défaut 2000, max 10000)." },
             since: { type: "number", description: "Epoch ms, optionnel." },
           },
           additionalProperties: false,
@@ -113,8 +118,9 @@ export default {
       editor.add({
         name: "verifier_artifact",
         description: [
-          "Lit un artefact référencé par une preuve : extrait de code (avec start_line/line_count), fichier texte ou document, borné au dossier du projet du parent (chemin relatif, sans sortie ni lien symbolique).",
-          "Une image n'en donne pas le rendu visuel (le tool le dit) : si le visuel porte le critère, exige une preuve textuelle complémentaire (sortie de test, texte).",
+          "Lit un artefact référencé par une preuve, borné au dossier du projet du parent (chemin relatif, sans sortie ni lien symbolique).",
+          "Une IMAGE est TRANSMISE : le fichier réel est attaché à ta session et tu le VOIS (rendu visuel) : juge l'alignement, l'état affiché, le texte lisible directement, sans la description de l'agent.",
+          "Un extrait de code se lit avec start_line/line_count ; un texte ou document en entier (borné).",
           ...LIMITS,
           "Entrée : {path, start_line?, line_count?}.",
         ].join(" "),
@@ -129,7 +135,23 @@ export default {
           required: ["path"],
           additionalProperties: false,
         },
-        async execute(input, context) { return call("verifier_artifact", input, context); },
+        async execute(input, context) {
+          const data = await call("verifier_artifact", input, context);
+          // le daemon renvoie {ok, image: {path, mime, ...}} pour une image de
+          // preuve : le fichier VALIDÉ est attaché à la session (le modèle le
+          // voit), jamais une description générée par l'agent principal.
+          const img = data?.metadata?.image;
+          if (data?.metadata?.ok && img?.path && img?.mime) {
+            return {
+              content: [
+                { type: "file", uri: `file://${img.path}`, mime: img.mime, name: img.name ?? null },
+                { type: "text", text: `Preuve image « ${input.path} » : tu la vois ci-dessus. Juge le rendu visuel directement.` },
+              ],
+              metadata: data.metadata,
+            };
+          }
+          return data;
+        },
       });
 
       editor.add({
@@ -137,7 +159,7 @@ export default {
         description: [
           "Cherche un texte dans la conversation de l'agent principal (insensible à la casse) : dans les messages ET dans les entrées des tool calls.",
           ...LIMITS,
-          "L'historique couvert est l'union des deux extrémités du listing (l'API ignore offset et curseurs) ; la recherche serveur d'OpenChamber est désactivée sur cette instance.",
+          "La recherche interroge d'abord l'INDEX LOCAL alimenté par le daemon (pleine couverture de ce qui a coulé pendant sa vie, y compris le centre d'une longue conversation que le listing ne remonte plus : l'API ignore offset/curseurs et refuse limit > 200) puis complete avec le listing live ; la réponse porte indexed (taille de l'index) : coverage rapportée honnêtement.",
           "Entrée : {query (500 caractères max), since?}. Chaque match : {id, type, at, field (message|tool_input), tool?, excerpt}.",
         ].join(" "),
         options: { codemode: false, permission: "verifier_search" },

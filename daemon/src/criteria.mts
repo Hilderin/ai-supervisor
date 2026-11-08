@@ -63,6 +63,8 @@ export interface CriterionRow {
   /** version du contenu jugé (preuve ou contenu) : l'approbation vise une version précise */
   version: number;
   validated_at: number | null;
+  /** version du travail examiné à l'approbation : JSON {commit?, at} */
+  validated_work: string | null;
   /** proposition de retrait du vérificateur (jamais une suppression physique) */
   remove_proposed_at: number | null;
   remove_reason: string | null;
@@ -168,7 +170,7 @@ interface RawCriterion {
   id: number; task_id: string; ref: string; title: string;
   detail: string | null; methods: string; status: string; evidence: string | null;
   review: string | null; review_at: number | null; created_at: number; updated_at: number;
-  version: number | null; validated_at: number | null;
+  version: number | null; validated_at: number | null; validated_work: string | null;
   remove_proposed_at: number | null; remove_reason: string | null; removed_at: number | null;
 }
 
@@ -252,7 +254,12 @@ export function addCriterion(taskId: string, p: { title: string; detail?: string
   const title = String(p.title ?? '').trim();
   if (!title) throw new CriteriaError('invalid', 'titre requis');
   const existing = listCriteria(taskId);
-  if (existing.length >= MAX_CRITERIA) throw new CriteriaError('limit', `plafond de ${MAX_CRITERIA} critères par tâche atteint`);
+  // plafond anti-explosion : il porte sur le travail NON validé (todo,
+  // à valider, à corriger) ; les critères validés sont de l'histoire et
+  // n'empêchent pas d'ajouter de nouveaux critères (tâche de supervision
+  // longue : les instructions successives s'accumulent)
+  const pending = existing.filter(r => r.status !== 'validated').length;
+  if (pending >= MAX_CRITERIA) throw new CriteriaError('limit', `plafond de ${MAX_CRITERIA} critères non validés atteint`);
   const methods = parseMethods(p.methods) ?? [];
   const ref = nextRef(taskId);
   const at = Date.now();
@@ -294,7 +301,7 @@ export function updateCriterion(taskId: string, ref: string, patch: { title?: st
   db.query(`UPDATE criteria SET
       title = COALESCE(?, title), detail = COALESCE(?, detail), methods = COALESCE(?, methods),
       status = ?, evidence = NULL, review = NULL, review_at = NULL, validated_at = NULL,
-      remove_proposed_at = NULL, remove_reason = NULL,
+      validated_work = NULL, remove_proposed_at = NULL, remove_reason = NULL,
       version = version + 1, updated_at = ?
       WHERE task_id = ? AND ref = ?`)
     .run(
@@ -346,14 +353,18 @@ export async function submitEvidence(taskId: string, ref: string, rawEvidence: u
  * est ignoré (`stale_judgment`) : jamais une approbation d'un état devenu
  * autre. `version` absent : repli sur la version courante (compatibilité).
  */
-export function approveCriterion(taskId: string, ref: string, comment: string, version?: number): CriterionRow {
+export function approveCriterion(taskId: string, ref: string, comment: string, version?: number, workVersion?: string): CriterionRow {
   const row = getCriterion(taskId, ref);
   if (!row) throw new CriteriaError('unknown_ref', `critère inconnu : ${ref}`);
   const v = version ?? row.version;
   const at = Date.now();
-  const changes = db.query(`UPDATE criteria SET status = 'validated', review = ?, review_at = ?, validated_at = ?, updated_at = ?
+  // workVersion : référence de la version du travail EXAMINÉE (commit du
+  // projet quand disponible + activité) : l'injection la comparera au commit
+  // courant pour distinguer toujours applicable / changement potentiellement
+  // pertinent / indéterminable
+  const changes = db.query(`UPDATE criteria SET status = 'validated', review = ?, review_at = ?, validated_at = ?, validated_work = ?, updated_at = ?
             WHERE task_id = ? AND ref = ? AND status = 'to_validate' AND version = ?`)
-    .run(String(comment ?? '').trim().slice(0, 500) || null, at, at, at, taskId, row.ref, v).changes;
+    .run(String(comment ?? '').trim().slice(0, 500) || null, at, at, workVersion ?? null, at, taskId, row.ref, v).changes;
   if (!changes) {
     if (row.status !== 'to_validate') {
       throw new CriteriaError('invalid_transition', `approbation impossible : ${row.ref} est « ${statusLabel(row.status)} » (attendu : à valider)`);

@@ -95,11 +95,15 @@ Règles dures :
    réveillent le vérificateur pour une revalidation de la liste.
 4. **Refs jamais réattribuées** : un compteur par tâche (`task_state.criteria_seq`)
    donne le prochain numéro ; un retrait ne libère pas son numéro.
-5. **Approche et rejet sont versionnés et atomiques** : l'approbation vise la
-   `submission_version` du critère telle que le vérificateur l'a vue ;
+5. **Approche et rejet sont versionnés et OBLIGATOIREMENT versionnés** : le
+   JSON du vérificateur doit porter la `submission_version` vue par le
+   vérificateur ; SANS version, l'action est refusée et journalisée (le daemon
+   ne replie plus sur la version courante : une réponse produite depuis une
+   ancienne soumission ne doit jamais s'appliquer à une nouvelle). Le repli
+   `version ?? courante` n'existe que dans les fonctions internes (appels
+   daemon hors phase, tests). L'application reste un
    `UPDATE ... WHERE status='to_validate' AND version = ?` ; un jugement sur
-   une version périmée (l'agent a soumis une preuve ou modifié le critère
-   pendant la phase) est ignoré (`stale_judgment`), jamais appliqué.
+   une version périmée est ignoré (`stale_judgment`), jamais appliqué.
 6. **Retrait** : `criteria_remove` (agent) est une SUPPRESSION DOUCE
    (`removed_at`, la ligne reste consultable : un critère retiré sert à
    comprendre une régression passée) ; le vérificateur ne supprime jamais
@@ -129,7 +133,9 @@ pas côté agent.
 | `criteria_list` | `{include_removed?}` (lecture) | renvoie la liste complète avec états, versions, preuves, propositions et commentaires ; ne déclenche rien |
 
 Gardes communs : `title` non vide (200 car.), `detail` (2000 car.), `ref`
-inconnu → erreur `unknown_ref` ; plus de 12 critères par tâche → `limit` ;
+inconnu → erreur `unknown_ref` ; plus de 12 critères NON validés à la fois →
+`limit` (les validés sont de l'histoire : une tâche de supervision longue
+accumule les instructions, ils ne bloquent pas les ajouts) ;
 méthodes inconnues → `invalid_method`. Chaque tool répond `{ok, criteria}` (la
 liste après application) pour que l'agent reste aligné sans relecture.
 
@@ -167,9 +173,9 @@ dans le frontmatter de l'agent).
 | --- | --- |
 | `verifier_messages` | liste des messages du parent (`limit` 60 max), textes tronqués ; lecture du texte racine (`m.text`, leçon du prompt humain) |
 | `verifier_tools` | liste des tool calls récents (`limit` 40 max) : nom, statut, entrée résumée |
-| `verifier_tool_result` | UN tool call précis avec entrée et sortie COMPLÈTES (bornées) : `{index}` ou `{tool, query?}` ; c'est ce qui permet de juger la preuve elle-même, pas sa description |
-| `verifier_artifact` | lit un artefact de preuve dans le dossier du projet du parent (extrait de code avec lignes, texte, document) ; une image n'en donne pas le rendu visuel : le tool le dit et une preuve textuelle complémentaire est exigée |
-| `verifier_search` | recherche (30 matches max) dans les messages ET les entrées de tool calls, sur l'historique couvert (union des deux extrémités du listing : l'API ignore offset/curseurs, vérifié sur l'instance ; la recherche serveur d'OpenChamber est désactivée) |
+| `verifier_tool_result` | UN tool call précis avec entrée et sortie COMPLÈTES : `{callId}` (identifiant stable `messageId:partIndex` renvoyé par verifier_tools) ou `{index}`/`{tool, query?}` ; la sortie se lit PAR PAGES (`offset`/`length`, page par défaut 2000, max 10000, réponse porte `total`/`nextOffset`) : plus de plafond fixe, un résumé en fin de sortie volumineuse est lisible |
+| `verifier_artifact` | lit un artefact de preuve dans le dossier du projet du parent (extrait de code avec lignes, texte, document) ; une IMAGE EST TRANSMISE : le chemin absolu validé (mêmes gardes) est renvoyé et le plugin attache le fichier réel à la session (Tool.FileContent) : le vérificateur VOIT la capture, juge le rendu visuel directement |
+| `verifier_search` | recherche (30 matches max) d'abord sur l'INDEX LOCAL des messages alimenté par le daemon (table `message_index`, fenêtre glissante à chaque événement `message.*`, upsert dédupliqué : couvre le centre d'une longue conversation que le listing ne remonte plus, l'API ignorant offset/curseurs et refusant `limit > 200`), puis le listing live en filet ; la réponse porte `indexed` (taille de l'index) : couverture rapportée honnêtement |
 
 Chaque lecture porte un horodatage de fenêtre optionnel (`since`) pour ne pas
 relire toute la conversation à chaque phase.
@@ -204,7 +210,11 @@ du daemon ni un extrait tronqué), liste des critères avec états, VERSION de
 contenu de chacun, preuves soumises (texte, coupes propres), derniers
 commentaires, propositions de retrait en cours, marqueur « VALIDÉ AVANT LES
 DERNIÈRES MODIFICATIONS » (`validated_at` antérieur à la dernière activité de
-la tâche), extrait de conversation récent, et le rappel du contrat. La
+la tâche), VERSION DU TRAVAIL EXAMINÉE pour chaque critère validé (commit
+enregistré avec l'approbation, comparé au commit courant : identique =
+toujours applicable ; différent = changement potentiellement pertinent, le
+distingu pertinent/non pertinent est le jugement du vérificateur ; absent =
+indéterminable), extrait de conversation récent, et le rappel du contrat. La
 composition est `buildPhasePrompt` (testée) : l'objectif et la liste entière
 (y compris la dernière ref en attente) ne sont JAMAIS coupés ; l'extrait de
 conversation est la partie élastique (coupe propre, puis omission explicite si
@@ -232,7 +242,8 @@ Règles du contrat :
   a changé pendant la phase) est ignoré et journalisé, jamais appliqué ; un ref
   invalide est ignoré et journalisé (le daemon garde la main) ;
 - `reject` exige `reason` (l'explication devient `review` du critère et part
-  dans la notification) ; `approve` peut porter un `comment` court ;
+  dans la notification) ; `approve` peut porter un `comment` court ; les deux
+  exigent `submission_version` : sans elle, l'action est refusée (P0) ;
 - `add` exige `title` et au moins une méthode ; `update` exige au moins un
   champ de contenu ; chaque suggestion peut porter une `reason` ;
 - `remove` n'est PAS une suppression : une proposition persistée (raison
@@ -256,20 +267,29 @@ Règles du contrat :
 - **Notification à l'agent principal** : après chaque phase de vérificateur qui
   a produit au moins une transition, le daemon envoie UN message à la session
   de la tâche (`POST /api/session/:id/prompt`, `delivery: 'steer'`) qui liste
-  chaque transition appliquée, structurée : la justification d'une approbation
-  (`comment`) est transmise, les ajouts portent titre, détail et méthodes, les
-  propositions de retrait expliquent comment confirmer ou refuser :
+  chaque transition appliquée, structurée (lignes jointes par `\n`, jamais par
+  des virgules) : la justification d'une approbation (`comment`) est transmise,
+  les ajouts portent titre, détail et méthodes, les propositions de retrait
+  expliquent comment confirmer ou refuser :
 
-  > [superviseur] Critères : AC-02 validé : la sortie de test passe. AC-03 à
-  > corriger : la capture ne montre pas l'état final. AC-05 ajouté par le
-  > vérificateur : « aucune régression du build UI » : le plan touche l'UI
-  > sans critère associé. Ne réponds pas à ce message : applique les
-  > corrections nécessaires.
+  > [superviseur] Critères :
+  > - AC-02 validé : la sortie de test passe
+  > - AC-03 à corriger : la capture ne montre pas l'état final
+  > - AC-05 ajouté par le vérificateur : « aucune régression du build UI » : le
+  >   plan touche l'UI sans critère associé
+  > Ne réponds pas à ce message : applique les corrections nécessaires.
 
   Un message par phase (jamais un prompt par transition) ; l'agent initie
   ensuite lui-même ses `criteria_*`. Livraison fiable : 3 essais de steer, puis
   repli sur la file d'attente OpenChamber (`sendConfig` repris de la session) ;
   si les deux échouent, journal et reprise au prochain kick.
+- **Journal durable des notifications** : chaque notification est écrite dans
+  la table `notification` avec un identifiant, le texte exact, le nombre
+  d'essais et un STATUT DE LIVRAISON (`pending` → `sent` steer accepté /
+  `queued` repli file d'attente / `failed`) ; les reprises réutilisent la
+  MÊME ligne (pas de doublon). Un steer accepté (200) ne prouve pas que l'agent
+  a TRAITÉ le message (pas d'accusé de réception) : le journal documente la
+  livraison, pas le traitement.
 - Les transitions initiées par l'agent lui-même (`criteria_to_validate`,
   add/remove/update via tools) ne génèrent pas de notification à lui-même.
 - **Rappel critères (analyste)** : un verdict `done` avec un trou de critères

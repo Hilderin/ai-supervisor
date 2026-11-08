@@ -126,6 +126,7 @@ CREATE TABLE IF NOT EXISTS criteria (
   -- modifié ; l'approbation vise une version précise, périmée elle est ignorée
   version INTEGER NOT NULL DEFAULT 0,
   validated_at INTEGER,              -- horodatage de l'approbation (staleness)
+  validated_work TEXT,               -- version du travail examiné : JSON {commit?, at}
   -- proposition de retrait (jamais une suppression physique par le vérificateur)
   remove_proposed_at INTEGER,
   remove_reason TEXT,
@@ -144,6 +145,34 @@ CREATE TABLE IF NOT EXISTS verifier_map (
   signature TEXT,
   created_at INTEGER NOT NULL
 );
+
+-- journal durable des notifications critères : identifiant, statut de
+-- livraison (pending, sent, queued, failed) et nombre d essais ; les reprises
+-- réutilisent la même ligne, jamais de message en double.
+CREATE TABLE IF NOT EXISTS notification (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id TEXT NOT NULL,
+  text TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  attempts INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  delivered_at INTEGER
+);
+
+-- index local des messages : l API OpenChamber ignore offset et curseurs, ses
+-- deux extrémités laissent un angle mort central sur une longue conversation ;
+-- le daemon alimente cet index progressivement (upsert dédupliqué par id) et
+-- la recherche du vérificateur l interroge en pleine couverture.
+CREATE TABLE IF NOT EXISTS message_index (
+  msg_id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  at INTEGER NOT NULL,
+  type TEXT NOT NULL,
+  text TEXT,
+  tool_calls TEXT,
+  indexed_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS message_index_session ON message_index(session_id, at);
 `);
 try { db.exec('ALTER TABLE task_verdict ADD COLUMN note TEXT'); } catch { /* colonne déjà présente */ }
 try { db.exec('ALTER TABLE companion_map ADD COLUMN version INTEGER'); } catch { /* colonne déjà présente */ }
@@ -160,6 +189,7 @@ try { db.exec('ALTER TABLE task_state ADD COLUMN criteria_seq INTEGER'); } catch
 // colonnes critères (version de soumission, staleness, proposition de retrait, suppression douce)
 try { db.exec('ALTER TABLE criteria ADD COLUMN version INTEGER NOT NULL DEFAULT 0'); } catch { /* colonne déjà présente */ }
 try { db.exec('ALTER TABLE criteria ADD COLUMN validated_at INTEGER'); } catch { /* colonne déjà présente */ }
+try { db.exec('ALTER TABLE criteria ADD COLUMN validated_work TEXT'); } catch { /* colonne déjà présente */ }
 try { db.exec('ALTER TABLE criteria ADD COLUMN remove_proposed_at INTEGER'); } catch { /* colonne déjà présente */ }
 try { db.exec('ALTER TABLE criteria ADD COLUMN remove_reason TEXT'); } catch { /* colonne déjà présente */ }
 try { db.exec('ALTER TABLE criteria ADD COLUMN removed_at INTEGER'); } catch { /* colonne déjà présente */ }
@@ -334,6 +364,59 @@ export function setVerifierSignature(parentSid: string, signature: string) {
 }
 export function deleteVerifier(parentSid: string) {
   db.query('DELETE FROM verifier_map WHERE parent_session_id = ?').run(parentSid);
+}
+
+/* --- Journal durable des notifications (id + statut de livraison) --- */
+
+/**
+ * Chaque notification critères à une tâche est journalisée avec un
+ * identifiant et un statut : pending (créée), sent (steer accepté), queued
+ * (repli file d'attente), failed (steer ET file en échec). Les reprises
+ * réutilisent la MÊME ligne : pas de doublon.
+ */
+export function putNotification(sessionId: string, text: string): number {
+  const out = db.query('INSERT INTO notification (session_id, text, status, attempts, created_at) VALUES (?,?,0,1,?)')
+    .run(sessionId, text, Date.now());
+  return Number(out.lastInsertRowid);
+}
+
+export function setNotificationStatus(id: number, status: 'pending' | 'sent' | 'queued' | 'failed', attempts?: number) {
+  db.query('UPDATE notification SET status = ?, attempts = COALESCE(?, attempts), delivered_at = ? WHERE id = ?')
+    .run(status, attempts ?? null, status === 'sent' || status === 'queued' ? Date.now() : null, id);
+}
+
+/* --- Index local des messages (recherche pleine couverture) --- */
+
+/**
+ * L'API OpenChamber ignore offset et curseurs : ses 200 premières + 200
+ * dernières messages laissent un angle mort central sur une longue
+ * conversation. Le daemon alimente donc un index local, progressivement
+ * (fenêtre glissante des deux extrémités, upsert dédupliqué par id) : la
+ * recherche du vérificateur interroge CET index, qui ne rétrécit jamais.
+ */
+export interface IndexedMessage {
+  msg_id: string; session_id: string; at: number; type: string;
+  text: string; tool_calls: string | null; indexed_at: number;
+}
+
+export function upsertIndexedMessages(sessionId: string, rows: Array<{
+  msgId: string; at: number; type: string; text: string; toolInputs: string | null;
+}>) {
+  for (const r of rows) {
+    db.query(`INSERT INTO message_index (msg_id, session_id, at, type, text, tool_calls, indexed_at)
+              VALUES (?,?,?,?,?,?,?)
+              ON CONFLICT(msg_id) DO UPDATE SET at=excluded.at, type=excluded.type,
+                text=excluded.text, tool_calls=excluded.tool_calls, indexed_at=excluded.indexed_at`)
+      .run(r.msgId, sessionId, r.at, r.type, r.text, r.toolInputs, Date.now());
+  }
+}
+
+export function indexedCount(sessionId: string): number {
+  return (db.query('SELECT COUNT(*) AS n FROM message_index WHERE session_id = ?').get(sessionId) as { n: number }).n;
+}
+
+export function searchIndexedMessages(sessionId: string, query: string, limit: number): Array<IndexedMessage> {
+  return db.query(`SELECT * FROM message_index WHERE session_id = ? ORDER BY at ASC`).all(sessionId) as IndexedMessage[];
 }
 
 export function logEvent(sessionId: string, kind: string, text: string, meta?: object) {

@@ -79,6 +79,8 @@ export interface Criterion {
   /** version du contenu jugé (l'approbation vise cette version) */
   version?: number;
   validated_at?: number | null;
+  /** version du travail examiné à l'approbation : JSON {commit?, at} */
+  validated_work?: string | null;
   /** proposition de retrait du vérificateur (jamais une suppression physique) */
   remove_proposed_at?: number | null;
   remove_reason?: string | null;
