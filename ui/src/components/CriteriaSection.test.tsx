@@ -63,6 +63,19 @@ describe('CriterionRow', () => {
     expect(html).toContain('daemon/src/plan.mts:190+20');
     expect(html).toContain('À valider');
   });
+
+  test('la capture de preuve est un bouton d’agrandissement nommé par son critère', () => {
+    const html = renderToStaticMarkup(createElement(CriterionRow, { sessionId: 's1', criterion: rejected }));
+    expect(html).toContain('data-testid="evidence-thumb"');
+    expect(html).toContain('aria-label="Agrandir la capture de preuve AC-02"');
+    expect(html).toContain('cursor-zoom-in');
+    expect(html).toContain('src="/api/fleet/asset?sessionId=s1&amp;path=capture.png"');
+  });
+
+  test('une preuve sans image n’offre pas de miniature', () => {
+    const html = renderToStaticMarkup(createElement(CriterionRow, { sessionId: 's1', criterion: validated }));
+    expect(html).not.toContain('data-testid="evidence-thumb"');
+  });
 });
 
 describe('CriteriaSection (en-tête)', () => {

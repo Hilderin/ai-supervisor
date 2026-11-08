@@ -1,0 +1,54 @@
+diff --git a/ui/src/components/CardStateIcon.tsx b/ui/src/components/CardStateIcon.tsx
+index ef2ce04..0e50a2c 100644
+--- a/ui/src/components/CardStateIcon.tsx
++++ b/ui/src/components/CardStateIcon.tsx
+@@ -37,5 +37,20 @@ export function CardStateIcon({ state }: { state: CardState }) {
+       </span>
+     );
+   }
+-  return <span aria-hidden="true" className="h-[10px] w-[10px] shrink-0 rounded-full bg-green ring-2 ring-green/25" />;
++  // « fini, à valider » : plus de pastille verte (elle laissait croire que tout
++  // était accepté, retour du propriétaire). Étoile à cinq branches, violet doux :
++  // accueillante sans être chargée, distincte du vert (acquis) et du orange
++  // (question en attente). Étoile charnue : à 10 px, une étoile fine (quatre
++  // branches, ou cinq branches trop maigres) s'efface en barre pâle ; constaté
++  // au rendu réel. Même empreinte que le sablier, aucun décalage du titre.
++  return (
++    <span aria-hidden="true" className="flex h-[10px] w-[10px] shrink-0 items-center justify-center text-review">
++      <svg viewBox="0 0 10 10" className="h-[10px] w-[10px]" aria-hidden="true">
++        <path
++          d="M5 0.2 6.59 2.82 9.57 3.52 7.57 5.83 7.82 8.88 5 7.7 2.18 8.88 2.43 5.83 0.43 3.52 3.41 2.82Z"
++          fill="currentColor"
++        />
++      </svg>
++    </span>
++  );
+ }
+diff --git a/ui/src/index.css b/ui/src/index.css
+index 9e9997b..5dabf84 100644
+--- a/ui/src/index.css
++++ b/ui/src/index.css
+@@ -17,6 +17,9 @@
+   --color-orange: #d97a2b;
+   --color-orange-soft: #faeadf;
+   --color-amber: #d19a2f;
++  /* Violet doux du statut « fini, à valider » : ni le orange des questions,
++     ni le vert de l'accepté. */
++  --color-review: #6b52c9;
+   --color-danger: #d95f5f;
+   --color-wait: #fffaf3;
+   --color-wait-border: #eec89a;
+
+# --- SessionCard.test.tsx : seul bloc livré par cette tâche (lignes 229-239) ---
+# Le fichier est partagé avec le chantier « Preuves image », dont les blocs
+# (gabarit des barres, allègement de la carte, question orange) sont exclus de
+# cette livraison. Le bloc ci-dessous est le seul remplacé par cette tâche
+# (avant : test du sablier ambre ; après : test de l'étoile violette) :
+#
+#   - test("l'icône de « fini, à valider » est un sablier ambre, à la même place")
+#   - expect(html).toContain('text-amber')
+#   - expect(html).toContain('M2 1.4h6L5.3 5l2.7 3.6H2L4.7 5 2 1.4Z')
+#   + test("l'icône de « fini, à valider » est une étoile violette, à la même place")
+#   + expect(html).toContain('text-review')
+#   + expect(html).not.toContain('text-amber')
+#   + expect(html).toContain('M5 0.2 6.59 2.82 9.57 3.52 7.57 5.83 7.82 8.88 5 7.7 2.18 8.88 2.43 5.83 0.43 3.52 3.41 2.82Z')

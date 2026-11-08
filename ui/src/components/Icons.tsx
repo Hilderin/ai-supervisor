@@ -151,6 +151,22 @@ export function ChevronIcon() {
 }
 
 /**
+ * Pastille « ? » orange : une question attend le propriétaire (carte et détail).
+ * Remplace la main ✋, moins lisible et hors du langage visuel de la flotte.
+ */
+export function QuestionIcon({ size = 14 }: { size?: number }) {
+  return (
+    <span
+      aria-hidden="true"
+      className="inline-flex shrink-0 items-center justify-center rounded-full bg-orange align-[-1px] font-bold leading-none text-white"
+      style={{ width: size, height: size, fontSize: Math.round(size * 0.72) }}
+    >
+      ?
+    </span>
+  );
+}
+
+/**
  * Icônes de la ligne d'activité. Même langage qu'OpenChamber
  * (`toolPresentation.tsx` de son UI) : trait fin, 14 px, un pictogramme par
  * type (cerveau, crayon, fichier, loupe, terminal). Les composants d'OpenChamber

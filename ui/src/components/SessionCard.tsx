@@ -10,8 +10,7 @@ import type { FleetRow } from '../types';
 import { ActivityLine } from './ActivityLine';
 import { CardStateIcon } from './CardStateIcon';
 import { CriteriaPopover } from './CriteriaPopover';
-import { DeliveryBlock } from './DeliveryBlock';
-import { CloseConversationIcon, OpenChamberIcon } from './Icons';
+import { CloseConversationIcon, OpenChamberIcon, QuestionIcon } from './Icons';
 import { PlanPopover } from './PlanPopover';
 
 interface Props {
@@ -132,7 +131,11 @@ export function SessionCard({ row, state, selected, flash, now, onOpen, onOpenCh
 
   let detail: ReactNode = null;
   if (state === 'waiting') {
-    detail = <span className="text-attend">✋ {questionText}</span>;
+    detail = (
+      <span className="text-attend">
+        <QuestionIcon /> {questionText}
+      </span>
+    );
   } else if (state === 'error' || state === 'retry') {
     const attempt = issue?.attempt ? ` · tentative ${issue.attempt}` : '';
     detail = (
@@ -144,21 +147,20 @@ export function SessionCard({ row, state, selected, flash, now, onOpen, onOpenCh
     detail = currentStep ? (
       <span>Étape : {currentStep.text}</span>
     ) : attend ? (
-      <span className="text-attend">✋ {attend}</span>
+      <span className="text-attend">
+        <QuestionIcon /> {attend}
+      </span>
     ) : null;
   } else if (state === 'idle' && attend) {
-    detail = <span className="text-attend">✋ {attend}</span>;
-  } else {
     detail = (
-      <DeliveryBlock
-        sessionId={row.id}
-        enabled
-        done={done}
-        compact
-        refreshKey={`${row.lastUpdateAt ?? 0}:${row.turnStartedAt ?? 0}`}
-      />
+      <span className="text-attend">
+        <QuestionIcon /> {attend}
+      </span>
     );
   }
+  // Au repos, pas de bloc de résultat dans la carte : l'aperçu de deux lignes
+  // n'apportait rien et poussait le résumé hors du peu de place disponible ;
+  // la livraison complète reste dans le détail (DeliveryBlock).
 
   return (
     <div
@@ -245,8 +247,11 @@ export function SessionCard({ row, state, selected, flash, now, onOpen, onOpenCh
         onClick={(e) => e.stopPropagation()}
       >
         <span
+          data-testid="card-state-label"
           className={cx(
-            'min-w-0 max-w-[112px] shrink truncate text-[11.5px] font-semibold',
+            // colonne à largeur fixe : le libellé ne pousse plus la barre ni la
+            // valeur de progression, qui restent alignées d'une carte à l'autre
+            'w-[112px] min-w-0 shrink truncate text-[11.5px] font-semibold',
             waiting ? 'text-attend' : 'text-muted',
           )}
         >
@@ -254,7 +259,10 @@ export function SessionCard({ row, state, selected, flash, now, onOpen, onOpenCh
         </span>
         <span
           data-testid="plan-progress-bar"
-          className="h-[5px] min-w-[48px] max-w-[160px] flex-1 overflow-hidden rounded-[3px] bg-track"
+          // largeur liée à la carte, jamais au contenu voisin : la fin de la
+          // barre, donc la colonne de la valeur, tombe au même x sur toutes les
+          // cartes d'une même flotte (clamp : le plafond existant de 160 px)
+          className="h-[5px] w-[clamp(110px,19%,160px)] min-w-[48px] shrink overflow-hidden rounded-[3px] bg-track"
         >
           {hasProgress ? (
             <span
@@ -275,12 +283,18 @@ export function SessionCard({ row, state, selected, flash, now, onOpen, onOpenCh
               total={row.plan?.total ?? 0}
             />
           ) : (
-            <span className="w-[34px] shrink-0 text-right text-[11.5px] font-[650] tabular-nums">
+            // même largeur que le compteur cliquable du plan (38 px), sinon la
+            // valeur glisse selon la présence d'un plan ; le retrait de 2 px
+            // aligne le texte sur celui du bouton (qui a un padding de 2 px)
+            <span
+              data-testid="card-progress-value"
+              className="w-[38px] shrink-0 pr-[2px] text-right text-[11.5px] font-[650] tabular-nums"
+            >
               {progressLabel}
             </span>
           )
         ) : (
-          <span className="w-[34px] shrink-0" />
+          <span className="w-[38px] shrink-0" />
         )}
         {critTotal > 0 ? (
           <>

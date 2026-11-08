@@ -1,8 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { fetchCriteria } from '../lib/api';
 import type { CardState } from '../lib/cardState';
 import { cx } from '../lib/cx';
+import { collectEvidenceImages, evidenceAssetUrl, galleryIndex } from '../lib/evidenceGallery';
 import type { CriteriaCounts, Criterion } from '../types';
+import { EvidenceViewer } from './EvidenceViewer';
 import { ChevronIcon } from './Icons';
 
 interface Props {
@@ -52,7 +54,16 @@ function StatusBadge({ status }: { status: Criterion['status'] }) {
   );
 }
 
-function Evidence({ sessionId, evidence }: { sessionId: string; evidence: Criterion['evidence'] }) {
+interface EvidenceProps {
+  sessionId: string;
+  evidence: Criterion['evidence'];
+  /** référence du critère, pour nommer le bouton d'agrandissement */
+  criterionRef: string;
+  /** ouvre la visionneuse sur cette preuve (rang dans le critère) */
+  onOpen?: (evidenceIndex: number) => void;
+}
+
+function Evidence({ sessionId, evidence, criterionRef, onOpen }: EvidenceProps) {
   if (!evidence.length) return null;
   return (
     <ul className="mt-[3px] flex flex-col gap-[3px]">
@@ -70,12 +81,21 @@ function Evidence({ sessionId, evidence }: { sessionId: string; evidence: Criter
           ) : null}
           <span className="whitespace-pre-wrap">{ev.text}</span>
           {ev.kind === 'screenshot' && ev.path ? (
-            <img
-              src={`/api/fleet/asset?sessionId=${encodeURIComponent(sessionId)}&path=${encodeURIComponent(ev.path)}`}
-              alt={ev.text.slice(0, 80)}
-              className="mt-[4px] max-h-[160px] rounded-[6px] border border-border"
-              loading="lazy"
-            />
+            <button
+              type="button"
+              data-testid="evidence-thumb"
+              aria-label={`Agrandir la capture de preuve ${criterionRef}`}
+              title="Agrandir la capture"
+              onClick={() => onOpen?.(i)}
+              className="mt-[4px] inline-flex cursor-zoom-in rounded-[6px] border border-border bg-transparent p-0 outline-none transition-colors hover:border-green/60 focus-visible:ring-2 focus-visible:ring-green/40"
+            >
+              <img
+                src={evidenceAssetUrl(sessionId, ev.path)}
+                alt={ev.text.slice(0, 80)}
+                className="max-h-[160px] rounded-[5px]"
+                loading="lazy"
+              />
+            </button>
           ) : null}
         </li>
       ))}
@@ -84,7 +104,17 @@ function Evidence({ sessionId, evidence }: { sessionId: string; evidence: Criter
 }
 
 /** Ligne d'un critère : ref, titre, badge d'état, preuve soumise, commentaire du vérificateur. */
-export function CriterionRow({ sessionId, criterion }: { sessionId: string; criterion: Criterion }) {  return (
+export function CriterionRow({
+  sessionId,
+  criterion,
+  onOpenEvidence,
+}: {
+  sessionId: string;
+  criterion: Criterion;
+  /** reçoit le rang de la preuve dans le critère ; absent, la miniature reste inerte */
+  onOpenEvidence?: (evidenceIndex: number) => void;
+}) {
+  return (
     <li
       data-testid="criterion-row"
       className={cx(
@@ -107,7 +137,12 @@ export function CriterionRow({ sessionId, criterion }: { sessionId: string; crit
       {criterion.methods.length ? (
         <div className="mt-[3px] text-[10.5px] text-placeholder">{criterion.methods.join(' · ')}</div>
       ) : null}
-      <Evidence sessionId={sessionId} evidence={criterion.evidence} />
+      <Evidence
+        sessionId={sessionId}
+        evidence={criterion.evidence}
+        criterionRef={criterion.ref}
+        onOpen={onOpenEvidence}
+      />
       {criterion.status === 'to_fix' && criterion.review ? (
         <div className="mt-[4px] text-[11.5px] leading-[1.4] text-attend">
           Vérificateur : preuve refusée : {criterion.review}
@@ -136,10 +171,17 @@ export function CriteriaSection({ sessionId, state, refreshKey, counts }: Props)
   const [open, setOpen] = useState(() => manualPref.get(sessionId) ?? criteriaDefaultOpen(state));
   const [rows, setRows] = useState<Criterion[]>([]);
   const [error, setError] = useState<string | null>(null);
+  /** rang dans le lot des captures de la tâche, null quand la visionneuse est fermée */
+  const [viewer, setViewer] = useState<number | null>(null);
 
   useEffect(() => {
     if (!manualPref.has(sessionId)) setOpen(criteriaDefaultOpen(state));
   }, [sessionId, state]);
+
+  // changer de tâche ferme la visionneuse : le lot n'est plus le même
+  useEffect(() => {
+    setViewer(null);
+  }, [sessionId]);
 
   useEffect(() => {
     const ctl = new AbortController();
@@ -163,6 +205,14 @@ export function CriteriaSection({ sessionId, state, refreshKey, counts }: Props)
 
   const validated = counts?.validated ?? rows.filter(r => r.status === 'validated').length;
   const total = counts?.total ?? rows.length;
+
+  // lot de captures de la tâche : la navigation traverse tous les critères
+  const images = useMemo(() => collectEvidenceImages(rows, sessionId), [rows, sessionId]);
+
+  const openEvidence = (criterionId: number, evidenceIndex: number) => {
+    const index = galleryIndex(images, criterionId, evidenceIndex);
+    if (index >= 0) setViewer(index);
+  };
 
   return (
     <div
@@ -208,9 +258,22 @@ export function CriteriaSection({ sessionId, state, refreshKey, counts }: Props)
       {open ? (
         <ul className="mt-[8px] flex max-h-[320px] flex-col gap-[6px] overflow-y-auto" data-testid="criteria-rows">
           {rows.map((c) => (
-            <CriterionRow key={c.id} sessionId={sessionId} criterion={c} />
+            <CriterionRow
+              key={c.id}
+              sessionId={sessionId}
+              criterion={c}
+              onOpenEvidence={(evidenceIndex) => openEvidence(c.id, evidenceIndex)}
+            />
           ))}
         </ul>
+      ) : null}
+      {viewer != null && images.length ? (
+        <EvidenceViewer
+          images={images}
+          index={viewer}
+          onIndex={setViewer}
+          onClose={() => setViewer(null)}
+        />
       ) : null}
     </div>
   );

@@ -79,4 +79,19 @@ describe('TaskInspector', () => {
     expect(html).not.toContain('bg-track');
     expect(html).toContain('pas de plan');
   });
+
+  test('la section des questions porte un titre et le « ? » orange, dans le gabarit des autres sections', () => {
+    const html = renderInspector(row({
+      pendingForms: [{
+        id: 'form_1',
+        title: 'Quelle suite ?',
+        fields: [{ key: 'q0', title: 'Quelle suite ?', type: 'string', description: 'Préciser la suite.' }],
+      }],
+    }));
+    expect(html).toContain('data-testid="question-section"');
+    expect(html).toContain('Question en attente');
+    expect(html).toContain('rounded-[9px] border border-wait-border bg-wait');
+    expect(html).toContain('rounded-full bg-orange');
+    expect(html).not.toContain('✋');
+  });
 });

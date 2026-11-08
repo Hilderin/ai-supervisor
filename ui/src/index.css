@@ -17,6 +17,9 @@
   --color-orange: #d97a2b;
   --color-orange-soft: #faeadf;
   --color-amber: #d19a2f;
+  /* Violet doux du statut « fini, à valider » : ni le orange des questions,
+     ni le vert de l'accepté. */
+  --color-review: #6b52c9;
   --color-danger: #d95f5f;
   --color-wait: #fffaf3;
   --color-wait-border: #eec89a;

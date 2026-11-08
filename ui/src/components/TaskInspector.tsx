@@ -14,7 +14,7 @@ import { Composer } from './Composer';
 import { AnswersSection } from './AnswersSection';
 import { CriteriaSection } from './CriteriaSection';
 import { DeliveryBlock } from './DeliveryBlock';
-import { OpenChamberIcon } from './Icons';
+import { OpenChamberIcon, QuestionIcon } from './Icons';
 import { PlanSection } from './PlanSection';
 import { QuestionBox } from './QuestionBox';
 
@@ -160,7 +160,11 @@ export function TaskInspector({ row, state, now, onClose, onOpenChamber }: Props
           <div className="mb-[6px] text-[12px] font-semibold text-muted">Résumé</div>
           <div className="whitespace-pre-wrap text-[13.5px] leading-[1.45] text-text">{brief}</div>
         </div>
-        {attend ? <div className="mt-[4px] text-[13px] text-attend">✋ {attend}</div> : null}
+        {attend ? (
+          <div className="mt-[4px] text-[13px] text-attend">
+            <QuestionIcon /> {attend}
+          </div>
+        ) : null}
 
         {planSteps.length ? (
           <PlanSection
@@ -214,7 +218,24 @@ export function TaskInspector({ row, state, now, onClose, onOpenChamber }: Props
             </button>
           </div>
         ) : form ? (
-          <QuestionBox key={form.id} sessionId={row.id} form={form} />
+          // même gabarit que les autres sections du détail (encadré, titre),
+          // avec le « ? » et le orange de la carte pour la question en attente
+          <section
+            data-testid="question-section"
+            className="mt-[12px] rounded-[9px] border border-wait-border bg-wait px-[12px] py-[10px]"
+          >
+            <div className="flex min-w-0 items-center gap-[7px]">
+              <QuestionIcon />
+              <span className="shrink-0 text-[12px] font-semibold text-attend">Question en attente</span>
+              {form.title ? (
+                <span className="min-w-0 truncate text-[11.5px] text-muted" title={form.title}>
+                  {form.title}
+                </span>
+              ) : null}
+              <span className="flex-1" />
+            </div>
+            <QuestionBox key={form.id} sessionId={row.id} form={form} embedded />
+          </section>
         ) : null}
 
         {actionError ? <div className="mt-[8px] text-[11.5px] text-danger">{actionError}</div> : null}
