@@ -41,13 +41,13 @@ describe('CriterionRow', () => {
     expect(html).toContain('Tests passent');
     expect(html).toContain('Validé');
     expect(html).toContain('bun test');
-    expect(html).toContain('La sortie de test est visible.');
+    expect(html).toContain('Vérificateur : preuve acceptée : La sortie de test est visible.');
   });
 
-  test('un critère rejeté affiche « À corriger » et la raison du rejet', () => {
+  test('un critère rejeté affiche « À corriger » et la raison du rejet, libellée claire', () => {
     const html = renderToStaticMarkup(createElement(CriterionRow, { sessionId: 's1', criterion: rejected }));
     expect(html).toContain('À corriger');
-    expect(html).toContain('La capture ne montre pas l’état final.');
+    expect(html).toContain('Vérificateur : preuve refusée : La capture ne montre pas l’état final.');
   });
 
   test('un extrait de code pointe son fichier et ses lignes', () => {

@@ -163,13 +163,22 @@ relire toute la conversation à chaque phase.
   de validation, exigence du design) ;
 - tool `criteria_to_validate` (une preuve attend un jugement) ;
 - fin de tour de la tâche (kick `end` du flux `session.execution.*`) si la
-  tâche a au moins un critère.
+  tâche a au moins un critère ;
+- création PROACTIVE : la sous-conversation existe pour toute tâche dès le
+  premier tick (même sans critère, comme le compagnon) ; aucune phase ne part
+  tant qu'il n'y a rien à juger.
 
 Garde-fous (leçons compagnon) : intervalle minimal entre deux phases
 (`SUPERVISEUR_VERIFIER_MIN_INTERVAL_MS`, défaut 20 s ; 60 s après une phase qui
 a modifié la liste, pour casser les boucles) ; dédoublonnage par signature de
-l'état critères (liste + horodatages de preuve) : signature inchangée, aucun
-appel ; une seule phase à la fois par tâche ; concurrence globale limitée à 2.
+l'état critères PERSISTÉE en DB (`verifier_map.signature`, mise à jour après
+chaque phase appliquée) : la signature ne repart pas à vide au redémarrage du
+daemon, donc aucun redémarrage ne relance de phase sans changement (retour du
+propriétaire, 2026-11-08) ; une seule phase à la fois par tâche ; concurrence
+globale limitée à 2 ; l'attente de réponse scanne les messages du plus récent
+au plus ancien (`newestVerifierReply`, le listing est descendant : un assistant
+sans texte ne doit pas masquer le JSON, constat réel : 151 s d'attente ramenées
+à environ 13 s).
 
 ### 4.4 Injection et contrat JSON
 
@@ -227,6 +236,15 @@ Règles du contrat :
   ensuite lui-même ses `criteria_*`.
 - Les transitions initiées par l'agent lui-même (`criteria_to_validate`,
   add/remove/update via tools) ne génèrent pas de notification à lui-même.
+- **Rappel critères (analyste)** : un verdict `done` avec un trou de critères
+  (aucun critère défini, ou critères restants non validés) fait pousser par le
+  daemon UN message à l'agent : la `criteria_note` de l'analyste (adressée à
+  l'agent, à l'impératif) sinon le message déterministe `criteriaPushMessage`
+  (aucun critère : `criteria_add` ; restants : refs et états,
+  `criteria_to_validate`). Dédoublonné : un message identique n'est pas
+  repoussé ; le rappel se réarme dès que le verdict repasse hors done. Le
+  `wrapOwnerPrompt` (nouvelle consigne du propriétaire) rappelle aussi les
+  critères.
 - `task_log` reçoit une ligne par transition (kind `criteria`, meta avec ref,
   ancien état, nouvel état, source `agent|verifier`).
 
@@ -283,8 +301,11 @@ CREATE TABLE IF NOT EXISTS verifier_map (
   (PlanSection), avant les réponses au propriétaire : une ligne par critère
   avec ref (`AC-01`), titre, badge d'état (À faire, À valider, À corriger,
   Validé), la preuve soumise (texte, chemin et lignes pour `code_excerpt`,
-  image servable via `/api/fleet/asset`) et le dernier commentaire du
-  vérificateur.
+  image servable via `/api/fleet/asset`) et le jugement du vérificateur,
+  libellé selon l'état : « Vérificateur : preuve refusée : (raison) » en orange
+  pour « À corriger », « Vérificateur : preuve acceptée : (commentaire) » en
+  vert pour « Validé », rien sinon (retour du propriétaire : la ligne orange
+  nue n'expliquait pas son rôle).
 - Comportement d'ouverture identique au plan : **dépliée par défaut tant que
   la tâche est en cours, repliée sinon** (`criteriaDefaultOpen` calqué sur
   `planDefaultOpen`, préférence manuelle de repli/dépli mémorisée par session
@@ -294,14 +315,16 @@ CREATE TABLE IF NOT EXISTS verifier_map (
 ### 7.3 Carte : deuxième barre de progression
 
 - À droite de la barre de progression du plan, dans le pied de carte, une
-  **deuxième barre** au même format (piste, largeur animée, libellé `x/y`
-  tabulaire) : nombre de critères validés sur le nombre total de critères.
+  **deuxième barre au même gabarit exact** (piste `flex-1` plafonnée à 160 px
+  comme celle du plan, donc même longueur : retour du propriétaire sur des
+  largeurs divergentes, largeur animée, libellé `x/y` tabulaire) : nombre de
+  critères validés sur le nombre total de critères.
 - La barre n'apparaît que si la tâche a au moins un critère (même règle que la
-  barre du plan sans plan). Le libellé `x/y` porte un `title` explicite
-  (« Critères : 2 validés sur 4 ») ; pas de popup dédiée pour cette passe.
-- La libération de place vient du retrait des pastilles de confiance (7.4).
-- Le sig de la carte doit inclure les comptes critères, sinon la barre semble
-  figée (leçon connue du sig incomplet).
+  barre du plan sans plan).
+- Le libellé `x/y` est **cliquable comme celui du plan** : même bulle en
+  portail `position:fixed` (`CriteriaPopover`, calqué sur `PlanPopover`),
+  liste des critères avec pastille d'état par critère, chargée à l'ouverture
+  (la flotte ne transporte que les comptes).
 
 ### 7.4 Retrait du concept de confiance
 

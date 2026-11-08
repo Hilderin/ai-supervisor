@@ -127,17 +127,22 @@ CREATE TABLE IF NOT EXISTS criteria (
 CREATE INDEX IF NOT EXISTS idx_criteria_task ON criteria(task_id);
 -- Session du vérificateur (sous-conversation enfant, une seule par tâche,
 -- réutilisée pour toutes les vérifications) ; comme companion_map.
+-- colonne « signature » : état critères déjà jugé, persisté pour qu'un
+-- redémarrage du daemon ne relance pas une phase à vide.
 CREATE TABLE IF NOT EXISTS verifier_map (
   parent_session_id TEXT PRIMARY KEY,
   verifier_session_id TEXT NOT NULL,
   agent TEXT,
+  signature TEXT,
   created_at INTEGER NOT NULL
 );
 `);
 try { db.exec('ALTER TABLE task_verdict ADD COLUMN note TEXT'); } catch { /* colonne déjà présente */ }
 try { db.exec('ALTER TABLE companion_map ADD COLUMN version INTEGER'); } catch { /* colonne déjà présente */ }
 // nom exact de l'agent versionné utilisé par le compagnon (le prompt est mis en cache par nom)
-try { db.exec('ALTER TABLE companion_map ADD COLUMN agent TEXT'); } catch { /* colonne déjà présente */ }// objectif courant + plan : une nouvelle consigne change l'objectif, pas seulement le tour
+try { db.exec('ALTER TABLE companion_map ADD COLUMN agent TEXT'); } catch { /* colonne déjà présente */ }
+// signature de l'état critères déjà jugé par le vérificateur (survit aux redémarrages)
+try { db.exec('ALTER TABLE verifier_map ADD COLUMN signature TEXT'); } catch { /* colonne déjà présente */ }// objectif courant + plan : une nouvelle consigne change l'objectif, pas seulement le tour
 try { db.exec('ALTER TABLE task_state ADD COLUMN objective TEXT'); } catch { /* colonne déjà présente */ }
 try { db.exec('ALTER TABLE task_state ADD COLUMN objective_version INTEGER'); } catch { /* colonne déjà présente */ }
 try { db.exec('ALTER TABLE task_state ADD COLUMN last_user_id TEXT'); } catch { /* colonne déjà présente */ }
@@ -297,10 +302,10 @@ export function reopenTaskState(sid: string) {
 export function getCompanionOut(parentSid: string): string | null { return getCompanion(parentSid); }
 
 /** Session du vérificateur d'une tâche (mapping parent → enfant). */
-export function getVerifier(parentSid: string): { verifierId: string; agent: string | null } | null {
-  const r = db.query('SELECT verifier_session_id v, agent a FROM verifier_map WHERE parent_session_id = ?')
-    .get(parentSid) as { v: string; a: string | null } | undefined;
-  return r ? { verifierId: r.v, agent: r.a } : null;
+export function getVerifier(parentSid: string): { verifierId: string; agent: string | null; signature: string | null } | null {
+  const r = db.query('SELECT verifier_session_id v, agent a, signature s FROM verifier_map WHERE parent_session_id = ?')
+    .get(parentSid) as { v: string; a: string | null; s: string | null } | undefined;
+  return r ? { verifierId: r.v, agent: r.a, signature: r.s ?? null } : null;
 }
 export function putVerifier(parentSid: string, verifierId: string, agent: string) {
   db.query(`INSERT INTO verifier_map (parent_session_id, verifier_session_id, agent, created_at)
@@ -308,6 +313,10 @@ export function putVerifier(parentSid: string, verifierId: string, agent: string
             ON CONFLICT(parent_session_id) DO UPDATE SET verifier_session_id=excluded.verifier_session_id,
               agent=excluded.agent, created_at=excluded.created_at`)
     .run(parentSid, verifierId, agent, Date.now());
+}
+/** L'état critères vient d'être jugé : mémorisé en DB, un redémarrage ne repart pas à vide. */
+export function setVerifierSignature(parentSid: string, signature: string) {
+  db.query('UPDATE verifier_map SET signature = ? WHERE parent_session_id = ?').run(signature, parentSid);
 }
 export function deleteVerifier(parentSid: string) {
   db.query('DELETE FROM verifier_map WHERE parent_session_id = ?').run(parentSid);

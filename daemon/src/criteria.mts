@@ -344,6 +344,21 @@ export function pendingValidation(taskId: string): CriterionRow[] {
   return listCriteria(taskId).filter(r => r.status === 'to_validate');
 }
 
+/**
+ * Message à pousser à l'agent quand son verdict est « done » mais que les
+ * critères ne suivent pas : aucun critère, ou critères restants non validés.
+ * Retourne null quand rien ne doit être poussé (critères tous validés).
+ */
+export function criteriaPushMessage(rows: CriterionRow[]): string | null {
+  const counts = criteriaCounts(rows);
+  if (!counts.total) {
+    return "Il n'y a aucun critère d'acceptation pour cette tâche : définis-en avec criteria_add, puis soumets tes preuves avec criteria_to_validate.";
+  }
+  const remaining = rows.filter(r => r.status !== 'validated');
+  if (!remaining.length) return null;
+  return `Critères non validés : ${remaining.map(r => `${r.ref} (${statusLabel(r.status)})`).join(', ')} : soumets tes preuves avec criteria_to_validate.`;
+}
+
 /** Signature de l'état critères : le dédoublonnage du vérificateur s'appuie dessus. */
 export function criteriaSignature(taskId: string): string {
   return listCriteria(taskId)

@@ -13,6 +13,7 @@
  */
 import {
   VERIFIER_AGENT, ensureVerifierDefinition, getTaskState, getVerifier, logEvent, putVerifier,
+  setVerifierSignature,
 } from './state.mts';
 import {
   CriteriaError, approveCriterion, addCriterion, criteriaCounts, criteriaSignature,
@@ -37,8 +38,8 @@ const MAX_EXCERPT_MESSAGES = 8;
 interface VerifierState {
   verifierSession?: string;
   inFlight?: boolean;
+  ensuring?: boolean;
   lastRunAt?: number;
-  lastSig?: string;
   cooldownUntil?: number;
   failures?: number;
 }
@@ -51,20 +52,28 @@ function get(sid: string): VerifierState {
   return s;
 }
 
-async function jget(path: string): Promise<unknown> {
-  const res = await fetch(`${base}${path}`);
-  if (!res.ok) throw new Error(`${path} → ${res.status}`);
-  return res.json();
+async function jget(path: string, timeoutMs = 8000): Promise<unknown> {
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${base}${path}`, { signal: ctl.signal });
+    if (!res.ok) throw new Error(`${path} → ${res.status}`);
+    return res.json();
+  } finally { clearTimeout(t); }
 }
 
-async function jpost(path: string, body: unknown) {
-  const res = await fetch(`${base}${path}`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
-  });
-  const text = await res.text();
-  let data: unknown = null;
-  try { data = text ? JSON.parse(text) : null; } catch { /* pas JSON */ }
-  return { status: res.status, ok: res.ok, data };
+async function jpost(path: string, body: unknown, timeoutMs = 30_000) {
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${base}${path}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: ctl.signal,
+    });
+    const text = await res.text();
+    let data: unknown = null;
+    try { data = text ? JSON.parse(text) : null; } catch { /* pas JSON */ }
+    return { status: res.status, ok: res.ok, data };
+  } finally { clearTimeout(t); }
 }
 
 /* --- Session du vérificateur (quincallerie compagnon) --- */
@@ -142,6 +151,28 @@ export function parseVerifierJson(text: string): VerifierJson | null {
   } catch { return null; }
 }
 
+/**
+ * Dernière réponse utile du vérificateur, la PLUS RÉCENTE d'abord : le listing
+ * OpenChamber est descendant, prendre le dernier élément filtré renvoie le plus
+ * ancien (souvent un assistant sans texte, d'où des attentes de 150 s pour rien).
+ * On scanne du plus récent au plus ancien et on s'arrête au premier JSON
+ * parsable ; à défaut, on rend le texte le plus récent.
+ */
+export function newestVerifierReply(messages: WireMessage[], sinceMs: number): { text: string; parses: boolean } | null {
+  const replies = messages
+    .filter(m => m.type === 'assistant' && (m.time?.created ?? 0) >= sinceMs)
+    .sort((a, b) => (b.time?.created ?? 0) - (a.time?.created ?? 0));
+  for (const m of replies) {
+    const text = messageText(m);
+    if (text && parseVerifierJson(text)) return { text, parses: true };
+  }
+  for (const m of replies) {
+    const text = messageText(m);
+    if (text) return { text, parses: false };
+  }
+  return null;
+}
+
 async function waitReply(verifierId: string, sinceMs: number, timeoutMs = MAX_WAIT_MS): Promise<string> {
   const deadline = Date.now() + timeoutMs;
   let lastText = '';
@@ -149,13 +180,11 @@ async function waitReply(verifierId: string, sinceMs: number, timeoutMs = MAX_WA
     await new Promise(r => setTimeout(r, 2500));
     try {
       const out = await jget(`/api/session/${verifierId}/message?limit=6`) as { data?: WireMessage[] };
-      const replies = (out.data ?? []).filter(m => m.type === 'assistant' && (m.time?.created ?? 0) >= sinceMs);
-      const last = replies[replies.length - 1];
-      const text = messageText(last ?? { type: 'assistant' });
-      if (text) {
-        lastText = text;
+      const found = newestVerifierReply(out.data ?? [], sinceMs);
+      if (found) {
+        lastText = found.text;
         // dès que le texte parse en JSON vérificateur, on s'arrête
-        if (parseVerifierJson(text)) return text;
+        if (found.parses) return found.text;
       }
     } catch { /* réseau : on retente */ }
   }
@@ -308,8 +337,12 @@ async function runPhase(taskId: string, title: string, dir: string | undefined):
   if (!rows.length) return;
   const sig = criteriaSignature(taskId);
   const pending = rows.filter(r => r.status === 'to_validate').length;
-  // dédoublonnage : même signature, rien à valider, aucun kick → aucun appel
-  if (sig === s.lastSig && pending === 0) return;
+  // dédoublonnage PERSISTÉ : la signature de l'état critères déjà jugé vit en
+  // DB (verifier_map.signature), donc un redémarrage du daemon ne relance pas
+  // une phase à vide ; seuls un kick, une preuve en attente ou un changement
+  // d'état déclenchent
+  const stored = getVerifier(taskId)?.signature ?? undefined;
+  if (stored === sig && pending === 0) return;
 
   s.inFlight = true;
   active++;
@@ -329,12 +362,14 @@ async function runPhase(taskId: string, title: string, dir: string | undefined):
     ].join('\n\n').slice(0, MAX_INJECT_CHARS);
 
     const verifierId = await ensureVerifier(taskId, s);
+    logEvent(taskId, 'note', `vérificateur : phase envoyée (${counts.toValidate} preuve(s) à juger)`);
     const p = await jpost(`/api/openchamber/sessions/${verifierId}/send`, {
       prompt: inject, agent: VERIFIER_AGENT, directory: dir,
     });
     if (!p.ok) throw new Error(`prompt vérificateur → ${p.status}`);
 
     const reply = await waitReply(verifierId, Date.now() - 1500);
+    logEvent(taskId, 'note', `vérificateur : réponse reçue (${reply ? `${reply.length} car.` : 'vide'})`);
     let json = parseVerifierJson(reply);
     if (!json) {
       logEvent(taskId, 'note', 'vérificateur : réponse illisible (reprise unique)');
@@ -349,9 +384,11 @@ async function runPhase(taskId: string, title: string, dir: string | undefined):
 
     const applied = applyVerifierActions(taskId, json);
     const notes = String(json.notes ?? '').trim().slice(0, 300);
-    s.lastSig = criteriaSignature(taskId);
     s.lastRunAt = Date.now();
     s.failures = 0;
+    // l'état critères (post-application) est marqué « jugé » en DB : un
+    // redémarrage ne relance pas de phase tant que rien n'a changé
+    setVerifierSignature(taskId, criteriaSignature(taskId));
     logEvent(taskId, 'note', `vérificateur : ${applied.length} transition(s)${notes ? ` : ${notes}` : ''}`, {
       applied: applied.map(t => `${t.op}:${t.ref}`),
     });
@@ -392,6 +429,18 @@ export async function verifierTick(
     if (sess.parentID) continue;                  // jamais une sous-session
     if (sess.time?.archived) continue;
     const taskId = sess.id;
+    // comme le compagnon : la sous-conversation vérificateur existe pour toute
+    // tâche, même sans critère encore (créée au premier tick, réutilisée ensuite)
+    if (!getVerifier(taskId)) {
+      const s = get(taskId);
+      if (!s.ensuring) {
+        s.ensuring = true;
+        void ensureVerifier(taskId, s)
+          .catch((e) => logEvent(taskId, 'note', `vérificateur : création impossible ${String(e).slice(0, 80)}`))
+          .finally(() => { s.ensuring = false; });
+      }
+      continue;
+    }
     const rows = listCriteria(taskId);
     if (!rows.length) continue;
     const s = get(taskId);
@@ -403,7 +452,8 @@ export async function verifierTick(
     const now = Date.now();
     const due = now - (s.lastRunAt ?? 0) >= MIN_INTERVAL_MS;
     const pending = rows.some(r => r.status === 'to_validate');
-    if (!k && !pending && s.lastSig === criteriaSignature(taskId)) continue;
+    // signature déjà jugée persistée en DB : survit aux redémarrages du daemon
+    if (!k && !pending && (getVerifier(taskId)?.signature ?? undefined) === criteriaSignature(taskId)) continue;
     // un kick critère (transition explicite de l'agent) passe l'intervalle :
     // il est consommé ici, le repousser le perdrait sans autre déclencheur
     if (!due && !k?.criteria) continue;

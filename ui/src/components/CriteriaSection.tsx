@@ -108,8 +108,14 @@ export function CriterionRow({ sessionId, criterion }: { sessionId: string; crit
         <div className="mt-[3px] text-[10.5px] text-placeholder">{criterion.methods.join(' · ')}</div>
       ) : null}
       <Evidence sessionId={sessionId} evidence={criterion.evidence} />
-      {criterion.review ? (
-        <div className="mt-[4px] text-[11.5px] leading-[1.4] text-attend">Vérificateur : {criterion.review}</div>
+      {criterion.status === 'to_fix' && criterion.review ? (
+        <div className="mt-[4px] text-[11.5px] leading-[1.4] text-attend">
+          Vérificateur : preuve refusée : {criterion.review}
+        </div>
+      ) : criterion.status === 'validated' && criterion.review ? (
+        <div className="mt-[4px] text-[11.5px] leading-[1.4] text-green">
+          Vérificateur : preuve acceptée : {criterion.review}
+        </div>
       ) : null}
     </li>
   );

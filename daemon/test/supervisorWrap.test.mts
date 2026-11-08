@@ -2,10 +2,13 @@ import { describe, expect, test } from 'bun:test';
 import { OWNER_WRAP, stripOwnerWrap, wrapOwnerPrompt } from '../src/supervisor.mts';
 
 describe('encadrement des prompts du propriétaire', () => {
-  test('le texte envoyé au chat est précédé de l\'instruction combinée (plan + answer)', () => {
+  test('le texte envoyé au chat est précédé de l\'instruction combinée (plan + critères + answer)', () => {
     const wrapped = wrapOwnerPrompt('cherche la météo');
     expect(wrapped.startsWith(OWNER_WRAP)).toBe(true);
     expect(wrapped).toContain('answer');
+    // rappel critères : sans lui, un nouvel objectif part sans critères (constaté réel)
+    expect(wrapped).toContain('criteria_add');
+    expect(wrapped).toContain('criteria_to_validate');
     expect(wrapped.endsWith('cherche la météo')).toBe(true);
   });
 

@@ -523,6 +523,8 @@ export async function getSupervisorState(): Promise<SupervisorState> {
  */
 export const OWNER_WRAP =
   "Nouvelle instruction de l\u2019utilisateur : mets ton plan à jour au besoin ; "
+  + "définis ou mets à jour tes critères d\u2019acceptation (criteria_add, criteria_to_validate : "
+  + "le vérificateur du Superviseur juge tes preuves) ; "
   + "les réponses pour le propriétaire partent avec le tool `answer` (elles s\u2019affichent dans le Superviseur) :";
 
 export function wrapOwnerPrompt(text: string): string {

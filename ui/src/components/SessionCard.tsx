@@ -8,6 +8,7 @@ import { BUSY_BRIEF, briefRow, isStaleTurn, planLabel } from '../lib/fleet';
 import { useFleetStore } from '../store/fleetStore';
 import type { FleetRow } from '../types';
 import { CardStateIcon } from './CardStateIcon';
+import { CriteriaPopover } from './CriteriaPopover';
 import { DeliveryBlock } from './DeliveryBlock';
 import { CloseConversationIcon, OpenChamberIcon } from './Icons';
 import { PlanPopover } from './PlanPopover';
@@ -246,7 +247,10 @@ export function SessionCard({ row, state, selected, flash, now, onOpen, onOpenCh
         >
           {stateLabel}
         </span>
-        <span className="h-[5px] min-w-[48px] max-w-[160px] flex-1 overflow-hidden rounded-[3px] bg-track">
+        <span
+          data-testid="plan-progress-bar"
+          className="h-[5px] min-w-[48px] max-w-[160px] flex-1 overflow-hidden rounded-[3px] bg-track"
+        >
           {hasProgress ? (
             <span
               className={cx(
@@ -275,8 +279,12 @@ export function SessionCard({ row, state, selected, flash, now, onOpen, onOpenCh
         )}
         {critTotal > 0 ? (
           <>
+            {/* plus d'air AVANT la barre (après le libellé du plan), et le
+                compteur est serré (min-width réduit) : demande explicite du
+                propriétaire, l'inverse était en place */}
             <span
-              className="h-[5px] w-[80px] shrink-0 overflow-hidden rounded-[3px] bg-track"
+              data-testid="criteria-progress-bar"
+              className="ml-[15px] h-[5px] min-w-[48px] max-w-[160px] flex-1 overflow-hidden rounded-[3px] bg-track"
               aria-label={`Critères : ${critValidated} validés sur ${critTotal}`}
             >
               <span
@@ -287,12 +295,12 @@ export function SessionCard({ row, state, selected, flash, now, onOpen, onOpenCh
                 style={{ width: `${Math.round((critValidated / critTotal) * 100)}%` }}
               />
             </span>
-            <span
-              title={`Critères : ${critValidated} validés sur ${critTotal}`}
-              className="w-[34px] shrink-0 text-right text-[11.5px] font-[650] tabular-nums"
-            >
-              {critValidated}/{critTotal}
-            </span>
+            <CriteriaPopover
+              sessionId={row.id}
+              label={`${critValidated}/${critTotal}`}
+              done={critValidated}
+              total={critTotal}
+            />
           </>
         ) : null}
         <span className="flex-1" />

@@ -14,6 +14,7 @@ import {
   putCompanion, setTaskObjective, setTaskPlan, upsertVerdict,
 } from './state.mts';
 import { getPlanSnapshot, planStepsOf } from './plan.mts';
+import { criteriaCounts, criteriaPushMessage, listCriteria, statusLabel } from './criteria.mts';
 import { takeKick, kick as pushKick } from './kicks.mts';
 import { messageText } from './messages.mts';
 import {
@@ -45,6 +46,7 @@ interface CompanionState {
   lastRunAt?: number;
   lastStatus?: string;
   lastMigrationAt?: number;
+  lastCriteriaPush?: string;
   failures?: number;
 }
 const st = new Map<string, CompanionState>();
@@ -240,13 +242,19 @@ async function waitReply(compId: string, sinceMs: number, timeoutMs = MAX_WAIT_M
       const stt = await jget(`/api/session/${compId}/message?limit=6`) as {
         data?: Array<{ type: string; time?: { created?: number }; content?: Array<{ type: string; text?: string }> }>;
       };
-      const replies = (stt.data ?? []).filter(m => m.type === 'assistant' && (m.time?.created ?? 0) >= sinceMs);
-      const last = replies[replies.length - 1];
-      const text = last?.content?.filter(c => c.type === 'text').map(c => c.text ?? '').join(' ') ?? '';
-      if (text) {
+      // le listing est DESCENDANT : la réponse utile est la plus récente, pas
+      // la dernière du tableau filtré (les assistants sans texte, tool calls,
+      // la précédaient et faisaient attendre le délai complet pour rien)
+      const replies = (stt.data ?? [])
+        .filter(m => m.type === 'assistant' && (m.time?.created ?? 0) >= sinceMs)
+        .sort((a, b) => (b.time?.created ?? 0) - (a.time?.created ?? 0));
+      for (const m of replies) {
+        const text = m?.content?.filter(c => c.type === 'text').map(c => c.text ?? '').join(' ') ?? '';
+        if (!text) continue;
         lastText = text;
         // dès que le texte parse en verdict, on s'arrête : le marqueur "complété" arrive en retard
         if (parseVerdictText(text)) return text;
+        break;   // le texte le plus récent ne parse pas : on continue de poller
       }
     } catch { /* réseau : on retente */ }
   }
@@ -338,6 +346,13 @@ async function analyseOnce(
 
     const compId = await ensureCompanion(sid, s);
     const planForInjection = planSteps;
+    // l'analyste doit savoir que la tâche est censée porter des critères : liste
+    // et état de chacun, ou l'absence explicite
+    const critRows = listCriteria(sid);
+    const critCounts = criteriaCounts(critRows);
+    const criteriaInject = critRows.length
+      ? `Critères d'acceptation (${critCounts.validated}/${critCounts.total} validés) :\n${critRows.map(r => `${r.ref} [${statusLabel(r.status)}] ${r.title}`).join('\n')}`
+      : "Aucun critère d'acceptation défini pour cette tâche : l'agent est censé en définir avec criteria_add et soumettre ses preuves avec criteria_to_validate.";
     const waitText = wait.waiting
       ? `${wait.source}: ${wait.ask}`
       : (digest.agentAsk ? `agent_ask: ${digest.agentAsk}` : 'aucun');
@@ -349,6 +364,7 @@ async function analyseOnce(
       `Tâche : ${title}`,
       `Objectif actuel (version ${objective.version}) : ${objective.objective || 'inconnu'}`,
       `Plan de la tâche (planwrite, source de vérité) :\n${planText(planForInjection)}`,
+      criteriaInject,
       'Le plan appartient à la session de travail. Ne crée pas de plan, ne le modifie pas, et ne produis pas de champ plan : la progression est calculée par le daemon depuis ce planwrite.',
       `Signal d’attente humaine : ${waitText}`,
       prevText,
@@ -423,6 +439,19 @@ async function analyseOnce(
       progress: norm.progress, termine: norm.done,
       state: norm.state, source: norm.humanSource, plan: norm.plan.length,
     });
+    // verdict done mais critères incomplets : le rappel part à l'agent
+    // (note de l'analyste sinon message déterministe) ; un message identique
+    // n'est pas repoussé, et l'état hors done réarme le rappel
+    if (!norm.done) {
+      s.lastCriteriaPush = undefined;
+    } else if (!(prevTask?.closed_at)) {
+      const msg = norm.criteriaNote || criteriaPushMessage(listCriteria(sid));
+      if (msg && s.lastCriteriaPush !== msg) {
+        s.lastCriteriaPush = msg;
+        const push = await jpost(`/api/session/${sid}/prompt`, { text: `[superviseur] Critères : ${msg}`, delivery: 'steer' });
+        logEvent(sid, 'note', push.ok ? `rappel critères poussé : ${msg.slice(0, 100)}` : `rappel critères refusé (${push.status})`);
+      }
+    }
   } catch (e) {
     const failures = (s.failures ?? 0) + 1;
     s.failures = failures;

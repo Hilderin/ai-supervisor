@@ -36,6 +36,7 @@ export interface RawVerdict {
   pending_human?: unknown;
   attend?: unknown;
   wait?: unknown;
+  criteria_note?: unknown;
   done?: unknown;
   termine?: unknown;
   [key: string]: unknown;
@@ -68,6 +69,8 @@ export interface NormalizedVerdict {
   plan: PlanStep[];
   progress: number | null;
   attend: string;
+  /** Message à pousser à l'agent quand l'état est done mais les critères incomplets ; vide sinon. */
+  criteriaNote: string;
   humanSource: HumanSource;
   done: boolean;
   lintReasons: string[];
@@ -355,6 +358,7 @@ export function normalizeVerdict(raw: RawVerdict, ctx: NormalizeContext): Normal
     plan,
     progress: done ? 100 : progress,
     attend,
+    criteriaNote: scrubSummary(pickString(raw.criteria_note, raw.criteriaNote)).slice(0, 300),
     humanSource,
     done,
     lintReasons: lint.reasons,

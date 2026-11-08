@@ -13,6 +13,7 @@ Les idées à faire sont triées par priorité. Les idées complétées ou close
 | # | Idée | Pourquoi ce rang | Coût | État |
 |---|------|------------------|------|------|
 | 1 | Le superviseur fixe l'objectif, et peut stopper ou rediriger un agent qui dérape | Protège du travail qui part dans la mauvaise direction, né d'un cas réel : c'est la raison d'être du Superviseur (porter l'attention) | moyen | À faire |
+| 24 | Stop et revert pour une tâche (comme pour le chat) | Une erreur sur une tâche ne se rattrape pas : ni stop du tour, ni retrait de la file, ni revert, alors que le chat sait déjà faire les deux et que l'idée 1 suppose ce geste | moyen | À faire |
 | 5 | Envoyer des instructions pendant qu'une tâche travaille | Capacité de pilotage centrale (queue, direct, fork, btw), mais dépend de ce que l'API permet réellement | moyen à élevé | Partiel : file d'attente |
 | 7 | Un mode plan pour le superviseur : lire le projet avant de cadrer une carte | Le brief d'une tâche est deviné à partir d'une phrase : sans lecture du projet, l'objectif et les critères restent génériques et l'humain corrige ce que l'agent n'a pas pu lire ; même outils que le mode discussion, autre intention | moyen | Partiel : mode Investigation et lecture bornée |
 | 8 | Un vrai mode conversationnel : brainstormer sans lancer de tâche | Le chat existe, mais son agent est un aiguilleur sans accès au projet : il manque la posture (discuter) et des outils de lecture ; le coût est surtout du prompt et une bascule explicite | faible à moyen | À faire |
@@ -519,3 +520,30 @@ Constat sur le code actuel :
 - **articulation avec l'idée 22** : openui-lang reste pour la structure (étapes, tableaux, graphiques), `question` pour ce qui attend une réponse ; les deux instructions se rédigent ensemble.
 
 Lien : idée « rendre les blocs `openui-lang` » (la complémentarité des deux canaux), leçon « Les questions passent par le tool `question` » dans `AGENTS.md`, `ui/src/components/QuestionBox.tsx`, `ui/src/lib/api.ts` (`replyForm`, `cancelQuestion`), doc [mvp1/chat-superviseur.md](../mvp1/chat-superviseur.md).
+
+### Stop et revert pour une tâche (comme pour le chat)
+
+Discussion du 7 nov : quand on se trompe (mauvaise consigne envoyée, direction qui dérape, message mis en file par erreur), le chat du superviseur sait s'arrêter et revenir en arrière, mais une tâche non : ni stop du tour en cours, ni retrait de la file, ni revert vers un message. Le seul recours est d'aller dans OpenChamber et de refaire le geste à la main.
+
+Demande : les mêmes trois commandes pour une tâche, depuis la carte ou le détail :
+
+- **stop** : interrompre le tour en cours (abort ou interrupt, la version diffère selon l'instance) ;
+- **retirer de la file** : annuler un message en attente (`/api/message-queue/.../:itemId`) ;
+- **revert** : revenir à un message du passé (stage + commit, abort avant, restaurer le texte du composer), le geste déjà implémenté pour le chat (`revertSupervisor`).
+
+Constat sur le code actuel :
+
+- le chat a son Stop (`canStop` quand busy, `/api/supervisor/abort`) et son revert (`/api/supervisor/revert`, stage + commit, texte restauré) : le chemin daemon existe, il vise la session du superviseur ;
+- pour une tâche, `/api/fleet/send` met en file, mais rien n'expose l'annulation d'un item ni l'interruption du tour ; `/api/fleet/done` retire la carte, c'est tout ;
+- l'idée 1 suppose ce geste (stopper ou rediriger un agent qui dérape) : ces commandes en sont les fondations.
+
+À creuser avant d'implémenter :
+
+- **où** : le détail porte déjà l'écriture depuis la suppression du composer de carte ; stop et revert y vivent naturellement, et la carte peut garder un stop court ;
+- **revert = destructif** : confirmation avant commit, et un texte clair sur ce qui disparaît (les tours après le message) ; une question en attente est annulée d'abord (même garde que `close_task`) ;
+- **état après stop** : une tâche interrompue n'est pas terminée ; la carte repart au repos sans verdict trompeur (le compagnon ne doit pas lire l'interruption comme un bilan) ;
+- **file visible** : le retrait et le revert supposent de voir les messages en attente de la tâche (l'idée 5 le demande déjà) ;
+- **abort vs interrupt** : la version d'OpenCode expose l'un ou l'autre ; `abortSupervisor` envoie déjà les deux par sécurité, même approche à reprendre ;
+- **après revert** : restaurer le texte utilisateur dans le composer du détail si l'instruction doit être corrigée et renvoyée (le brouillon vit dans le store).
+
+Lien : idée 1 (stopper ou rediriger, le concept), idée 5 (les messages en attente visibles), `/api/supervisor/abort` et `revertSupervisor` (`daemon/src/supervisor.mts`) comme implémentations à généraliser, leçon « Revert depuis un message » dans `AGENTS.md`.

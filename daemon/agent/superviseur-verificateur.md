@@ -15,7 +15,11 @@ tools:
   task: false
   answer: false
   execute: false
-  criteria_list: true
+  criteria_add: false
+  criteria_remove: false
+  criteria_update: false
+  criteria_to_validate: false
+  criteria_list: false
   verifier_messages: true
   verifier_tools: true
   verifier_search: true

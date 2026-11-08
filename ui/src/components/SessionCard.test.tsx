@@ -65,3 +65,32 @@ describe('SessionCard sans composer', () => {
     expect(html).toContain('Connexion interrompue');
   });
 });
+
+describe('barres de progression', () => {
+  const classOf = (html: string, testid: string): string => {
+    const match = html.match(new RegExp(`data-testid="${testid}"[^>]*class="([^"]*)"`));
+    return match?.[1] ?? '';
+  };
+
+  test('la barre des critères partage exactement le gabarit de celle du plan', () => {
+    const html = renderCard(row({
+      id: 'ses_bars',
+      status: 'busy',
+      sup: { resume: 'r', at: 1, progress: 50 },
+      plan: {
+        steps: [{ text: 'Étape 1', status: 'completed' }, { text: 'Étape 2', status: 'in_progress' }],
+        done: 1,
+        total: 2,
+      },
+      criteria: { total: 2, todo: 0, toValidate: 1, toFix: 0, validated: 1 },
+    }));
+    const planBar = classOf(html, 'plan-progress-bar');
+    const criteriaBar = classOf(html, 'criteria-progress-bar');
+    expect(planBar).toContain('flex-1');
+    expect(planBar).toContain('max-w-[160px]');
+    // même gabarit, à la marge d'espacement près demandée par le propriétaire
+    // (plus d'air avant la barre, compteur serré)
+    expect(criteriaBar.replace('ml-[15px] ', '')).toBe(planBar);
+    expect(criteriaBar).toContain('ml-[15px]');
+  });
+});

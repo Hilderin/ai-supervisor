@@ -11,6 +11,14 @@ tools:
   planwrite: false
   planupdate: false
   planread: false
+  criteria_add: false
+  criteria_remove: false
+  criteria_update: false
+  criteria_to_validate: false
+  criteria_list: false
+  verifier_messages: false
+  verifier_tools: false
+  verifier_search: false
   question: false
   task: false
   execute: false
