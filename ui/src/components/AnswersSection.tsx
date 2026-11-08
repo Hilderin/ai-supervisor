@@ -20,7 +20,7 @@ const timeLabel = (at: number): string => {
 
 /**
  * Réponses de la tâche au propriétaire (tool `answer`), affichées sous le plan.
- * Les réponses non lues sont visibles avec un bouton « Got it » qui les cache
+ * Les réponses non lues sont visibles avec un bouton « Vu » qui les cache
  * (le compteur de la carte retombe à zéro). Le journal des réponses cachées
  * reste consultable : le bouton « Réponses antérieures » suffit à les rouvrir.
  */
@@ -113,18 +113,20 @@ export function AnswersSection({ sessionId, refreshKey }: Props) {
       </div>
 
       {pending.length ? (
-        <button
-          type="button"
-          data-testid="answers-got-it"
-          disabled={acking}
-          onClick={() => void gotIt().catch(() => setAttempt((n) => n + 1))}
-          className={cx(
-            'mt-[8px] cursor-pointer rounded-[7px] px-[12px] py-[5px] text-[12px] font-semibold',
-            acking ? 'bg-green-soft text-green' : 'bg-green text-white hover:brightness-95',
-          )}
-        >
-          Got it
-        </button>
+        <div className="mt-[8px] flex justify-end">
+          <button
+            type="button"
+            data-testid="answers-got-it"
+            disabled={acking}
+            onClick={() => void gotIt().catch(() => setAttempt((n) => n + 1))}
+            className={cx(
+              'cursor-pointer rounded-[7px] px-[12px] py-[5px] text-[12px] font-semibold',
+              acking ? 'bg-green-soft text-green' : 'bg-green text-white hover:brightness-95',
+            )}
+          >
+            Vu
+          </button>
+        </div>
       ) : (
         <div className="mt-[6px] text-[11px] text-muted">Toutes les réponses sont lues.</div>
       )}

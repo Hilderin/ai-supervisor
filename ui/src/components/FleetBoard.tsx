@@ -39,6 +39,10 @@ export function FleetBoard({ fleet, now, onOpenChamber }: Props) {
 
   useLayoutEffect(() => {
     if (!selected) return;
+    // Premier rendu sans liste (flotte pas encore reçue) : il n'y a rien à faire
+    // glisser. Sans ce garde-fou, la sélection restaurée au chargement se ferme
+    // avant l'arrivée de la première flotte utile.
+    if (!previousIds.current.length) return;
     const visible = new Set(rows.map((row) => row.id));
     if (visible.has(selected)) return;
     // Le store fait déjà glisser la sélection de façon atomique (flotte et

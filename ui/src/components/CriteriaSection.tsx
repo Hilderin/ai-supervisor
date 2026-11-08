@@ -68,18 +68,24 @@ function Evidence({ sessionId, evidence, criterionRef, onOpen }: EvidenceProps) 
   return (
     <ul className="mt-[3px] flex flex-col gap-[3px]">
       {evidence.map((ev, i) => (
-        <li key={i} className="text-[11.5px] leading-[1.4] text-muted">
-          <span className="font-semibold text-muted">[{ev.kind}]</span>{' '}
-          {ev.path ? (
-            <span
-              title={ev.start_line ? `${ev.path} lignes ${ev.start_line}-${(ev.start_line ?? 1) + (ev.line_count ?? 1) - 1}` : ev.path}
-              className="font-mono"
-            >
-              {ev.path}
-              {ev.start_line ? `:${ev.start_line}${ev.line_count ? `+${ev.line_count}` : ''}` : ''} :{' '}
-            </span>
-          ) : null}
-          <span className="whitespace-pre-wrap">{ev.text}</span>
+        <li
+          key={i}
+          data-testid="evidence-row"
+          className="text-[11.5px] leading-[1.4] text-muted"
+        >
+          <div>
+            <span className="font-semibold text-muted">[{ev.kind}]</span>{' '}
+            {ev.path ? (
+              <span
+                title={ev.start_line ? `${ev.path} lignes ${ev.start_line}-${(ev.start_line ?? 1) + (ev.line_count ?? 1) - 1}` : ev.path}
+                className="font-mono"
+              >
+                {ev.path}
+                {ev.start_line ? `:${ev.start_line}${ev.line_count ? `+${ev.line_count}` : ''}` : ''} :{' '}
+              </span>
+            ) : null}
+            <span className="whitespace-pre-wrap">{ev.text}</span>
+          </div>
           {ev.kind === 'screenshot' && ev.path ? (
             <button
               type="button"
@@ -87,7 +93,7 @@ function Evidence({ sessionId, evidence, criterionRef, onOpen }: EvidenceProps) 
               aria-label={`Agrandir la capture de preuve ${criterionRef}`}
               title="Agrandir la capture"
               onClick={() => onOpen?.(i)}
-              className="mt-[4px] inline-flex cursor-zoom-in rounded-[6px] border border-border bg-transparent p-0 outline-none transition-colors hover:border-green/60 focus-visible:ring-2 focus-visible:ring-green/40"
+              className="mt-[4px] flex w-fit cursor-zoom-in rounded-[6px] border border-border bg-transparent p-0 outline-none transition-colors hover:border-green/60 focus-visible:ring-2 focus-visible:ring-green/40"
             >
               <img
                 src={evidenceAssetUrl(sessionId, ev.path)}
@@ -256,7 +262,7 @@ export function CriteriaSection({ sessionId, state, refreshKey, counts }: Props)
         <div className="mt-[6px] text-[11.5px] text-danger">Critères indisponibles : {error}</div>
       ) : null}
       {open ? (
-        <ul className="mt-[8px] flex max-h-[320px] flex-col gap-[6px] overflow-y-auto" data-testid="criteria-rows">
+        <ul className="mt-[8px] flex flex-col gap-[6px]" data-testid="criteria-rows">
           {rows.map((c) => (
             <CriterionRow
               key={c.id}

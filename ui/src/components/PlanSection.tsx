@@ -126,7 +126,7 @@ export function PlanSection({ sessionId, state, steps, done, total }: Props) {
         </span>
       </button>
       {open ? (
-        <div className="mt-[8px] max-h-[240px] overflow-y-auto" data-testid="plan-steps">
+        <div className="mt-[8px]" data-testid="plan-steps">
           <PlanSteps steps={steps} />
         </div>
       ) : null}

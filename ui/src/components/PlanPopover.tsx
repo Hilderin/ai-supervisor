@@ -101,7 +101,7 @@ export function PlanPopover({ label, steps, done, total }: Props) {
                 width: WIDTH,
                 visibility: pos ? 'visible' : 'hidden',
               }}
-              className="z-[200] rounded-[9px] border border-border bg-card px-[11px] py-[9px] text-left shadow-[0_8px_22px_rgba(0,0,0,.16)]"
+              className="z-[200] flex max-h-[calc(100vh-16px)] flex-col rounded-[9px] border border-border bg-card px-[11px] py-[9px] text-left shadow-[0_8px_22px_rgba(0,0,0,.16)]"
             >
               <div className="mb-[6px] flex items-center justify-between gap-[8px]">
                 <span className="text-[11.5px] font-semibold">Plan de la tâche</span>
@@ -109,7 +109,7 @@ export function PlanPopover({ label, steps, done, total }: Props) {
                   {done}/{total}
                 </span>
               </div>
-              <div className="max-h-[240px] overflow-y-auto">
+              <div className="min-h-0 overflow-y-auto">
                 <PlanSteps steps={steps} />
               </div>
             </div>,

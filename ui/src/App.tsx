@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { FleetBoard } from './components/FleetBoard';
 import { PanelLeftIcon } from './components/Icons';
 import { SupervisorChat } from './components/SupervisorChat';
@@ -8,26 +8,37 @@ import { useFleetStream } from './hooks/useFleetStream';
 import { useNow } from './hooks/useNow';
 import { cardState } from './lib/cardState';
 import { cx } from './lib/cx';
+import {
+  MIN_INSPECTOR_WIDTH,
+  clampInspectorWidth,
+  inspectorMaxWidth,
+  panelWidths,
+} from './lib/panelLayout';
 import { useFleetStore } from './store/fleetStore';
 
 const MIN_CHAT = 320;
 const MAX_CHAT = 480;
 const DEFAULT_CHAT = 380;
 
-const MIN_INSPECTOR = 280;
-const MAX_INSPECTOR = 680;
 const DEFAULT_INSPECTOR = 460;
 const MIN_OPENCHAMBER = 320;
 const MAX_OPENCHAMBER = 680;
 const DEFAULT_OPENCHAMBER = 380;
 const MIN_FLEET = 320;
 
-function clampWidth(n: number): number {
-  return Math.max(MIN_CHAT, Math.min(MAX_CHAT, Math.round(n)));
+/** Colonne du chat et sa poignée, ou le rail replié (34 px + 8 px de marge). */
+function chatAreaWidth(chatOpen: boolean, chatWidth: number): number {
+  return chatOpen ? chatWidth + 15 : 42;
 }
 
-function clampInspector(n: number): number {
-  return Math.max(MIN_INSPECTOR, Math.min(MAX_INSPECTOR, Math.round(n)));
+/** Valeur enregistrée, jamais 0 ni NaN : le repli est une vraie préférence. */
+function storedWidth(key: string, fallback: number): number {
+  const value = Number(localStorage.getItem(key));
+  return Number.isFinite(value) && value > 0 ? Math.round(value) : fallback;
+}
+
+function clampWidth(n: number): number {
+  return Math.max(MIN_CHAT, Math.min(MAX_CHAT, Math.round(n)));
 }
 
 function clampOpenChamber(n: number): number {
@@ -43,13 +54,24 @@ export default function App() {
   const placements = useFleetStore((s) => s.placements);
   const now = useNow(1000);
   const [chatOpen, setChatOpen] = useState(() => localStorage.getItem('superviseur.chat') !== 'closed');
-  const [chatWidth, setChatWidth] = useState(() => clampWidth(Number(localStorage.getItem('superviseur.chatWidth')) || DEFAULT_CHAT));
-  const [inspectorWidth, setInspectorWidth] = useState(
-    () => clampInspector(Number(localStorage.getItem('superviseur.inspectorWidth')) || DEFAULT_INSPECTOR),
+  const [chatWidth, setChatWidth] = useState(() => clampWidth(storedWidth('superviseur.chatWidth', DEFAULT_CHAT)));
+  // Largeurs VOULUES, pas les largeurs affichées : la fenêtre ne fait que les
+  // contraindre, un redimensionnement n'écrase donc jamais la préférence.
+  const [inspectorWanted, setInspectorWanted] = useState(
+    () => Math.max(MIN_INSPECTOR_WIDTH, storedWidth('superviseur.inspectorWidth', DEFAULT_INSPECTOR)),
   );
+  const [centerWanted, setCenterWanted] = useState(() => {
+    const stored = Number(localStorage.getItem('superviseur.centerWidth'));
+    if (Number.isFinite(stored) && stored > 0) return Math.round(stored);
+    // rien d'enregistré : le central prend la place laissée par le détail
+    const available = Math.max(0, window.innerWidth - chatAreaWidth(chatOpen, chatWidth) - 15);
+    return Math.max(0, Math.min(available, Math.max(MIN_FLEET, available - inspectorWanted)));
+  });
   const [openChamberWidth, setOpenChamberWidth] = useState(
-    () => clampOpenChamber(Number(localStorage.getItem('superviseur.openChamberWidth')) || DEFAULT_OPENCHAMBER),
+    () => clampOpenChamber(storedWidth('superviseur.openChamberWidth', DEFAULT_OPENCHAMBER)),
   );
+  // largeur réelle du conteneur des panneaux (barre de défilement éventuelle déduite)
+  const [layoutWidth, setLayoutWidth] = useState(() => window.innerWidth);
   const [view, setView] = useState<'chat' | 'fleet' | 'openchamber'>('chat');
   const [openChamberSessionId, setOpenChamberSessionId] = useState<string | null>(null);
   const [openChamberTitle, setOpenChamberTitle] = useState<string | null>(null);
@@ -66,12 +88,42 @@ export default function App() {
   }, [chatWidth]);
 
   useEffect(() => {
-    localStorage.setItem('superviseur.inspectorWidth', String(inspectorWidth));
-  }, [inspectorWidth]);
+    localStorage.setItem('superviseur.inspectorWidth', String(inspectorWanted));
+  }, [inspectorWanted]);
+
+  useEffect(() => {
+    localStorage.setItem('superviseur.centerWidth', String(centerWanted));
+  }, [centerWanted]);
 
   useEffect(() => {
     localStorage.setItem('superviseur.openChamberWidth', String(openChamberWidth));
   }, [openChamberWidth]);
+
+  // mesure le conteneur : fenêtre, barre de défilement, panneaux masqués en étroit
+  useLayoutEffect(() => {
+    const element = layoutRef.current;
+    if (!element) return;
+    const measure = () => setLayoutWidth(element.clientWidth || window.innerWidth);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+
+  const inspectorAvailable = Math.max(0, layoutWidth - chatAreaWidth(chatOpen, chatWidth) - 15);
+  const { inspector: inspectorWidth } = panelWidths({
+    windowWidth: layoutWidth,
+    availableWidth: inspectorAvailable,
+    inspectorWanted,
+    centerWanted,
+  });
+
+  /** Pose la largeur du détail : la poignée fixe aussi ce que le central garde. */
+  const sizeInspector = (next: number) => {
+    const width = clampInspectorWidth(next, layoutWidth, inspectorAvailable);
+    setInspectorWanted(width);
+    setCenterWanted(Math.max(0, inspectorAvailable - width));
+  };
 
   const selectedRow = selected
     ? (fleet?.rows.find((row) => row.id === selected) ?? null)
@@ -88,7 +140,7 @@ export default function App() {
     const requiredWidth =
       MIN_FLEET + openChamberWidth + 15 +
       (hasInspector ? inspectorWidth + 15 : 0) +
-      (chatOpen ? chatWidth + 15 : 34);
+      chatAreaWidth(chatOpen, chatWidth);
     const availableWidth = layoutRef.current?.clientWidth ?? window.innerWidth;
     if (chatOpen && requiredWidth > availableWidth) {
       autoCollapsedChat.current = true;
@@ -170,7 +222,7 @@ export default function App() {
     e.preventDefault();
     const startX = e.clientX;
     const startWidth = inspectorWidth;
-    const move = (ev: PointerEvent) => setInspectorWidth(clampInspector(startWidth - (ev.clientX - startX)));
+    const move = (ev: PointerEvent) => sizeInspector(startWidth - (ev.clientX - startX));
     const up = () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
@@ -295,7 +347,7 @@ export default function App() {
         <main
           data-testid="fleet-pane"
           className={cx(
-            'min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto pr-[1px]',
+            'min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto pr-[1px] max-[1100px]:pr-0',
             (chatOpen && view === 'chat') || view === 'openchamber' ? 'max-[1100px]:hidden' : null,
           )}
         >
@@ -317,10 +369,10 @@ export default function App() {
             title="Redimensionner le détail (flèches gauche/droite)"
             onPointerDown={startInspectorResize}
             onKeyDown={(e) => {
-              if (e.key === 'ArrowLeft') { e.preventDefault(); setInspectorWidth((w) => clampInspector(w + 10)); }
-              if (e.key === 'ArrowRight') { e.preventDefault(); setInspectorWidth((w) => clampInspector(w - 10)); }
-              if (e.key === 'Home') { e.preventDefault(); setInspectorWidth(MIN_INSPECTOR); }
-              if (e.key === 'End') { e.preventDefault(); setInspectorWidth(MAX_INSPECTOR); }
+              if (e.key === 'ArrowLeft') { e.preventDefault(); sizeInspector(inspectorWidth + 10); }
+              if (e.key === 'ArrowRight') { e.preventDefault(); sizeInspector(inspectorWidth - 10); }
+              if (e.key === 'Home') { e.preventDefault(); sizeInspector(MIN_INSPECTOR_WIDTH); }
+              if (e.key === 'End') { e.preventDefault(); sizeInspector(inspectorMaxWidth(layoutWidth, inspectorAvailable)); }
             }}
             className="group hidden w-[15px] shrink-0 cursor-col-resize touch-none select-none items-stretch justify-center outline-none min-[1100px]:flex"
           >
