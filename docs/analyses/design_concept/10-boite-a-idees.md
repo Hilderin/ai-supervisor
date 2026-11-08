@@ -12,7 +12,6 @@ Les idées à faire sont triées par priorité. Les idées complétées ou close
 
 | # | Idée | Pourquoi ce rang | Coût | État |
 |---|------|------------------|------|------|
-| 18 | Supporter Markdown dans le chat du superviseur | Lisibilité de ce qu'écrivent les agents, d'abord dans le chat du superviseur où le texte d'agent est le plus dense (brief, questions et tooltips restent l'analyse de fond) ; coût faible | faible | Partiel : chat seulement |
 | 1 | Le superviseur fixe l'objectif, et peut stopper ou rediriger un agent qui dérape | Protège du travail qui part dans la mauvaise direction, né d'un cas réel : c'est la raison d'être du Superviseur (porter l'attention) | moyen | À faire |
 | 24 | Stop et revert pour une tâche (comme pour le chat) | Une erreur sur une tâche ne se rattrape pas : ni stop du tour, ni retrait de la file, ni revert, alors que le chat sait déjà faire les deux et que l'idée 1 suppose ce geste | moyen | À faire |
 | 5 | Envoyer des instructions pendant qu'une tâche travaille | Capacité de pilotage centrale (queue, direct, fork, btw), mais dépend de ce que l'API permet réellement | moyen à élevé | Partiel : file d'attente |
@@ -22,7 +21,7 @@ Les idées à faire sont triées par priorité. Les idées complétées ou close
 | 13 | Chemins de fichiers et URL cliquables dans les résultats | Aller du résultat au fichier sans copier-coller ; s'appuie sur le rendu existant de la livraison et sur `/api/fleet/asset` | faible à moyen | À faire |
 | 15 | Always on top + une UI qui tient dans un coin | Définit le mode d'usage (patch d'écran) ; à faire une fois les signaux essentiels arrêtés | moyen | À faire |
 
-> Ordre révisé le 2026-11-08 : le markdown du chat, les blocs `openui-lang`, le tool `question` du chat puis les deux réglages de modèle passent en tête ; le reste garde son ordre d'origine. Les raisons de rang sont celles d'origine, ajustées seulement là où elles contredisaient la nouvelle position. Les idées 22 et 23 sont faites le 2026-11-08 et passent dans les complétées ; les idées 19, 20 et 21 sont faites le même jour.
+> Ordre révisé le 2026-11-08 : le markdown du chat, les blocs `openui-lang`, le tool `question` du chat puis les deux réglages de modèle passent en tête ; le reste garde son ordre d'origine. Les raisons de rang sont celles d'origine, ajustées seulement là où elles contredisaient la nouvelle position. Les idées 18, 19, 20, 21, 22 et 23 sont faites le 2026-11-08 et passent dans les complétées.
 
 ### Complétées / closes
 
@@ -38,6 +37,7 @@ Les idées à faire sont triées par priorité. Les idées complétées ou close
 | 14 | Pinner des conversations / indiquer une priorité | Triage quand la flotte grossit ; secondaire tant que l'ordre des cartes n'est pas stabilisé | faible à moyen | Clos : l'ordre des cartes est stable |
 | 16 | Date et heure de la dernière activité sur une conversation | Petit signal complémentaire (session vivante ou morte), peu coûteux, non bloquant | faible | Fait |
 | 17 | Un chat permanent, à droite ? (le « poste de commandement » conversationnel) | Gros pari d'architecture, à trancher après les signaux de base : il peut réorienter toute l'UI | élevé | Fait : chat à gauche |
+| 18 | Supporter Markdown dans le chat du superviseur | Lisibilité de ce qu'écrivent les agents, d'abord dans le chat du superviseur où le texte d'agent est le plus dense (brief, questions et tooltips restent l'analyse de fond) ; coût faible | faible | Fait : chat du superviseur |
 | 22 | Rendre les blocs `openui-lang` des agents : chat du superviseur, réponses `answer`, résultat | OpenChamber sait dessiner ces blocs nativement ; le Superviseur les laissait en texte brut, alors que Steps, Table ou Callout disent mieux qu'un paragraphe ce qu'un agent a fait | moyen | Fait : chat, `answer` et résultat |
 | 23 | Le chat du superviseur gère le tool `question` (et le préfère aux blocs openui-lang) | Une question de l'orchestrateur était du texte à recopier ; le tool `question` donne une carte répondable, et l'instruction évite des blocs openui-lang inertes dans le Superviseur | faible à moyen | Fait : carte question dans le chat |
 | 19 | Un petit bouton config dans la conversation | Le modèle et l'agent se changeaient seulement en sortant du Superviseur ; un geste direct dans l'en-tête évite de rouvrir OpenChamber pour un réglage de confort | faible | Fait : engrenage dans l'en-tête du chat |
@@ -417,6 +417,8 @@ Demande : rendre le markdown partout où le texte vient d'un agent ou d'un humai
 - copier-coller : un chemin rendu en `code` doit rester sélectionnable tel quel.
 
 Lien : anti wall-of-text du doc 03, leçons « Rendu openchamber_render » et « Images locales de la livraison » dans `AGENTS.md`.
+
+Fait le 2026-11-08 pour le périmètre resserré : le chat du superviseur rend le markdown des agents avec `ChatMarkdown` (GFM, `skipHtml`, liens externes, tableaux et code stylés). Le brief de carte, les questions et les tooltips restent hors de ce rang, comme prévu.
 
 ### Un petit bouton config dans la conversation
 
