@@ -83,7 +83,10 @@ export function TaskInspector({ row, state, now, onClose, onOpenChamber }: Props
     setActionError(null);
     try {
       await closeTask(row, closeSession, !!question);
-      onCloseRef.current();
+      // la tâche quittée, la sélection a déjà glissé vers sa voisine : le
+      // panneau reste ouvert. On ne le referme que si la clôture n'a pas été
+      // retenue par la flotte (la tâche est toujours sélectionnée).
+      if (useFleetStore.getState().selected === row.id) onCloseRef.current();
     } catch (e) {
       setActionError(String((e as Error)?.message ?? e));
     }

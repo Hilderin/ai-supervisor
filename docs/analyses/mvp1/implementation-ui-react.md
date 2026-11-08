@@ -246,3 +246,16 @@ Tests : `ui/src/components/SessionCard.test.tsx` (plus de `textarea` sur la cart
 - Le panneau iframe n'a pas d'arrondi. Son en-tête ferme avec un bouton X, qui démonte l'iframe et restaure le chat superviseur s'il avait été replié automatiquement.
 - L'en-tête de `SupervisorChat` place la flèche Mini chat immédiatement à droite du bouton « Replier ». Le bouton distinct au-dessus du chat est retiré. Les sélecteurs mode et projet ne sont pas affichés. Le panneau affiche maintenant la session `OpenChamber - [titre]` avec troncature visuelle ; le X reste à droite.
 - Vérification : `bun run typecheck`, `bun test` UI et `bun run build:ui`. Le navigateur confirme la fermeture X et le retour au chat.
+
+## 15. Le détail glisse vers la tâche voisine (2026-11-08)
+
+Terminer la tâche sélectionnée fermait le panneau de droite et obligeait à recliquer, en plus de faire bouger la mise en page. La sélection glisse désormais vers la voisine, sans refermer le panneau.
+
+- **Règle** : la tâche retenue est celle immédiatement AU-DESSUS dans l'ordre affiché (index plus petit) ; à défaut seulement, celle juste en dessous. S'il ne reste aucune tâche, le panneau se ferme proprement.
+- **Où** : `ui/src/lib/selection.ts` porte la règle pure (`neighborSelection`, `selectionAfterChange`) ; `ui/src/store/fleetStore.ts` l'applique. `setFleet` (mise à jour de la flotte) et `closeSession` (clôture depuis l'interface) recalculent `selected` DANS le même `set` que la disparition : `App` ne rend jamais un frame intermédiaire sans sélection, l'`aside` du détail n'est donc pas démonté et la mise en page ne bouge pas.
+- **Candidats** : `visibleRows()` (export du store, partagé avec `FleetBoard`) applique le même filtre (`isClosedRow`) et le même tri (`sortByOrder`) que l'écran ; la sélection ne peut pas atterrir sur une carte masquée. Un repli dans `FleetBoard` couvre le cas d'une vue qui masquerait une carte sans passer par le store (filtre ou section repliée à venir).
+- **Pas de sélection automatique** : sans sélection courante, rien ne s'ouvre (démarrage, ou clic sur `Fermer le détail`) ; `selectionAfterChange(null, …)` retourne null.
+- **Détail** : `TaskInspector.close()` ne rappelle plus `onClose` après une clôture réussie. Si la flotte n'a pas retiré la tâche (busy, clôture non retenue), le panneau se ferme comme avant.
+- **Banc d'essai** : `bun run dev` puis `http://localhost:5173/repro-selection.html` (quatre cartes factices, boutons « flotte sans X » et « clôturer X »). Le compteur affiche les montages du panneau : 1 montage et 0 panneau vide sur une disparition prouvent qu'il n'a pas été démonté. Capture : [preuves/selection-voisine-panneau-ouvert.jpg](preuves/selection-voisine-panneau-ouvert.jpg).
+
+Tests : `ui/src/lib/selection.test.ts` (voisine au-dessus, repli en dessous, voisines masquées, liste vide) et `ui/src/store/fleetStore.test.ts` (`setFleet` et `closeSession`, aucune sélection automatique, tâche busy non retirée).

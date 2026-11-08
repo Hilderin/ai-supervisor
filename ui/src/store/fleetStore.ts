@@ -1,7 +1,8 @@
 import { create } from 'zustand';
 import type { Fleet, FleetRow } from '../types';
-import { assignOrder, loadOrder, saveOrder, type OrderState } from '../lib/order';
+import { assignOrder, loadOrder, saveOrder, sortByOrder, type OrderState } from '../lib/order';
 import { updatePlacements, type Placement } from '../lib/placement';
+import { selectionAfterChange } from '../lib/selection';
 
 const initialOrder = loadOrder();
 // Les rangs persistés sont considérés comme vus au chargement : une première
@@ -9,6 +10,22 @@ const initialOrder = loadOrder();
 const initialSeenAt = Object.fromEntries(
   Object.keys(initialOrder.order).map((id) => [id, Date.now()]),
 );
+
+/**
+ * Liste réellement affichée par la flotte : mêmes fermetures écartées et même
+ * tri que `FleetBoard`. Sert aussi à décider où glisse la sélection quand une
+ * tâche disparaît, pour ne jamais retenir une carte que l'écran ne montre pas.
+ */
+export function visibleRows(
+  fleet: Fleet | null,
+  order: Record<string, number>,
+  closed: Record<string, number>,
+): FleetRow[] {
+  return sortByOrder(
+    (fleet?.rows ?? []).filter((row) => !isClosedRow(row, closed)),
+    order,
+  );
+}
 
 interface FleetState {
   fleet: Fleet | null;
@@ -58,6 +75,15 @@ export const useFleetStore = create<FleetState>((set) => ({
       if (s.fleet && fleet.at < s.fleet.at) return s;
       const now = Date.now();
       const visible = fleet.rows.filter((row) => !isClosedRow(row, s.closed));
+      // liste affichée AVANT ce frame : elle donne la position qu'occupait la
+      // tâche sélectionnée, donc sa voisine en cas de disparition
+      const before = visibleRows(s.fleet, s.order, s.closed);
+      const slide = (rows: FleetRow[]) =>
+        selectionAfterChange(
+          s.selected,
+          before.map((row) => row.id),
+          rows.map((row) => row.id),
+        );
       if (!s.orderHydrated && visible.length === 0) {
         // Avant le premier snapshot utile, une frame vide ne doit pas toucher
         // aux rangs persistés (le daemon peut répondre avant d'avoir lu la flotte).
@@ -68,6 +94,7 @@ export const useFleetStore = create<FleetState>((set) => ({
           nextRank: s.nextRank,
           seenAt: s.seenAt,
           orderHydrated: false,
+          selected: slide(visibleRows(fleet, s.order, s.closed)),
         };
       }
       const firstMeaningful = !s.orderHydrated && visible.length > 0;
@@ -89,6 +116,7 @@ export const useFleetStore = create<FleetState>((set) => ({
         nextRank: assigned.state.nextRank,
         seenAt: assigned.state.seenAt,
         orderHydrated: s.orderHydrated || visible.length > 0,
+        selected: slide(visibleRows(fleet, assigned.state.order, s.closed)),
       };
     }),
   setError: (error) => set({ error }),
@@ -96,13 +124,27 @@ export const useFleetStore = create<FleetState>((set) => ({
     set((s) => (s.selected === id ? s : { selected: id })),
   closeSession: (id, at = Date.now()) =>
     set((s) => {
+      // même glissement que pour une disparition reçue du daemon : clôturer la
+      // tâche sélectionnée ouvre sa voisine sans refermer le panneau
+      const before = visibleRows(s.fleet, s.order, s.closed);
       // une session fermée puis rouverte repart en bas : on oublie son rang.
       const order = { ...s.order };
       const seenAt = { ...s.seenAt };
       delete order[id];
       delete seenAt[id];
+      const closed = { ...s.closed, [id]: at };
       saveOrder(order, s.nextRank);
-      return { closed: { ...s.closed, [id]: at }, order, seenAt };
+      const after = visibleRows(s.fleet, order, closed);
+      return {
+        closed,
+        order,
+        seenAt,
+        selected: selectionAfterChange(
+          s.selected,
+          before.map((row) => row.id),
+          after.map((row) => row.id),
+        ),
+      };
     }),
   setDraft: (id, text) =>
     set((s) => ({ drafts: { ...s.drafts, [id]: text } })),

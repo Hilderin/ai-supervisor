@@ -95,3 +95,137 @@ describe('fleetStore.setFleet', () => {
     expect(useFleetStore.getState().order.ses_test).toBe(3);
   });
 });
+
+describe('fleetStore : sélection du détail quand la tâche disparaît', () => {
+  const a = { ...row, id: 'a' };
+  const b = { ...row, id: 'b' };
+  const c = { ...row, id: 'c' };
+
+  beforeEach(() => {
+    useFleetStore.setState({
+      fleet: null,
+      placements: {},
+      order: {},
+      nextRank: 1,
+      seenAt: {},
+      orderHydrated: false,
+      selected: null,
+      closed: {},
+      drafts: {},
+      error: null,
+    });
+  });
+
+  /** Trois tâches affichées a, b, c ; sélection e. */
+  const threeRows = (selected: string) => {
+    useFleetStore.getState().setFleet(fleet(10, [a, b, c]));
+    useFleetStore.getState().setSelected(selected);
+  };
+
+  test('la tâche sélectionnée disparaît de la flotte : la voisine du dessus est retenue', () => {
+    threeRows('b');
+    useFleetStore.getState().setFleet(fleet(20, [a, c]));
+    expect(useFleetStore.getState().selected).toBe('a');
+  });
+
+  test('la première tâche disparaît : la voisine du dessous est retenue', () => {
+    threeRows('a');
+    useFleetStore.getState().setFleet(fleet(20, [b, c]));
+    expect(useFleetStore.getState().selected).toBe('b');
+  });
+
+  test('la dernière tâche disparaît : la voisine du dessus est retenue', () => {
+    threeRows('c');
+    useFleetStore.getState().setFleet(fleet(20, [a, b]));
+    expect(useFleetStore.getState().selected).toBe('b');
+  });
+
+  test('plus aucune tâche : la sélection est vidée', () => {
+    threeRows('a');
+    useFleetStore.getState().setFleet(fleet(20, []));
+    expect(useFleetStore.getState().selected).toBeNull();
+  });
+
+  test('aucune tâche sélectionnée : rien ne s’ouvre au démarrage', () => {
+    useFleetStore.getState().setFleet(fleet(10, [a, b, c]));
+    expect(useFleetStore.getState().selected).toBeNull();
+    useFleetStore.getState().setFleet(fleet(20, [a, c]));
+    expect(useFleetStore.getState().selected).toBeNull();
+  });
+
+  test('la disparition d’une autre tâche ne bouge pas la sélection', () => {
+    threeRows('c');
+    useFleetStore.getState().setFleet(fleet(20, [a, c]));
+    expect(useFleetStore.getState().selected).toBe('c');
+  });
+
+  test('une clôture depuis l’interface glisse vers la voisine du dessus', () => {
+    threeRows('b');
+    useFleetStore.getState().closeSession('b');
+    expect(useFleetStore.getState().selected).toBe('a');
+  });
+
+  test('une clôture de la première tâche glisse vers la voisine du dessous', () => {
+    threeRows('a');
+    useFleetStore.getState().closeSession('a');
+    expect(useFleetStore.getState().selected).toBe('b');
+  });
+
+  test('une clôture des autres tâches laisse la sélection en place', () => {
+    threeRows('a');
+    useFleetStore.getState().closeSession('c');
+    expect(useFleetStore.getState().selected).toBe('a');
+  });
+
+  test('la sélection ne s’accroche jamais à une tâche masquée par un filtre', () => {
+    // b est déjà fermée : elle sort de la liste affichée avant la sélection
+    useFleetStore.getState().setFleet(fleet(10, [a, b, c]));
+    useFleetStore.getState().closeSession('b', 15);
+    useFleetStore.getState().setSelected('b');
+    useFleetStore.getState().setFleet(fleet(20, [a, c]));
+    // b n'est pas sur l'écran : aucune voisine connue, donc pas de panneau
+    // ouvert sur une carte invisible
+    expect(useFleetStore.getState().selected).toBeNull();
+  });
+
+  test('une tâche busy clôturée n’est pas retirée : la sélection reste', () => {
+    useFleetStore.getState().setFleet(fleet(10, [a, { ...b, busy: 500 }, c]));
+    useFleetStore.getState().setSelected('b');
+    useFleetStore.getState().closeSession('b', 100);
+    expect(useFleetStore.getState().selected).toBe('b');
+  });
+
+  test('setFleet et closeSession retiennent la même voisine', () => {
+    threeRows('b');
+    useFleetStore.getState().setFleet(fleet(20, [a, c]));
+    const viaFleet = useFleetStore.getState().selected;
+
+    useFleetStore.setState({ fleet: null, order: {}, nextRank: 1, seenAt: {}, orderHydrated: false, closed: {}, selected: null });
+    threeRows('b');
+    useFleetStore.getState().closeSession('b');
+    const viaClose = useFleetStore.getState().selected;
+
+    expect(viaFleet).toBe('a');
+    expect(viaClose).toBe(viaFleet);
+  });
+
+  test('la disparition émet directement la voisine, sans sélection nulle intermédiaire', () => {
+    threeRows('b');
+    const seen: Array<string | null> = [];
+    const unsubscribe = useFleetStore.subscribe((s) => seen.push(s.selected));
+    useFleetStore.getState().setFleet(fleet(20, [a, c]));
+    unsubscribe();
+    // un seul état émis, déjà sur la voisine : le panneau n'a aucun frame vide
+    expect(seen).toEqual(['a']);
+  });
+
+  test('une clôture émet directement la voisine, sans sélection nulle intermédiaire', () => {
+    threeRows('b');
+    const seen: Array<string | null> = [];
+    const unsubscribe = useFleetStore.subscribe((s) => seen.push(s.selected));
+    useFleetStore.getState().closeSession('b');
+    unsubscribe();
+    expect(seen).toEqual(['a']);
+  });
+});
+

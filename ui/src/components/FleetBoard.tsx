@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { cardState } from '../lib/cardState';
 import { isWaiting } from '../lib/fleet';
-import { sortByOrder } from '../lib/order';
 import { cx } from '../lib/cx';
-import { isClosedRow, useFleetStore } from '../store/fleetStore';
+import { neighborSelection } from '../lib/selection';
+import { useFleetStore, visibleRows } from '../store/fleetStore';
 import type { Fleet } from '../types';
 import { SessionCard } from './SessionCard';
 
@@ -27,18 +27,29 @@ export function FleetBoard({ fleet, now, onOpenChamber }: Props) {
   const [flashId, setFlashId] = useState<string | null>(null);
   const nextWaiting = useRef(0);
 
-  const rows = sortByOrder(
-    (fleet?.rows ?? []).filter((row) => !isClosedRow(row, closed)),
-    order,
-  );
+  const rows = visibleRows(fleet, order, closed);
   const waiting = rows.filter(isWaiting);
   // Le détail de droite fournit la marge à droite de la liste quand il est ouvert ;
   // fermé, on ajoute cette marge pour que cartes et compteur ne touchent pas le bord.
   const detailOpen = !!selected && rows.some((row) => row.id === selected);
 
+  // Ordre affiché du rendu précédent : il garde la place de la tâche qui vient
+  // de disparaître, donc la voisine à retenir.
+  const previousIds = useRef<string[]>([]);
+
+  useLayoutEffect(() => {
+    if (!selected) return;
+    const visible = new Set(rows.map((row) => row.id));
+    if (visible.has(selected)) return;
+    // Le store fait déjà glisser la sélection de façon atomique (flotte et
+    // clôture) ; ce repli couvre une carte masquée par la vue elle-même, pour
+    // que la sélection ne porte jamais sur une tâche que l'écran ne montre pas.
+    setSelected(neighborSelection(previousIds.current, selected, visible));
+  });
+
   useEffect(() => {
-    if (selected && !rows.some((row) => row.id === selected)) setSelected(null);
-  }, [rows, selected, setSelected]);
+    previousIds.current = rows.map((row) => row.id);
+  }, [rows]);
 
   useEffect(() => {
     if (!flashId) return;
