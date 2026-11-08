@@ -3,6 +3,7 @@ import {
   abortSupervisor, cancelQueuedSupervisor, fetchSupervisor, newSupervisor,
   queueSupervisor, revertSupervisor, sendSupervisor, updateSupervisorMode,
 } from '../lib/api';
+import type { ComposerAttachment } from '../lib/attachments';
 import type { SupervisorState } from '../types';
 
 interface SupervisorStore {
@@ -20,7 +21,10 @@ interface SupervisorStore {
   /** erreur du dernier poll */
   refreshError: string | null;
   draft: string;
+  /** pièces jointes du brouillon : collées, déposées ou choisies */
+  attachments: ComposerAttachment[];
   setDraft: (text: string) => void;
+  setAttachments: (next: ComposerAttachment[]) => void;
   clearErrors: () => void;
   refresh: () => Promise<void>;
   send: (text: string) => Promise<void>;
@@ -42,8 +46,11 @@ export const useSupervisorStore = create<SupervisorStore>((set, get) => ({
   sendError: null,
   refreshError: null,
   draft: '',
+  attachments: [],
 
   setDraft: (draft) => set({ draft }),
+
+  setAttachments: (attachments) => set({ attachments }),
 
   clearErrors: () => set({ sendError: null, refreshError: null }),
 
@@ -65,7 +72,9 @@ export const useSupervisorStore = create<SupervisorStore>((set, get) => ({
 
   send: async (text) => {
     const value = text.trim();
-    if (!value || get().modeUpdating) return;
+    const attachments = get().attachments;
+    if ((!value && !attachments.length) || get().modeUpdating) return;
+    const label = value || 'Pièce jointe';
     const before = get().state;
     // pendant un tour (ou juste après un envoi), le message part en file :
     // OpenChamber le livrera dès que la session redevient idle
@@ -75,19 +84,20 @@ export const useSupervisorStore = create<SupervisorStore>((set, get) => ({
             ...before,
             queued: [
               ...(before.queued ?? []),
-              { id: `local-queue-${Date.now()}`, text: value, at: Date.now() },
+              { id: `local-queue-${Date.now()}`, text: label, at: Date.now() },
             ],
           }
         : before;
-      set({ state: temp, sendError: null, refreshError: null, draft: '' });
+      set({ state: temp, sendError: null, refreshError: null, draft: '', attachments: [] });
       try {
-        const next = await queueSupervisor(value);
+        const next = await queueSupervisor(value, attachments);
         set({ state: next, loading: false, sendError: null });
       } catch {
         set({
           state: before,
           sendError: 'Mise en file impossible. Le superviseur ne répond pas.',
           draft: value,
+          attachments,
         });
       }
       return;
@@ -98,18 +108,25 @@ export const useSupervisorStore = create<SupervisorStore>((set, get) => ({
           status: 'busy' as const,
           messages: [
             ...before.messages,
-            { id: `local-${Date.now()}`, role: 'user' as const, at: Date.now(), text: value, tools: [] },
+            { id: `local-${Date.now()}`, role: 'user' as const, at: Date.now(), text: label, tools: [] },
           ],
         }
       : before;
-    set({ state: temp, sending: true, sendError: null, refreshError: null, draft: '' });
+    set({ state: temp, sending: true, sendError: null, refreshError: null, draft: '', attachments: [] });
     try {
-      const next = await sendSupervisor(value);
+      const next = await sendSupervisor(value, attachments);
       set({ state: next, sending: false, loading: false, sendError: null });
     } catch {
       // le message n'est pas parti : on retire la bulle optimiste, on rend le
-      // brouillon et on garde une erreur locale que le poll ne peut pas effacer
-      set({ state: before, sending: false, sendError: 'Envoi impossible. Le superviseur ne répond pas.', draft: value });
+      // brouillon (et ses pièces jointes) avec une erreur locale que le poll
+      // ne peut pas effacer
+      set({
+        state: before,
+        sending: false,
+        sendError: 'Envoi impossible. Le superviseur ne répond pas.',
+        draft: value,
+        attachments,
+      });
     }
   },
 
@@ -155,6 +172,7 @@ export const useSupervisorStore = create<SupervisorStore>((set, get) => ({
       sendError: null,
       refreshError: null,
       draft: '',
+      attachments: [],
       state: before ? { ...before, sessionId: null, messages: [], queued: [], status: 'idle', error: undefined } : before,
     });
     try {

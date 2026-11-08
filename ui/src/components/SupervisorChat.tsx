@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useSupervisor } from '../hooks/useSupervisor';
 import { cx } from '../lib/cx';
 import { taskTitleOf } from '../lib/fleet';
@@ -6,6 +6,7 @@ import { useFleetStore } from '../store/fleetStore';
 import { useSupervisorStore } from '../store/supervisorStore';
 import type { ChatTool, Fleet, SupervisorMessage } from '../types';
 import { ChatMarkdown } from './ChatMarkdown';
+import { ComposerInput } from './ComposerInput';
 import { BroomIcon, CopyIcon, OpenChamberIcon, PanelLeftIcon, RevertIcon, SendIcon, StopIcon } from './Icons';
 
 interface Props {
@@ -222,6 +223,8 @@ export function SupervisorChat({ onCollapse, onOpenMiniChat }: Props) {
   const error = sendError ?? refreshError;
   const draft = useSupervisorStore((s) => s.draft);
   const setDraft = useSupervisorStore((s) => s.setDraft);
+  const attachments = useSupervisorStore((s) => s.attachments);
+  const setAttachments = useSupervisorStore((s) => s.setAttachments);
   const send = useSupervisorStore((s) => s.send);
   const removeQueued = useSupervisorStore((s) => s.removeQueued);
   const revert = useSupervisorStore((s) => s.revert);
@@ -235,7 +238,6 @@ export function SupervisorChat({ onCollapse, onOpenMiniChat }: Props) {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const focusAfterClean = useRef(false);
   const [stick, setStick] = useState(true);
-  const [atMax, setAtMax] = useState(false);
   const [composerHeight, setComposerHeight] = useState(() =>
     clampComposer(Number(localStorage.getItem('superviseur.composerHeight')) || MIN_COMPOSER),
   );
@@ -253,16 +255,6 @@ export function SupervisorChat({ onCollapse, onOpenMiniChat }: Props) {
   useEffect(() => {
     localStorage.setItem('superviseur.composerHeight', String(composerHeight));
   }, [composerHeight]);
-
-  useLayoutEffect(() => {
-    const ta = inputRef.current;
-    if (!ta) return;
-    ta.style.height = 'auto';
-    const natural = ta.scrollHeight + 1;
-    const height = Math.max(composerHeight, Math.min(natural, MAX_COMPOSER));
-    setAtMax(natural > MAX_COMPOSER);
-    ta.style.height = `${height}px`;
-  }, [draft, composerHeight]);
 
   useEffect(() => {
     const el = listRef.current;
@@ -283,9 +275,11 @@ export function SupervisorChat({ onCollapse, onOpenMiniChat }: Props) {
     void newConversation();
   };
 
+  const hasContent = !!draft.trim() || attachments.length > 0;
+
   const submit = () => {
     const value = draft.trim();
-    if (!value || creating || reverting) return;
+    if ((!value && !attachments.length) || creating || reverting) return;
     void send(value);
     setStick(true);
   };
@@ -525,49 +519,45 @@ export function SupervisorChat({ onCollapse, onOpenMiniChat }: Props) {
               ))}
             </div>
           ) : null}
-          <div className="flex items-end gap-[7px]">
-            <textarea
-              ref={inputRef}
-              data-testid="supervisor-composer"
-              rows={1}
-              value={draft}
-              disabled={creating}
-              placeholder={
-                creating
-                  ? 'Nettoyage…'
-                  : busy
-                    ? 'Ton message sera mis en file…'
-                    : mode === 'investigation'
-                      ? 'Que veux-tu explorer dans ce projet ?'
-                      : 'Décris une tâche…'
-              }
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  submit();
-                }
-              }}
-              className={cx(
-                'min-h-[34px] flex-1 resize-none rounded-[8px] border border-border bg-white px-[9px] py-[7px] font-[inherit] text-[13px] leading-[1.45] text-text outline-none placeholder:text-placeholder focus:border-[#c9cfc9] disabled:opacity-60',
-                atMax ? 'overflow-y-auto' : 'overflow-y-hidden',
-              )}
-            />
-            <ComposerActions
-              canStop={canStop && !creating && !reverting}
-              hasText={!!draft.trim()}
-              disabled={sending || creating || reverting || !draft.trim()}
-              onSend={submit}
-              onStop={() => void stop()}
-            />
-          </div>
-          <div className="mt-[5px] text-[10.5px] text-placeholder">
-            {busy && draft.trim()
-              ? "Entrée pour mettre en file, Maj+Entrée pour une nouvelle ligne."
-              : busy
-                ? 'Le superviseur travaille : ton message sera mis en file.'
-                : 'Entrée pour envoyer, Maj+Entrée pour une nouvelle ligne.'}
-          </div>
+          <ComposerInput
+            value={draft}
+            onChange={setDraft}
+            onSubmit={submit}
+            disabled={creating}
+            placeholder={
+              creating
+                ? 'Nettoyage…'
+                : busy
+                  ? 'Ton message sera mis en file…'
+                  : mode === 'investigation'
+                    ? 'Que veux-tu explorer dans ce projet ?'
+                    : 'Décris une tâche…'
+            }
+            attachments={attachments}
+            onAttachmentsChange={setAttachments}
+            textareaRef={inputRef}
+            textareaTestId="supervisor-composer"
+            ariaLabel="Message au superviseur"
+            minHeight={composerHeight}
+            maxHeight={MAX_COMPOSER}
+            textareaClassName="min-h-[34px] rounded-[8px] border border-border bg-white px-[9px] py-[7px] font-[inherit] text-[13px] leading-[1.45] text-text focus:border-[#c9cfc9] disabled:opacity-60"
+            actions={
+              <ComposerActions
+                canStop={canStop && !creating && !reverting}
+                hasText={hasContent}
+                disabled={sending || creating || reverting || !hasContent}
+                onSend={submit}
+                onStop={() => void stop()}
+              />
+            }
+            footer={
+              busy ? (
+                <div className="mt-[5px] text-[10.5px] text-placeholder">
+                  Le superviseur travaille : ton message sera mis en file.
+                </div>
+              ) : undefined
+            }
+          />
         </div>
       </div>
     </aside>

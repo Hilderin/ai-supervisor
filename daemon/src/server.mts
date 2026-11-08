@@ -18,6 +18,7 @@ import { cancelPendingForms, configureSupervisorMode, pendingFor, runTool, super
 import { runCriteriaTool } from './criteria-tools.mts';
 import { runVerifierTool } from './verifier-tools.mts';
 import { criteriaCounts, listCriteria } from './criteria.mts';
+import { toPromptFiles } from './attachments.mts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 // le build Vite (bun run build:ui) ; le daemon ne sert que des fichiers produits
@@ -150,7 +151,7 @@ async function handleApi(req: http.IncomingMessage, res: http.ServerResponse, ur
   if (path === '/api/supervisor/send' && req.method === 'POST') {
     const body = await readBody(req);
     try {
-      json(res, 200, await sendSupervisor(String(body.text ?? '')));
+      json(res, 200, await sendSupervisor(String(body.text ?? ''), body.attachments));
     } catch (e) {
       json(res, 502, { error: String(e) });
     }
@@ -159,7 +160,7 @@ async function handleApi(req: http.IncomingMessage, res: http.ServerResponse, ur
   if (path === '/api/supervisor/queue' && req.method === 'POST') {
     const body = await readBody(req);
     try {
-      json(res, 200, await queueSupervisor(String(body.text ?? '')));
+      json(res, 200, await queueSupervisor(String(body.text ?? ''), body.attachments));
     } catch (e) {
       json(res, 502, { error: String(e) });
     }
@@ -334,7 +335,8 @@ async function handleApi(req: http.IncomingMessage, res: http.ServerResponse, ur
     const body = await readBody(req);
     const sessionId = String(body.sessionId ?? '');
     const text = String(body.text ?? '').trim();
-    if (!sessionId || !text) { json(res, 400, { error: 'sessionId et text requis' }); return; }
+    const files = toPromptFiles(body.attachments);
+    if (!sessionId || (!text && !files.length)) { json(res, 400, { error: 'sessionId et text (ou une pièce jointe) requis' }); return; }
     const pending = await pendingFor(sessionId);
     if (pending.permissions) {
       json(res, 409, { error: 'waiting_human', kind: 'permission', message: 'une permission attend sur la carte' });
@@ -351,12 +353,18 @@ async function handleApi(req: http.IncomingMessage, res: http.ServerResponse, ur
         cancelledQuestion = pending.forms[0].text;
         logEvent(sessionId, 'note', `question annulée par message : ${cancelledQuestion}`);
       }
-      logEvent(sessionId, 'note', '→ prompt : ' + text.slice(0, 120));
+      const promptText = text || 'Voir la pièce jointe.';
+      logEvent(sessionId, 'note', '→ prompt : ' + promptText.slice(0, 120)
+        + (files.length ? ` (+${files.length} fichier${files.length > 1 ? 's' : ''})` : ''));
       // même encadrement que le chat : l'instruction du propriétaire demande
       // la mise à jour du plan, et le texte brut reste dans le journal
       const out = await relay(`/api/session/${sessionId}/prompt`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: wrapOwnerPrompt(text), delivery: body.delivery ?? 'steer' }),
+        body: JSON.stringify({
+          text: wrapOwnerPrompt(promptText),
+          delivery: body.delivery ?? 'steer',
+          ...(files.length ? { files } : {}),
+        }),
       });
       json(res, 200, { ...(out as object), cancelledQuestion });
     } catch (e) { json(res, 502, { error: String(e) }); }

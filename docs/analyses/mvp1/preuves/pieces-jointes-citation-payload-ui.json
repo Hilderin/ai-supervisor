@@ -1,0 +1,14 @@
+{
+  "verifiedAt": "2026-11-08T16:50:00.000Z",
+  "how": "Playwright sur http://127.0.0.1:5180/fleet, POST /api/fleet/send intercepté après collage de deux fichiers dans le détail d'une carte",
+  "draftAfterPaste": "Regarde [image-1.png] [note-test.txt]",
+  "request": {
+    "sessionId": "ses_e440e8523ffeOSc51kq46lkeNT",
+    "text": "Regarde [image-1.png] [note-test.txt]",
+    "attachments": [
+      { "name": "image-1.png", "mimeType": "image/png", "size": 177, "dataUrlPrefix": "data:image/png;base64,iVBORw0K" },
+      { "name": "note-test.txt", "mimeType": "text/plain", "size": 55, "dataUrlPrefix": "data:text/plain;base64,Q2VjaSB" }
+    ]
+  },
+  "result": "la citation insérée est exactement le texte envoyé, et son nom [image-1.png] correspond au nom de la pièce jointe transmise"
+}

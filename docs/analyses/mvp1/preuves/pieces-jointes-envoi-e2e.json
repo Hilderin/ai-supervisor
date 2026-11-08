@@ -1,0 +1,23 @@
+{
+  "verifiedAt": "2026-11-08T16:22:16.807Z",
+  "endpoint": "POST http://127.0.0.1:5180/api/fleet/send",
+  "sessionId": "ses_e4408d982ffeK1H1IEBdjFOOQx",
+  "messageId": "msg_1bbf73087001ixvZmp9UVhmD95",
+  "messageText": "Nouvelle instruction de l’utilisateur : mets ton plan à jour au besoin ; définis ou mets à jour tes critères d’acceptation (criteria_add, criteria_to_validate : le vérificateur du Superviseur juge tes preuves) ; les réponses pour le propriétaire partent avec le tool `answer` (elles s’affichent dans le Superviseur) :\n\nTest e2e pièces jointes : confirme en une phrase que tu vois une image et un fichier texte.",
+  "files": [
+    {
+      "name": "capture-test.png",
+      "mime": "image/png",
+      "source": "inline",
+      "base64Bytes": 177
+    },
+    {
+      "name": "note-test.txt",
+      "mime": "text/plain",
+      "source": "inline",
+      "base64Bytes": 57
+    }
+  ],
+  "assistantAnswer": "Je vois le fichier texte `note-test.txt` dont le contenu est : « Ceci est un fichier texte de test pour le Superviseur. » En revanche, je ne peux pas lire l'image `capture-test.png` car ce modèle ne prend pas en charge l'entrée d'images.",
+  "note": "Le modèle de test ne prend pas en charge les images : il confirme la lecture du fichier texte; les deux parties fichier inline (image/png et text/plain) sont présentes dans le message utilisateur."
+}

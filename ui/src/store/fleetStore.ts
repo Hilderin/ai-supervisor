@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { Fleet, FleetRow } from '../types';
+import type { ComposerAttachment } from '../lib/attachments';
 import { assignOrder, loadOrder, saveOrder, sortByOrder, type OrderState } from '../lib/order';
 import { updatePlacements, type Placement } from '../lib/placement';
 import { selectionAfterChange } from '../lib/selection';
@@ -10,6 +11,28 @@ const initialOrder = loadOrder();
 const initialSeenAt = Object.fromEntries(
   Object.keys(initialOrder.order).map((id) => [id, Date.now()]),
 );
+
+/** Session dont le panneau de détail était ouvert à la dernière visite. */
+export const SELECTED_STORAGE_KEY = 'superviseur.selected';
+
+function loadSelected(): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    return window.localStorage.getItem(SELECTED_STORAGE_KEY) || null;
+  } catch {
+    return null;
+  }
+}
+
+function saveSelected(id: string | null): void {
+  if (typeof window === 'undefined') return;
+  try {
+    if (id) window.localStorage.setItem(SELECTED_STORAGE_KEY, id);
+    else window.localStorage.removeItem(SELECTED_STORAGE_KEY);
+  } catch {
+    /* stockage plein ou désactivé : l'ouverture reste en mémoire */
+  }
+}
 
 /**
  * Liste réellement affichée par la flotte : mêmes fermetures écartées et même
@@ -45,6 +68,8 @@ interface FleetState {
   closed: Record<string, number>;
   /** brouillons du composer, conservés même si la carte change de section */
   drafts: Record<string, string>;
+  /** pièces jointes du brouillon, par session (même raison que les brouillons) */
+  attachments: Record<string, ComposerAttachment[]>;
   /** composer qui tient le focus : restauré quand React démonte/remonte la carte */
   focused: string | null;
   setFleet: (fleet: Fleet) => void;
@@ -53,6 +78,7 @@ interface FleetState {
   closeSession: (id: string, at?: number) => void;
   setDraft: (id: string, text: string) => void;
   clearDraft: (id: string) => void;
+  setAttachments: (id: string, next: ComposerAttachment[]) => void;
   setFocus: (id: string | null) => void;
 }
 
@@ -64,9 +90,10 @@ export const useFleetStore = create<FleetState>((set) => ({
   nextRank: initialOrder.nextRank,
   seenAt: initialSeenAt,
   orderHydrated: false,
-  selected: null,
+  selected: loadSelected(),
   closed: {},
   drafts: {},
+  attachments: {},
   focused: null,
   setFleet: (fleet) =>
     set((s) => {
@@ -86,7 +113,8 @@ export const useFleetStore = create<FleetState>((set) => ({
         );
       if (!s.orderHydrated && visible.length === 0) {
         // Avant le premier snapshot utile, une frame vide ne doit pas toucher
-        // aux rangs persistés (le daemon peut répondre avant d'avoir lu la flotte).
+        // aux rangs persistés (le daemon peut répondre avant d'avoir lu la flotte),
+        // ni refermer la tâche dont le détail était ouvert à la dernière visite.
         return {
           fleet,
           placements: updatePlacements(s.placements, fleet.rows, now),
@@ -94,7 +122,7 @@ export const useFleetStore = create<FleetState>((set) => ({
           nextRank: s.nextRank,
           seenAt: s.seenAt,
           orderHydrated: false,
-          selected: slide(visibleRows(fleet, s.order, s.closed)),
+          selected: s.selected,
         };
       }
       const firstMeaningful = !s.orderHydrated && visible.length > 0;
@@ -109,6 +137,8 @@ export const useFleetStore = create<FleetState>((set) => ({
       }
       const assigned = assignOrder(previous, visible, now);
       if (assigned.changed) saveOrder(assigned.state.order, assigned.state.nextRank);
+      const selected = slide(visibleRows(fleet, assigned.state.order, s.closed));
+      if (selected !== s.selected) saveSelected(selected);
       return {
         fleet,
         placements: updatePlacements(s.placements, fleet.rows, now),
@@ -116,12 +146,16 @@ export const useFleetStore = create<FleetState>((set) => ({
         nextRank: assigned.state.nextRank,
         seenAt: assigned.state.seenAt,
         orderHydrated: s.orderHydrated || visible.length > 0,
-        selected: slide(visibleRows(fleet, assigned.state.order, s.closed)),
+        selected,
       };
     }),
   setError: (error) => set({ error }),
   setSelected: (id) =>
-    set((s) => (s.selected === id ? s : { selected: id })),
+    set((s) => {
+      if (s.selected === id) return s;
+      saveSelected(id);
+      return { selected: id };
+    }),
   closeSession: (id, at = Date.now()) =>
     set((s) => {
       // même glissement que pour une disparition reçue du daemon : clôturer la
@@ -135,16 +169,13 @@ export const useFleetStore = create<FleetState>((set) => ({
       const closed = { ...s.closed, [id]: at };
       saveOrder(order, s.nextRank);
       const after = visibleRows(s.fleet, order, closed);
-      return {
-        closed,
-        order,
-        seenAt,
-        selected: selectionAfterChange(
-          s.selected,
-          before.map((row) => row.id),
-          after.map((row) => row.id),
-        ),
-      };
+      const selected = selectionAfterChange(
+        s.selected,
+        before.map((row) => row.id),
+        after.map((row) => row.id),
+      );
+      if (selected !== s.selected) saveSelected(selected);
+      return { closed, order, seenAt, selected };
     }),
   setDraft: (id, text) =>
     set((s) => ({ drafts: { ...s.drafts, [id]: text } })),
@@ -154,6 +185,13 @@ export const useFleetStore = create<FleetState>((set) => ({
       const drafts = { ...s.drafts };
       delete drafts[id];
       return { drafts };
+    }),
+  setAttachments: (id, next) =>
+    set((s) => {
+      const attachments = { ...s.attachments };
+      if (next.length) attachments[id] = next;
+      else delete attachments[id];
+      return { attachments };
     }),
   setFocus: (id) =>
     set((s) => {

@@ -1,0 +1,16 @@
+{
+  "verifiedAt": "2026-11-08T16:30:00.000Z",
+  "path": "newSupervisorConversation + sendSupervisor (daemon/src/supervisor.mts) -> POST /api/session/:id/prompt avec files",
+  "sessionId": "ses_e44060991ffeVWKvlUn7RT383K",
+  "sessionSetup": {
+    "agent": "superviseur-orchestrateur-873038d",
+    "model": { "id": "DeepSeek-V4.1-Flash-1017", "providerID": "skytech", "variant": "default" }
+  },
+  "messageText": "Test superviseur : lis la pièce jointe texte et confirme son contenu.",
+  "files": [
+    { "name": "capture-test.png", "mime": "image/png", "source": "inline" },
+    { "name": "note-test.txt", "mime": "text/plain", "source": "inline" }
+  ],
+  "cleanup": "session de test supprimée (DELETE /api/session/:id → 204)",
+  "note": "Chat neuf (« Nettoyer ») isolé par SUPERVISEUR_HOME et SUPERVISEUR_DATA_DIR temporaires : l'agent et le modèle sont posés avant le prompt, les deux fichiers inline arrivent dans le message utilisateur, la conversation du propriétaire n'a pas été touchée."
+}

@@ -15,6 +15,8 @@ import {
   logEvent, setSupervisorSession,
 } from './state.mts';
 import { messageText } from './messages.mts';
+import { toPromptFiles, toQueueAttachments } from './attachments.mts';
+import { defaultModelRef } from './resume.mts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 export const SUPERVISOR_DIR = process.env.SUPERVISEUR_HOME ?? join(homedir(), '.superviseur');
@@ -223,6 +225,35 @@ async function switchSessionAgent(id: string, agent: string): Promise<boolean> {
   }
 }
 
+/**
+ * Une session ouverte par l'API sans prompt n'a ni agent ni modèle (le champ
+ * `agent` de la création n'est appliqué qu'avec un prompt). Le prompt v2 ne
+ * les choisit pas : on les pose ici avant d'envoyer, sinon un chat « Nettoyé »
+ * repartirait sur l'agent par défaut, voire sans modèle.
+ */
+async function applySessionSetup(id: string, agent: string): Promise<void> {
+  let meta: { data?: { agent?: string; model?: { id?: string; providerID?: string } } } | null = null;
+  try {
+    meta = await jget(`/api/session/${encodeURIComponent(id)}`) as {
+      data?: { agent?: string; model?: { id?: string; providerID?: string } };
+    };
+  } catch { /* session neuve ou lecture impossible : les writes diront */ }
+  if (meta?.data?.agent !== agent) await switchSessionAgent(id, agent);
+  const model = meta?.data?.model;
+  if (model?.id && model.providerID) return;
+  const ref = await defaultModelRef();
+  if (!ref) return;
+  const slash = ref.indexOf('/');
+  const providerID = slash > 0 ? ref.slice(0, slash) : '';
+  const modelID = slash > 0 ? ref.slice(slash + 1) : '';
+  if (!providerID || !modelID) return;
+  try {
+    await jpost(`/api/session/${encodeURIComponent(id)}/model`, {
+      model: { providerID, id: modelID },
+    });
+  } catch { /* le send signalera l'échec */ }
+}
+
 function sameDirectory(a: string | null | undefined, b: string | null | undefined): boolean {
   if (!a || !b) return false;
   return a.replace(/\/+$/, '') === b.replace(/\/+$/, '');
@@ -257,6 +288,7 @@ async function createSupervisorSession(agent: string): Promise<string> {
   });
   const id = (out.data as { sessionId?: string })?.sessionId;
   if (!out.ok || !id) throw new Error(`création session superviseur → ${out.status}`);
+  await applySessionSetup(id, agent);
   await quietWorkOnce(id);
   return id;
 }
@@ -558,16 +590,20 @@ export function stripOwnerWrap(text: string): string {
   return body;
 }
 
-export async function sendSupervisor(text: string): Promise<SupervisorState> {
+export async function sendSupervisor(text: string, rawAttachments: unknown = []): Promise<SupervisorState> {
   const clean = String(text ?? '').trim();
-  if (!clean) return getSupervisorState();
+  const files = toPromptFiles(rawAttachments);
+  if (!clean && !files.length) return getSupervisorState();
   const { id, agent } = await ensureSupervisorSession();
+  await applySessionSetup(id, agent);
   const mode = getSupervisorMode();
-  const prompt = wrapSupervisorPrompt(clean, mode.mode, mode.projectDir);
-  const out = await jpost(`/api/openchamber/sessions/${id}/send`, {
-    prompt,
-    agent,
-    directory: SUPERVISOR_DIR,
+  const prompt = wrapSupervisorPrompt(clean || 'Voir la pièce jointe.', mode.mode, mode.projectDir);
+  // le prompt v2 porte les pièces jointes ; l'agent est déjà sur la session
+  // (ensureSupervisorSession le bascule en place), le champ `agent` n'existe
+  // pas sur cette route.
+  const out = await jpost(`/api/session/${encodeURIComponent(id)}/prompt`, {
+    text: prompt,
+    ...(files.length ? { files } : {}),
   });
   if (!out.ok) throw new Error(`envoi superviseur → ${out.status}`);
   // règle OpenChamber : un message envoyé ouvre la session dans « In work ».
@@ -576,7 +612,7 @@ export async function sendSupervisor(text: string): Promise<SupervisorState> {
   await quietWork(id);
   const late = setTimeout(() => { void quietWork(id); }, 2500);
   late.unref?.();
-  logEvent('supervisor', 'note', `→ ${clean.slice(0, 120)}`);
+  logEvent('supervisor', 'note', `→ ${clean.slice(0, 120)}${files.length ? ` (+${files.length} fichier${files.length > 1 ? 's' : ''})` : ''}`);
   return getSupervisorState();
 }
 
@@ -584,20 +620,27 @@ export async function sendSupervisor(text: string): Promise<SupervisorState> {
  * Message écrit pendant un tour : la file OpenChamber le délivre quand la
  * session redevient idle, comme dans OpenChamber.
  */
-export async function queueSupervisor(text: string): Promise<SupervisorState> {
+export async function queueSupervisor(text: string, rawAttachments: unknown = []): Promise<SupervisorState> {
   const clean = String(text ?? '').trim();
-  if (!clean) return getSupervisorState();
+  const attachments = toQueueAttachments(rawAttachments);
+  if (!clean && !attachments.length) return getSupervisorState();
   const { id, agent } = await ensureSupervisorSession();
+  await applySessionSetup(id, agent);
   const mode = getSupervisorMode();
   const sendConfig = await sendConfigOf(id, agent);
   if (!sendConfig) throw new Error('modèle du superviseur introuvable');
-  const wrapped = wrapSupervisorPrompt(clean, mode.mode, mode.projectDir);
+  const wrapped = wrapSupervisorPrompt(clean || 'Voir la pièce jointe.', mode.mode, mode.projectDir);
   const out = await jpost(`/api/message-queue/sessions/${encodeURIComponent(id)}/items`, {
     directory: SUPERVISOR_DIR,
-    item: { content: wrapped, text: wrapped, sendConfig },
+    item: {
+      content: wrapped,
+      text: wrapped,
+      sendConfig,
+      ...(attachments.length ? { attachments } : {}),
+    },
   });
   if (!out.ok) throw new Error(`file d'attente superviseur → ${out.status}`);
-  logEvent('supervisor', 'note', `file → ${clean.slice(0, 120)}`);
+  logEvent('supervisor', 'note', `file → ${clean.slice(0, 120)}${attachments.length ? ` (+${attachments.length} fichier${attachments.length > 1 ? 's' : ''})` : ''}`);
   return getSupervisorState();
 }
 

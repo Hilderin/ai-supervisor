@@ -1,83 +1,76 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useRef } from 'react';
 import { sendPrompt } from '../lib/api';
+import type { ComposerAttachment } from '../lib/attachments';
 import { cx } from '../lib/cx';
 import { INPUT } from '../lib/ui';
 import { useFleetStore } from '../store/fleetStore';
+import { ComposerInput } from './ComposerInput';
 import { SendIcon } from './Icons';
 
-const MAX_HEIGHT = 120;
+const EMPTY: ComposerAttachment[] = [];
 
-/** Composer du détail : auto-grow (plafond 120 px), Entrée envoie. */
+/** Composer du détail : même zone de saisie que le chat (collage, dépôt, pièces jointes). */
 export function Composer({ sessionId }: { sessionId: string }) {
   const text = useFleetStore((s) => s.drafts[sessionId] ?? '');
+  const attachments = useFleetStore((s) => s.attachments[sessionId] ?? EMPTY);
   const setDraft = useFleetStore((s) => s.setDraft);
   const clearDraft = useFleetStore((s) => s.clearDraft);
+  const setAttachments = useFleetStore((s) => s.setAttachments);
   const ref = useRef<HTMLTextAreaElement>(null);
-  const interacted = useRef(false);
-  const [atMax, setAtMax] = useState(false);
-
-  useLayoutEffect(() => {
-    const ta = ref.current;
-    if (!ta) return;
-    // au premier rendu à vide, laisser la hauteur auto (comme la maquette) ;
-    // ensuite (frappe, brouillon restauré) ajuster à scrollHeight + 1
-    if (!text && !interacted.current) return;
-    const isMax = ta.scrollHeight > MAX_HEIGHT;
-    setAtMax(isMax);
-    ta.style.height = 'auto';
-    ta.style.height = `${isMax ? MAX_HEIGHT : ta.scrollHeight + 1}px`;
-  }, [text]);
 
   const send = () => {
     const value = text.trim();
-    if (!value) return;
+    if (!value && !attachments.length) return;
     clearDraft(sessionId);
+    setAttachments(sessionId, []);
     if (document.activeElement !== ref.current) ref.current?.focus();
-    void sendPrompt(sessionId, value).catch((e) => console.error('[send]', e));
+    void sendPrompt(sessionId, value, attachments).catch((e) => {
+      console.error('[send]', e);
+      // le message n'est pas parti : rendre le brouillon et ses pièces jointes,
+      // sans écraser ce que le propriétaire aurait déjà retapé entre-temps
+      const store = useFleetStore.getState();
+      if (!store.drafts[sessionId]) setDraft(sessionId, value);
+      if (!(store.attachments[sessionId]?.length ?? 0)) setAttachments(sessionId, attachments);
+    });
   };
 
+  const hasContent = !!text.trim() || attachments.length > 0;
+
   return (
-    <div
-      data-composer
-      onClick={(e) => e.stopPropagation()}
-      onPointerDown={(e) => e.stopPropagation()}
-      className="mt-[12px] flex items-end gap-[7px] border-t border-border pt-[10px]"
-    >
-      <textarea
-        ref={ref}
-        rows={1}
-        value={text}
-        placeholder="Écrire à cette tâche…"
-        onChange={(e) => {
-          interacted.current = true;
-          setDraft(sessionId, e.target.value);
-        }}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
+    <ComposerInput
+      value={text}
+      onChange={(value) => setDraft(sessionId, value)}
+      onSubmit={send}
+      placeholder="Écrire à cette tâche…"
+      attachments={attachments}
+      onAttachmentsChange={(next) => setAttachments(sessionId, next)}
+      textareaRef={ref}
+      maxHeight={120}
+      ariaLabel="Écrire à cette tâche"
+      textareaTestId="task-composer"
+      textareaClassName={cx(
+        INPUT,
+        'flex-1 text-[14px] leading-[1.45] focus:border-[#c9cfc9]',
+      )}
+      actions={
+        <button
+          type="button"
+          title="Envoyer"
+          aria-label="Envoyer"
+          onClick={(e) => {
+            e.stopPropagation();
             send();
-          }
-        }}
-        className={cx(
-          INPUT,
-          'max-h-[120px] flex-1 resize-none text-[14px] leading-[1.45] focus:border-[#c9cfc9]',
-          atMax ? 'overflow-y-auto' : 'overflow-y-hidden',
-        )}
-      />
-      <button
-        type="button"
-        title="Envoyer"
-        onClick={(e) => {
-          e.stopPropagation();
-          send();
-        }}
-        className={cx(
-          'h-[26px] w-[26px] shrink-0 cursor-pointer rounded-[7px] bg-transparent p-[2px] text-arrow transition-colors hover:text-green',
-          text.trim() ? 'text-green' : null,
-        )}
-      >
-        <SendIcon />
-      </button>
-    </div>
+          }}
+          disabled={!hasContent}
+          className={cx(
+            'h-[26px] w-[26px] shrink-0 cursor-pointer rounded-[7px] bg-transparent p-[2px] text-arrow transition-colors hover:text-green disabled:cursor-default disabled:opacity-40',
+            hasContent ? 'text-green' : null,
+          )}
+        >
+          <SendIcon />
+        </button>
+      }
+      className="mt-[12px] border-t border-border pt-[10px]"
+    />
   );
 }

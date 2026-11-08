@@ -1,4 +1,5 @@
 import type { Criterion, CriteriaCounts, Delivery, Fleet, SupervisorProject, SupervisorState, TaskAnswer } from '../types';
+import type { ComposerAttachment } from './attachments';
 
 async function post(path: string, body: unknown): Promise<void> {
   const res = await fetch(path, {
@@ -49,13 +50,13 @@ export async function updateSupervisorMode(
   return { mode: body.mode ?? mode, projectDirectory: body.projectDirectory ?? projectDirectory };
 }
 
-export async function sendSupervisor(text: string): Promise<SupervisorState> {
-  return postJson<SupervisorState>('/api/supervisor/send', { text });
+export async function sendSupervisor(text: string, attachments: ComposerAttachment[] = []): Promise<SupervisorState> {
+  return postJson<SupervisorState>('/api/supervisor/send', { text, attachments });
 }
 
 /** Message pendant un tour : file OpenChamber, livrée à la fin. */
-export async function queueSupervisor(text: string): Promise<SupervisorState> {
-  return postJson<SupervisorState>('/api/supervisor/queue', { text });
+export async function queueSupervisor(text: string, attachments: ComposerAttachment[] = []): Promise<SupervisorState> {
+  return postJson<SupervisorState>('/api/supervisor/queue', { text, attachments });
 }
 
 export async function cancelQueuedSupervisor(itemId: string): Promise<SupervisorState> {
@@ -108,8 +109,8 @@ export async function replyPermission(
   await post('/api/fleet/reply', { sessionId, requestID, decision });
 }
 
-export async function sendPrompt(sessionId: string, text: string): Promise<void> {
-  await post('/api/fleet/send', { sessionId, text });
+export async function sendPrompt(sessionId: string, text: string, attachments: ComposerAttachment[] = []): Promise<void> {
+  await post('/api/fleet/send', { sessionId, text, attachments });
 }
 
 /** Fermer = retirer du Superviseur (pas d'archivage ; une activité future rouvre la carte). */

@@ -1,0 +1,11 @@
+{
+  "verifiedAt": "2026-11-08T16:56:00.000Z",
+  "endpoint": "POST http://127.0.0.1:5180/api/fleet/send",
+  "sessionId": "ses_e43efd354ffezsWZrSIvhF43gt",
+  "messageText": "Nouvelle instruction de l’utilisateur : …\n\nRegarde [image-1.png]",
+  "files": [
+    { "name": "image-1.png", "mime": "image/png", "source": "inline" }
+  ],
+  "result": "le message réellement transmis à l'agent contient la citation [image-1.png] et une partie fichier du même nom",
+  "cleanup": "session de test supprimée (DELETE /api/session/:id → 204), lignes locales task_* nettoyées"
+}

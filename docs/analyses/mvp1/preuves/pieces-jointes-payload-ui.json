@@ -1,0 +1,13 @@
+{
+  "verifiedAt": "2026-11-08T16:33:00.000Z",
+  "how": "Playwright sur http://127.0.0.1:5180/fleet, POST /api/fleet/send intercepté (aucun envoi réel pendant ce contrôle)",
+  "request": {
+    "sessionId": "ses_e440a2d15ffe3ZYjBctfMAB61o",
+    "text": "Lis la pièce jointe texte.",
+    "attachments": [
+      { "name": "capture-test.png", "mimeType": "image/png", "size": 177, "dataUrlPrefix": "data:image/png;base64,iVBORw0K" },
+      { "name": "note-test.txt", "mimeType": "text/plain", "size": 55, "dataUrlPrefix": "data:text/plain;base64,Q2VjaSB" }
+    ]
+  },
+  "result": "le compositeur du détail de carte transmet bien le texte et les deux pièces jointes au daemon"
+}

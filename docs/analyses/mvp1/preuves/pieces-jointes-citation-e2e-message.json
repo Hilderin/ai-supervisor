@@ -1,0 +1,23 @@
+{
+  "verifiedAt": "2026-11-08T16:52:39.276Z",
+  "endpoint": "POST http://127.0.0.1:5180/api/fleet/send puis GET /api/session/<id>/message?limit=200&order=asc",
+  "sessionId": "ses_e43ec79f8ffeFRb3B1Ovchu4jR",
+  "message": {
+    "id": "msg_1bc13869a001emEJUeMTtMKNRV",
+    "type": "user",
+    "text": "Nouvelle instruction de l’utilisateur : mets ton plan à jour au besoin ; définis ou mets à jour tes critères d’acceptation (criteria_add, criteria_to_validate : le vérificateur du Superviseur juge tes preuves) ; les réponses pour le propriétaire partent avec le tool `answer` (elles s’affichent dans le Superviseur) :\n\nRegarde [image-1.png]",
+    "files": [
+      {
+        "name": "image-1.png",
+        "mime": "image/png",
+        "source": "inline",
+        "base64Prefix": "iVBORw0KGgoAAAANSUhEUgAA",
+        "base64Length": 236
+      }
+    ]
+  },
+  "checks": {
+    "textContainsCitation": true,
+    "fileNamedLikeCitation": true
+  }
+}
