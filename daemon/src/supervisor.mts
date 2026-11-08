@@ -15,8 +15,10 @@ import {
   logEvent, setSupervisorSession,
 } from './state.mts';
 import { messageText } from './messages.mts';
+import { pendingQuestionsOf, supervisorStatusOf, type SupervisorPendingForm } from './supervisor-forms.mts';
 import { toPromptFiles, toQueueAttachments } from './attachments.mts';
-import { defaultModelRef } from './resume.mts';
+import { defaultModelRef, modelLabel, modelPayload } from './models.mts';
+import { chatAgentRef, chatModelRef } from './prefs.mts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 export const SUPERVISOR_DIR = process.env.SUPERVISEUR_HOME ?? join(homedir(), '.superviseur');
@@ -90,6 +92,8 @@ export interface SupervisorMessage {
   tools: Array<{ name: string; status: string; label: string; ok?: boolean }>;
 }
 
+export type { SupervisorPendingForm } from './supervisor-forms.mts';
+
 /** Message accepté pendant un tour : OpenChamber le livrera à la fin. */
 export interface QueuedSupervisorMessage {
   id: string;
@@ -97,15 +101,28 @@ export interface QueuedSupervisorMessage {
   at: number;
 }
 
+export interface SupervisorModelInfo {
+  /** référence `provider/model` */
+  ref: string;
+  providerID: string;
+  modelID: string;
+  /** nom lisible du catalogue, la référence si le catalogue manque */
+  name: string;
+}
+
 export interface SupervisorState {
   sessionId: string | null;
   status: 'idle' | 'busy' | 'unknown';
   agent: string | null;
+  /** modèle effectif de la conversation (visible dans l'en-tête) */
+  model?: SupervisorModelInfo | null;
   directory: string;
   mode: 'pilot' | 'investigation';
   projectDirectory: string | null;
   messages: SupervisorMessage[];
   queued: QueuedSupervisorMessage[];
+  /** questions du tool `question` encore sans réponse */
+  pendingForms: SupervisorPendingForm[];
   error?: string;
 }
 
@@ -230,6 +247,10 @@ async function switchSessionAgent(id: string, agent: string): Promise<boolean> {
  * `agent` de la création n'est appliqué qu'avec un prompt). Le prompt v2 ne
  * les choisit pas : on les pose ici avant d'envoyer, sinon un chat « Nettoyé »
  * repartirait sur l'agent par défaut, voire sans modèle.
+ *
+ * Le modèle du chat suit la préférence explicite quand elle existe (y compris
+ * pour revenir en arrière), sinon le comportement d'origine est conservé : on
+ * ne remplit un modèle absent qu'avec le défaut d'OpenChamber.
  */
 async function applySessionSetup(id: string, agent: string): Promise<void> {
   let meta: { data?: { agent?: string; model?: { id?: string; providerID?: string } } } | null = null;
@@ -239,19 +260,41 @@ async function applySessionSetup(id: string, agent: string): Promise<void> {
     };
   } catch { /* session neuve ou lecture impossible : les writes diront */ }
   if (meta?.data?.agent !== agent) await switchSessionAgent(id, agent);
-  const model = meta?.data?.model;
-  if (model?.id && model.providerID) return;
-  const ref = await defaultModelRef();
-  if (!ref) return;
-  const slash = ref.indexOf('/');
-  const providerID = slash > 0 ? ref.slice(0, slash) : '';
-  const modelID = slash > 0 ? ref.slice(slash + 1) : '';
-  if (!providerID || !modelID) return;
+  const current = meta?.data?.model;
+  const currentRef = current?.id && current.providerID ? `${current.providerID}/${current.id}` : '';
+  const pref = await chatModelRef();
+  if (!pref && currentRef) return;
+  const ref = pref ?? await defaultModelRef();
+  if (!ref || ref === currentRef) return;
+  await setSessionModel(id, ref, pref ? 'préférence du chat' : 'défaut');
+}
+
+/** Pose le modèle d'une session vivante ; en cas de refus, replie sur le défaut. */
+async function setSessionModel(id: string, ref: string, origin: 'préférence du chat' | 'défaut'): Promise<boolean> {
+  const payload = modelPayload(ref);
+  if (!payload) return false;
   try {
-    await jpost(`/api/session/${encodeURIComponent(id)}/model`, {
-      model: { providerID, id: modelID },
-    });
-  } catch { /* le send signalera l'échec */ }
+    const out = await jpost(`/api/session/${encodeURIComponent(id)}/model`, { model: payload });
+    if (out.ok) return true;
+    if (origin === 'préférence du chat') {
+      // une préférence morte ne doit pas bloquer un envoi : on revient au défaut
+      const fallback = await defaultModelRef();
+      if (fallback && fallback !== ref) {
+        const fallbackPayload = modelPayload(fallback);
+        if (fallbackPayload) {
+          const retry = await jpost(`/api/session/${encodeURIComponent(id)}/model`, { model: fallbackPayload });
+          if (retry.ok) {
+            logEvent('supervisor', 'note', `modèle ${ref} refusé : repli sur ${fallback}`);
+            return true;
+          }
+        }
+      }
+      logEvent('supervisor', 'note', `modèle ${ref} refusé, session laissée sur son modèle courant`);
+    }
+    return false;
+  } catch {
+    return false;
+  }
 }
 
 function sameDirectory(a: string | null | undefined, b: string | null | undefined): boolean {
@@ -307,9 +350,16 @@ function serializedSupervisor<T>(task: () => Promise<T>): Promise<T> {
 /** Échec de bascule déjà journalisé : éviter un log par poll. */
 let lastSwitchFailure = '';
 
-async function ensureSupervisorSessionOnce(): Promise<{ id: string; agent: string }> {
+async function ensureSupervisorSessionOnce(): Promise<{
+  id: string;
+  agent: string;
+  model: SessionMeta['model'] | null;
+}> {
   const version = getOrchestratorVersion();
-  const agent = ensureOrchestratorDefinition(version);
+  const orchestrator = ensureOrchestratorDefinition(version);
+  // l'agent choisi dans la config remplace l'orchestrateur ; sans choix, le
+  // nom versionné du repo reste la référence (cache de prompt par nom)
+  const agent = (await chatAgentRef()) ?? orchestrator;
   await trustWorkspace();
   void quietSupervisorSessions();
   const known = getSupervisorSession();
@@ -324,7 +374,7 @@ async function ensureSupervisorSessionOnce(): Promise<{ id: string; agent: strin
     const id = await createSupervisorSession(agent);
     setSupervisorSession({ ocSessionId: id, agent, version, title: 'Superviseur' });
     logEvent('supervisor', 'note', `session de supervision #${id.slice(-6)} (${agent})`);
-    return { id, agent };
+    return { id, agent, model: (await sessionMeta(id))?.model ?? null };
   }
   // conversation existante : la sortir du home une fois par processus
   await quietWorkOnce(knownId);
@@ -349,10 +399,14 @@ async function ensureSupervisorSessionOnce(): Promise<{ id: string; agent: strin
       ocSessionId: knownId, agent: effectiveAgent, version, title: known?.title ?? 'Superviseur',
     });
   }
-  return { id: knownId, agent: effectiveAgent };
+  return { id: knownId, agent: effectiveAgent, model: meta?.model ?? null };
 }
 
-export function ensureSupervisorSession(): Promise<{ id: string; agent: string }> {
+export function ensureSupervisorSession(): Promise<{
+  id: string;
+  agent: string;
+  model: SessionMeta['model'] | null;
+}> {
   return serializedSupervisor(ensureSupervisorSessionOnce);
 }
 
@@ -384,6 +438,8 @@ function toolLabel(part: WirePart): {
       const title = String(meta.title ?? meta.task?.title ?? '').trim();
       label = title ? `a lancé « ${title} »` : 'a lancé une tâche';
     }
+  } else if (name === 'question') {
+    label = status === 'running' || status === 'pending' ? 'pose une question' : 'a posé une question';
   } else if (status === 'running') label = `utilise ${name}`;
   else if (status === 'failed' || status === 'error') label = `échec de ${name}`;
   // `send_task` : le titre et le texte complet servent au bloc « Envoyé à … ».
@@ -427,11 +483,25 @@ function toMessage(m: WireMessage): SupervisorMessage | null {
 }
 
 async function statusOf(id: string): Promise<'idle' | 'busy' | 'unknown'> {
+  return (await statusSnapshot(id)).status;
+}
+
+interface StatusSnapshot {
+  status: 'idle' | 'busy' | 'unknown';
+  forms: SupervisorPendingForm[];
+}
+
+/** Statut + questions en attente, en une seule lecture de /api/sessions/status. */
+async function statusSnapshot(id: string): Promise<StatusSnapshot> {
   try {
-    const s = await jget('/api/sessions/status') as { sessions?: Record<string, { status?: string }> };
-    const v = s.sessions?.[id]?.status;
-    return v === 'busy' ? 'busy' : v === 'idle' ? 'idle' : 'unknown';
-  } catch { return 'unknown'; }
+    const s = await jget('/api/sessions/status') as {
+      sessions?: Record<string, { status?: string }>;
+      pending?: Record<string, { forms?: SupervisorPendingForm[] }>;
+    };
+    return { status: supervisorStatusOf(s, id), forms: pendingQuestionsOf(s, id) };
+  } catch {
+    return { status: 'unknown', forms: [] };
+  }
 }
 
 interface SessionMeta {
@@ -499,12 +569,14 @@ let lastStatus: 'idle' | 'busy' | 'unknown' = 'unknown';
 
 export async function getSupervisorState(): Promise<SupervisorState> {
   try {
-    const { id, agent } = await ensureSupervisorSession();
-    const [messages, status, queued] = await Promise.all([
+    const { id, agent, model } = await ensureSupervisorSession();
+    const [messages, snapshot, queued] = await Promise.all([
       jget(`/api/session/${id}/message?limit=80&order=desc`) as Promise<{ data?: WireMessage[] }>,
-      statusOf(id),
+      statusSnapshot(id),
       queuedOf(id),
     ]);
+    const status = snapshot.status;
+    const pendingForms = snapshot.forms;
     const list = (messages.data ?? [])
       .map(toMessage)
       .filter((m): m is SupervisorMessage => !!m)
@@ -520,20 +592,30 @@ export async function getSupervisorState(): Promise<SupervisorState> {
     if (effective === 'idle' && lastStatus === 'busy') void quietWork(id);
     lastStatus = effective;
     const mode = getSupervisorMode();
+    const modelInfo: SupervisorModelInfo | null = model?.id && model.providerID
+      ? {
+          ref: `${model.providerID}/${model.id}`,
+          providerID: model.providerID,
+          modelID: model.id,
+          name: (await modelLabel(`${model.providerID}/${model.id}`)) ?? model.id,
+        }
+      : null;
     return {
-      sessionId: id, status: effective, agent, directory: SUPERVISOR_DIR,
-      mode: mode.mode, projectDirectory: mode.projectDir, messages: list, queued,
+      sessionId: id, status: effective, agent, model: modelInfo, directory: SUPERVISOR_DIR,
+      mode: mode.mode, projectDirectory: mode.projectDir, messages: list, queued, pendingForms,
     };
   } catch (e) {
     return {
       sessionId: getSupervisorSession()?.oc_session_id ?? null,
       status: 'unknown',
       agent: getSupervisorSession()?.agent ?? null,
+      model: null,
       directory: SUPERVISOR_DIR,
       mode: getSupervisorMode().mode,
       projectDirectory: getSupervisorMode().projectDir,
       messages: [],
       queued: [],
+      pendingForms: [],
       error: String(e),
     };
   }
@@ -673,15 +755,91 @@ export async function revertSupervisor(messageId: string): Promise<SupervisorSta
 export function newSupervisorConversation(): Promise<SupervisorState> {
   return serializedSupervisor(async () => {
     const version = getOrchestratorVersion();
-    const agent = ensureOrchestratorDefinition(version);
+    const agent = (await chatAgentRef()) ?? ensureOrchestratorDefinition(version);
     const id = await createSupervisorSession(agent);
     setSupervisorSession({ ocSessionId: id, agent, version, title: 'Superviseur' });
     logEvent('supervisor', 'note', `nouvelle conversation #${id.slice(-6)}`);
     // session neuve : pas besoin de relire 80 messages ni le statut, elle est vide
     const mode = getSupervisorMode();
+    const model = (await sessionMeta(id))?.model ?? null;
+    const modelInfo: SupervisorModelInfo | null = model?.id && model.providerID
+      ? {
+          ref: `${model.providerID}/${model.id}`,
+          providerID: model.providerID,
+          modelID: model.id,
+          name: (await modelLabel(`${model.providerID}/${model.id}`)) ?? model.id,
+        }
+      : null;
     return {
-      sessionId: id, status: 'idle' as const, agent, directory: SUPERVISOR_DIR,
-      mode: mode.mode, projectDirectory: mode.projectDir, messages: [], queued: [],
+      sessionId: id, status: 'idle' as const, agent, model: modelInfo, directory: SUPERVISOR_DIR,
+      mode: mode.mode, projectDirectory: mode.projectDir, messages: [], queued: [], pendingForms: [],
+    };
+  });
+}
+
+/**
+ * Applique à chaud la configuration du chat à la conversation courante :
+ * agent et modèle changent en place (`POST /api/session/:id/agent|model`),
+ * l'historique et l'id restent. Appelé par `POST /api/supervisor/config`.
+ * Si la conversation n'existe pas encore, rien n'est créé : la préférence
+ * sera appliquée au prochain `ensureSupervisorSession`.
+ */
+export async function applySupervisorChatConfig(): Promise<{
+  sessionId: string | null;
+  agent: string | null;
+  model: string | null;
+  applied: boolean;
+  error?: string;
+}> {
+  return serializedSupervisor(async () => {
+    const known = getSupervisorSession();
+    const id = known?.oc_session_id ?? '';
+    if (!id) return { sessionId: null, agent: null, model: null, applied: false };
+    const meta = await liveSessionMeta(id);
+    if (!meta?.id) {
+      return {
+        sessionId: null, agent: null, model: null, applied: false,
+        error: 'la conversation courante n’est plus vivante',
+      };
+    }
+    const version = getOrchestratorVersion();
+    const agent = (await chatAgentRef()) ?? ensureOrchestratorDefinition(version);
+    let applied = true;
+    let error: string | undefined;
+    if (meta.agent !== agent) {
+      const switched = await switchSessionAgent(id, agent);
+      if (!switched) {
+        applied = false;
+        error = 'changement d’agent impossible pour l’instant (tour en cours ?)';
+      }
+    }
+    // le modèle voulu : préférence explicite, sinon défaut d'OpenChamber (un
+    // retour au défaut doit aussi ramener la session au modèle par défaut)
+    const ref = (await chatModelRef()) ?? await defaultModelRef();
+    if (ref) {
+      const current = meta.model?.id && meta.model.providerID
+        ? `${meta.model.providerID}/${meta.model.id}` : '';
+      const payload = modelPayload(ref);
+      if (payload && current !== ref) {
+        const ok = await jpost(`/api/session/${encodeURIComponent(id)}/model`, { model: payload })
+          .then(out => out.ok).catch(() => false);
+        if (!ok) {
+          applied = false;
+          error = error ?? 'changement de modèle impossible pour l’instant (tour en cours ?)';
+        }
+      }
+    }
+    // l'agent stocké doit refléter la session réelle, pas le souhait
+    const fresh = await sessionMeta(id);
+    const effectiveAgent = fresh?.agent ?? meta.agent ?? agent;
+    setSupervisorSession({
+      ocSessionId: id, agent: effectiveAgent, version, title: known?.title ?? 'Superviseur',
+    });
+    logEvent('supervisor', 'note',
+      `config chat appliquée : agent ${effectiveAgent}${ref ? `, modèle ${ref}` : ''}${applied ? '' : ' (partiel)'}`);
+    return {
+      sessionId: id, agent: effectiveAgent, model: ref, applied,
+      ...(error ? { error } : {}),
     };
   });
 }

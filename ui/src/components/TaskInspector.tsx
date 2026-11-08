@@ -7,6 +7,7 @@ import { cx } from '../lib/cx';
 import { briefRow, dirName } from '../lib/fleet';
 import { BTN_GHOST, BTN_PRIMARY } from '../lib/ui';
 import { useFleetStore } from '../store/fleetStore';
+import { useTaskModel } from '../hooks/useTaskModel';
 import type { FleetRow } from '../types';
 import { ActivityLine } from './ActivityLine';
 import { CardStateIcon } from './CardStateIcon';
@@ -17,6 +18,7 @@ import { DeliveryBlock } from './DeliveryBlock';
 import { OpenChamberIcon, QuestionIcon } from './Icons';
 import { PlanSection } from './PlanSection';
 import { QuestionBox } from './QuestionBox';
+import { TaskModelPopover, taskModelLabel } from './TaskModelPopover';
 
 interface Props {
   row: FleetRow;
@@ -55,6 +57,7 @@ export function TaskInspector({ row, state, now, onClose, onOpenChamber }: Props
 
   const planSteps = row.plan?.steps ?? [];
   const progress = row.sup?.progress != null ? Math.max(0, Math.min(100, Number(row.sup.progress))) : null;
+  const { info: taskModel, loading: taskModelLoading, error: taskModelError, setInfo: setTaskModel } = useTaskModel(row.id);
 
   useEffect(() => {
     previousFocus.current = document.activeElement as HTMLElement | null;
@@ -105,6 +108,13 @@ export function TaskInspector({ row, state, now, onClose, onOpenChamber }: Props
         <span className="min-w-0 flex-1 truncate text-[14px] font-[650]" title={row.title}>
           {row.title}
         </span>
+        <TaskModelPopover
+          sessionId={row.id}
+          info={taskModel}
+          loading={taskModelLoading}
+          error={taskModelError}
+          onSaved={setTaskModel}
+        />
         <button
           type="button"
           title="Ouvrir dans le mini chat OpenChamber"
@@ -131,6 +141,13 @@ export function TaskInspector({ row, state, now, onClose, onOpenChamber }: Props
           </span>
           {dir ? <span className="min-w-0 truncate text-muted" title={row.dir}>{dir}</span> : null}
           <span className="flex-1" />
+          <span
+            data-testid="task-model"
+            title={taskModel?.name ?? 'défaut de la session'}
+            className="max-w-[46%] shrink-0 truncate text-muted"
+          >
+            {taskModelLabel(taskModel, taskModelLoading, taskModelError)}
+          </span>
         </div>
         {activity ? <ActivityLine activity={activity} /> : null}
       </div>

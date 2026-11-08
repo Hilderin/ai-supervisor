@@ -41,6 +41,8 @@ Un seul process **Bun** fait tout (daemon + serveur HTTP + UI statique) : `bun d
 | --- | --- |
 | `GET /api/fleet` | l'état fusionné pour l'UI : sessions (de `/api/session`), statut et pending (de `/api/sessions/status`), l'état local (journaux, clôtures) |
 | `GET /api/fleet/delivery` | livraison inline d'une session (`?sessionId=…`) : dernier texte + rendu `openchamber_render`, à la demande (jamais dans les frames de flotte), cache invalidé par événements |
+| `GET /api/fleet/model` | modèle d'une tâche (`?sessionId=…`) : préférence de la tâche, modèle effectif et catalogue, à la demande |
+| `POST /api/fleet/model` | changer le modèle d'une tâche : applique à la session vivante, puis met à jour `task_brief.model` et `task_resume.model` |
 | `GET /api/fleet/asset` | image locale citée par une réponse (`?sessionId=…&path=…`), servie depuis le dossier de la session, formats raster uniquement |
 | `POST /api/fleet/reply` | répondre une question / permission / envoyer du libre (proxy vers form/permission reply) |
 | `POST /api/fleet/create` | créé la session (proxé `/api/openchamber/sessions` — à confirmer) |

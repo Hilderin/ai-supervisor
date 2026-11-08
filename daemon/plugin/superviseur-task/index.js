@@ -26,6 +26,8 @@ const DESCRIPTION = [
   "À utiliser pour une information attendue par le propriétaire : une réponse à une question posée au démarrage, un point à valider, un résultat demandé.",
   "Si le propriétaire n'attend rien (validation de rendu, commentaire de confort), ne pas l'utiliser : le rendu se vérifie avec le build, les tests ou la flotte, et le bilan s'écrit en dernier message.",
   "Le texte accepte le markdown (titres, gras, listes, code) : il est rendu tel quel dans le Superviseur, rédige-le de façon lisible (listes, gras) quand la réponse le justifie, sans forcer la longueur.",
+  "Un bloc `openui-lang` de structure (root = Stack([...]) avec Steps, Table, Callout) y est aussi dessiné ; un composant non dessiné ou un bloc invalide s'affiche en code brut.",
+  "Pour poser une question au propriétaire, utilise le tool `question`, jamais un bloc openui-lang interactif (Choice, Input, Button) : un bloc interactif resterait inerte.",
   "Le propriétaire ne voit pas la conversation de la tâche (ni un rendu `openchamber_render`, ni un tableau laissé dans la session) : la réponse doit être autonome ; reproduis dans le texte tout tableau ou classement utile, ne renvoie jamais vers le chat.",
   "`question` est optionnel : s'il est présent, il rattache la réponse à la question concernée.",
   "Ce tool n'est pas pour le bilan final : il continue de s'écrire en dernier message de la session.",
@@ -46,7 +48,7 @@ export default {
           properties: {
             text: {
               type: "string",
-              description: "Réponse au propriétaire ; le markdown est rendu tel quel dans le Superviseur : des titres, du gras ou des listes quand la réponse le justifie, sans forcer la longueur. Le propriétaire ne voit pas la conversation : inclue dans le texte tout tableau ou liste importante, sans renvoyer au chat.",
+              description: "Réponse au propriétaire ; le markdown est rendu tel quel dans le Superviseur : des titres, du gras ou des listes quand la réponse le justifie, sans forcer la longueur. Un bloc openui-lang de structure (Steps, Table, Callout) y est dessiné. Le propriétaire ne voit pas la conversation : inclue dans le texte tout tableau ou liste importante, sans renvoyer au chat.",
             },
             question: {
               type: "string",

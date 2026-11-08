@@ -1,4 +1,4 @@
-import type { Criterion, CriteriaCounts, Delivery, Fleet, SupervisorProject, SupervisorState, TaskAnswer } from '../types';
+import type { Criterion, CriteriaCounts, Delivery, Fleet, SupervisorConfig, SupervisorConfigWarning, SupervisorProject, SupervisorState, TaskAnswer, TaskModelInfo, TaskModelSaveResult } from '../types';
 import type { ComposerAttachment } from './attachments';
 
 async function post(path: string, body: unknown): Promise<void> {
@@ -34,6 +34,37 @@ export async function fetchSupervisorProjects(): Promise<SupervisorProject[]> {
   if (!res.ok) throw new Error(String(res.status));
   const body = (await res.json()) as { projects?: SupervisorProject[] };
   return body.projects ?? [];
+}
+
+/** Catalogue (modèles, providers, agents) et préférences enregistrées. */
+export async function fetchSupervisorConfig(): Promise<SupervisorConfig> {
+  const res = await fetch('/api/supervisor/config', { cache: 'no-store' });
+  if (!res.ok) throw new Error(String(res.status));
+  return (await res.json()) as SupervisorConfig;
+}
+
+export interface ConfigSaveResult {
+  config: SupervisorConfig;
+  warnings: SupervisorConfigWarning[];
+  applied: { sessionId: string | null; agent: string | null; model: string | null; applied: boolean; error?: string };
+}
+
+/** Enregistre et applique à chaud (agent et modèle du chat, compagnons vivants). */
+export async function saveSupervisorConfig(
+  input: Record<string, string | null>,
+): Promise<ConfigSaveResult> {
+  const res = await fetch('/api/supervisor/config', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  const body = await res.json().catch(() => ({})) as Partial<ConfigSaveResult> & { error?: string };
+  if (!res.ok || !body.config) throw new Error(body.error ?? `${res.status}`);
+  return {
+    config: body.config,
+    warnings: body.warnings ?? [],
+    applied: body.applied ?? { sessionId: null, agent: null, model: null, applied: false },
+  };
 }
 
 export async function updateSupervisorMode(
@@ -137,6 +168,34 @@ export async function ackAnswers(sessionId: string, ids?: number[]): Promise<voi
 /** Annule un formulaire en attente : l'agent reprend sans réponse. */
 export async function cancelQuestion(sessionId: string, formId: string, message?: string): Promise<void> {
   await post('/api/fleet/cancel-question', { sessionId, formId, message });
+}
+
+/** Modèle propre à une tâche : préférence, modèle effectif et catalogue. */
+export async function fetchTaskModel(sessionId: string, signal?: AbortSignal): Promise<TaskModelInfo> {
+  const res = await fetch(`/api/fleet/model?sessionId=${encodeURIComponent(sessionId)}`, {
+    cache: 'no-store',
+    signal,
+  });
+  if (!res.ok) throw new Error(String(res.status));
+  return (await res.json()) as TaskModelInfo;
+}
+
+/** Change le modèle de la tâche ; un refus (modèle inconnu) revient dans le résultat. */
+export async function saveTaskModel(sessionId: string, model: string | null): Promise<TaskModelSaveResult> {
+  const res = await fetch('/api/fleet/model', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sessionId, model }),
+  });
+  const body = await res.json().catch(() => ({})) as TaskModelSaveResult;
+  if (!res.ok) {
+    return {
+      ok: false,
+      error: body.error ?? `${res.status}`,
+      message: body.message ?? 'changement de modèle impossible',
+    };
+  }
+  return { ok: true, info: body.info, persisted: body.persisted };
 }
 
 /** Liste détaillée des critères de la tâche, à la demande (la flotte ne transporte que les comptes). */

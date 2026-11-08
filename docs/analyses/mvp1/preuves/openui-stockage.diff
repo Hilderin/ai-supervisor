@@ -1,0 +1,556 @@
+# Preuve de non-modification du stockage des messages (tâche openui-lang)
+
+Les blocs openui-lang restent du texte dans le message OpenChamber ; aucune colonne ni écriture de message n'est ajoutée.
+Les modifications de state.mts visibles ici viennent du chantier parallèle modèles/config (table supervisor_pref), pas de cette tâche.
+
+## git diff --stat
+ AGENTS.md                                          |  19 ++
+ daemon/agent/superviseur-orchestrateur.md          |  34 +++-
+ daemon/plugin/superviseur-task/index.js            |   4 +-
+ daemon/src/companion.mts                           |  38 +++-
+ daemon/src/index.mts                               |   3 +-
+ daemon/src/resume.mts                              |  24 +--
+ daemon/src/server.mts                              |  34 +++-
+ daemon/src/state.mts                               |  50 +++++
+ daemon/src/supervisor.mts                          | 218 ++++++++++++++++++---
+ daemon/src/tools.mts                               |  39 +++-
+ .../design_concept/06-questions-ouvertes.md        |   1 +
+ docs/analyses/design_concept/10-boite-a-idees.md   |  18 +-
+ docs/analyses/mvp1/chat-superviseur.md             |  22 ++-
+ ui/bun.lock                                        |   8 +
+ ui/package.json                                    |   2 +
+ ui/src/components/ChatMarkdown.tsx                 |  12 +-
+ ui/src/components/DeliveryMarkdown.test.tsx        |  20 ++
+ ui/src/components/DeliveryMarkdown.tsx             |  43 +---
+ ui/src/components/Icons.tsx                        |  20 ++
+ ui/src/components/SupervisorChat.tsx               |  91 ++++++++-
+ ui/src/index.css                                   |  30 +++
+ ui/src/lib/api.ts                                  |  33 +++-
+ ui/src/store/supervisorStore.test.tsx              |   1 +
+ ui/src/store/supervisorStore.ts                    |   2 +-
+ ui/src/types.ts                                    |  62 +++++-
+ 25 files changed, 704 insertions(+), 124 deletions(-)
+
+## git diff -- daemon/src/state.mts
+diff --git a/daemon/src/state.mts b/daemon/src/state.mts
+index 0d3d25c..7d4fee1 100644
+--- a/daemon/src/state.mts
++++ b/daemon/src/state.mts
+@@ -64,6 +64,17 @@ CREATE TABLE IF NOT EXISTS supervisor_mode (
+   mode TEXT NOT NULL DEFAULT 'pilot',
+   project_dir TEXT
+ );
++-- Préférences de modèles et d'agent du chat (bouton config de la conversation).
++-- Aucune clé ni secret : des références « provider/model » et un id d'agent.
++-- NULL = pas de choix explicite, le défaut d'OpenChamber s'applique.
++CREATE TABLE IF NOT EXISTS supervisor_pref (
++  id INTEGER PRIMARY KEY CHECK (id = 1),
++  chat_model TEXT,
++  chat_agent TEXT,
++  task_model TEXT,
++  companion_model TEXT,
++  updated_at INTEGER NOT NULL
++);
+ CREATE TABLE IF NOT EXISTS task_brief (
+   session_id TEXT PRIMARY KEY,
+   title TEXT,
+@@ -472,6 +483,45 @@ export function setSupervisorMode(mode: SupervisorMode, projectDir: string | nul
+     .run(mode, projectDir);
+ }
+ 
++export interface SupervisorPrefRow {
++  chat_model: string | null;
++  chat_agent: string | null;
++  task_model: string | null;
++  companion_model: string | null;
++  updated_at: number | null;
++}
++
++/** Préférences explicites : une colonne NULL = pas de choix, le défaut s'applique. */
++export function getSupervisorPref(): SupervisorPrefRow {
++  const row = db.query('SELECT chat_model, chat_agent, task_model, companion_model, updated_at FROM supervisor_pref WHERE id = 1')
++    .get() as SupervisorPrefRow | undefined;
++  return {
++    chat_model: row?.chat_model ?? null,
++    chat_agent: row?.chat_agent ?? null,
++    task_model: row?.task_model ?? null,
++    companion_model: row?.companion_model ?? null,
++    updated_at: row?.updated_at ?? null,
++  };
++}
++
++export function setSupervisorPref(p: {
++  chatModel: string | null; chatAgent: string | null;
++  taskModel: string | null; companionModel: string | null;
++}): void {
++  db.query(`INSERT INTO supervisor_pref (id, chat_model, chat_agent, task_model, companion_model, updated_at)
++            VALUES (1, ?, ?, ?, ?, ?)
++            ON CONFLICT(id) DO UPDATE SET chat_model=excluded.chat_model, chat_agent=excluded.chat_agent,
++              task_model=excluded.task_model, companion_model=excluded.companion_model,
++              updated_at=excluded.updated_at`)
++    .run(p.chatModel, p.chatAgent, p.taskModel, p.companionModel, Date.now());
++}
++
++/** Compagnons vivants connus (mapping parent → enfant), pour propager un modèle. */
++export function listCompanions(): Array<{ parentId: string; companionId: string }> {
++  return (db.query('SELECT parent_session_id p, companion_session_id c FROM companion_map').all() as
++    Array<{ p: string; c: string }>).map(r => ({ parentId: r.p, companionId: r.c }));
++}
++
+ export function setSupervisorSession(p: {
+   ocSessionId: string; agent: string; version: number; title: string;
+ }) {
+
+## git diff -- daemon/src/messages.mts
+
+## git diff -- daemon/src/supervisor.mts
+diff --git a/daemon/src/supervisor.mts b/daemon/src/supervisor.mts
+index 860919c..0141361 100644
+--- a/daemon/src/supervisor.mts
++++ b/daemon/src/supervisor.mts
+@@ -15,8 +15,10 @@ import {
+   logEvent, setSupervisorSession,
+ } from './state.mts';
+ import { messageText } from './messages.mts';
++import { pendingQuestionsOf, supervisorStatusOf, type SupervisorPendingForm } from './supervisor-forms.mts';
+ import { toPromptFiles, toQueueAttachments } from './attachments.mts';
+-import { defaultModelRef } from './resume.mts';
++import { defaultModelRef, modelLabel, modelPayload } from './models.mts';
++import { chatAgentRef, chatModelRef } from './prefs.mts';
+ 
+ const here = dirname(fileURLToPath(import.meta.url));
+ export const SUPERVISOR_DIR = process.env.SUPERVISEUR_HOME ?? join(homedir(), '.superviseur');
+@@ -90,6 +92,8 @@ export interface SupervisorMessage {
+   tools: Array<{ name: string; status: string; label: string; ok?: boolean }>;
+ }
+ 
++export type { SupervisorPendingForm } from './supervisor-forms.mts';
++
+ /** Message accepté pendant un tour : OpenChamber le livrera à la fin. */
+ export interface QueuedSupervisorMessage {
+   id: string;
+@@ -97,15 +101,28 @@ export interface QueuedSupervisorMessage {
+   at: number;
+ }
+ 
++export interface SupervisorModelInfo {
++  /** référence `provider/model` */
++  ref: string;
++  providerID: string;
++  modelID: string;
++  /** nom lisible du catalogue, la référence si le catalogue manque */
++  name: string;
++}
++
+ export interface SupervisorState {
+   sessionId: string | null;
+   status: 'idle' | 'busy' | 'unknown';
+   agent: string | null;
++  /** modèle effectif de la conversation (visible dans l'en-tête) */
++  model?: SupervisorModelInfo | null;
+   directory: string;
+   mode: 'pilot' | 'investigation';
+   projectDirectory: string | null;
+   messages: SupervisorMessage[];
+   queued: QueuedSupervisorMessage[];
++  /** questions du tool `question` encore sans réponse */
++  pendingForms: SupervisorPendingForm[];
+   error?: string;
+ }
+ 
+@@ -230,6 +247,10 @@ async function switchSessionAgent(id: string, agent: string): Promise<boolean> {
+  * `agent` de la création n'est appliqué qu'avec un prompt). Le prompt v2 ne
+  * les choisit pas : on les pose ici avant d'envoyer, sinon un chat « Nettoyé »
+  * repartirait sur l'agent par défaut, voire sans modèle.
++ *
++ * Le modèle du chat suit la préférence explicite quand elle existe (y compris
++ * pour revenir en arrière), sinon le comportement d'origine est conservé : on
++ * ne remplit un modèle absent qu'avec le défaut d'OpenChamber.
+  */
+ async function applySessionSetup(id: string, agent: string): Promise<void> {
+   let meta: { data?: { agent?: string; model?: { id?: string; providerID?: string } } } | null = null;
+@@ -239,19 +260,41 @@ async function applySessionSetup(id: string, agent: string): Promise<void> {
+     };
+   } catch { /* session neuve ou lecture impossible : les writes diront */ }
+   if (meta?.data?.agent !== agent) await switchSessionAgent(id, agent);
+-  const model = meta?.data?.model;
+-  if (model?.id && model.providerID) return;
+-  const ref = await defaultModelRef();
+-  if (!ref) return;
+-  const slash = ref.indexOf('/');
+-  const providerID = slash > 0 ? ref.slice(0, slash) : '';
+-  const modelID = slash > 0 ? ref.slice(slash + 1) : '';
+-  if (!providerID || !modelID) return;
++  const current = meta?.data?.model;
++  const currentRef = current?.id && current.providerID ? `${current.providerID}/${current.id}` : '';
++  const pref = await chatModelRef();
++  if (!pref && currentRef) return;
++  const ref = pref ?? await defaultModelRef();
++  if (!ref || ref === currentRef) return;
++  await setSessionModel(id, ref, pref ? 'préférence du chat' : 'défaut');
++}
++
++/** Pose le modèle d'une session vivante ; en cas de refus, replie sur le défaut. */
++async function setSessionModel(id: string, ref: string, origin: 'préférence du chat' | 'défaut'): Promise<boolean> {
++  const payload = modelPayload(ref);
++  if (!payload) return false;
+   try {
+-    await jpost(`/api/session/${encodeURIComponent(id)}/model`, {
+-      model: { providerID, id: modelID },
+-    });
+-  } catch { /* le send signalera l'échec */ }
++    const out = await jpost(`/api/session/${encodeURIComponent(id)}/model`, { model: payload });
++    if (out.ok) return true;
++    if (origin === 'préférence du chat') {
++      // une préférence morte ne doit pas bloquer un envoi : on revient au défaut
++      const fallback = await defaultModelRef();
++      if (fallback && fallback !== ref) {
++        const fallbackPayload = modelPayload(fallback);
++        if (fallbackPayload) {
++          const retry = await jpost(`/api/session/${encodeURIComponent(id)}/model`, { model: fallbackPayload });
++          if (retry.ok) {
++            logEvent('supervisor', 'note', `modèle ${ref} refusé : repli sur ${fallback}`);
++            return true;
++          }
++        }
++      }
++      logEvent('supervisor', 'note', `modèle ${ref} refusé, session laissée sur son modèle courant`);
++    }
++    return false;
++  } catch {
++    return false;
++  }
+ }
+ 
+ function sameDirectory(a: string | null | undefined, b: string | null | undefined): boolean {
+@@ -307,9 +350,16 @@ function serializedSupervisor<T>(task: () => Promise<T>): Promise<T> {
+ /** Échec de bascule déjà journalisé : éviter un log par poll. */
+ let lastSwitchFailure = '';
+ 
+-async function ensureSupervisorSessionOnce(): Promise<{ id: string; agent: string }> {
++async function ensureSupervisorSessionOnce(): Promise<{
++  id: string;
++  agent: string;
++  model: SessionMeta['model'] | null;
++}> {
+   const version = getOrchestratorVersion();
+-  const agent = ensureOrchestratorDefinition(version);
++  const orchestrator = ensureOrchestratorDefinition(version);
++  // l'agent choisi dans la config remplace l'orchestrateur ; sans choix, le
++  // nom versionné du repo reste la référence (cache de prompt par nom)
++  const agent = (await chatAgentRef()) ?? orchestrator;
+   await trustWorkspace();
+   void quietSupervisorSessions();
+   const known = getSupervisorSession();
+@@ -324,7 +374,7 @@ async function ensureSupervisorSessionOnce(): Promise<{ id: string; agent: strin
+     const id = await createSupervisorSession(agent);
+     setSupervisorSession({ ocSessionId: id, agent, version, title: 'Superviseur' });
+     logEvent('supervisor', 'note', `session de supervision #${id.slice(-6)} (${agent})`);
+-    return { id, agent };
++    return { id, agent, model: (await sessionMeta(id))?.model ?? null };
+   }
+   // conversation existante : la sortir du home une fois par processus
+   await quietWorkOnce(knownId);
+@@ -349,10 +399,14 @@ async function ensureSupervisorSessionOnce(): Promise<{ id: string; agent: strin
+       ocSessionId: knownId, agent: effectiveAgent, version, title: known?.title ?? 'Superviseur',
+     });
+   }
+-  return { id: knownId, agent: effectiveAgent };
++  return { id: knownId, agent: effectiveAgent, model: meta?.model ?? null };
+ }
+ 
+-export function ensureSupervisorSession(): Promise<{ id: string; agent: string }> {
++export function ensureSupervisorSession(): Promise<{
++  id: string;
++  agent: string;
++  model: SessionMeta['model'] | null;
++}> {
+   return serializedSupervisor(ensureSupervisorSessionOnce);
+ }
+ 
+@@ -384,6 +438,8 @@ function toolLabel(part: WirePart): {
+       const title = String(meta.title ?? meta.task?.title ?? '').trim();
+       label = title ? `a lancé « ${title} »` : 'a lancé une tâche';
+     }
++  } else if (name === 'question') {
++    label = status === 'running' || status === 'pending' ? 'pose une question' : 'a posé une question';
+   } else if (status === 'running') label = `utilise ${name}`;
+   else if (status === 'failed' || status === 'error') label = `échec de ${name}`;
+   // `send_task` : le titre et le texte complet servent au bloc « Envoyé à … ».
+@@ -427,11 +483,25 @@ function toMessage(m: WireMessage): SupervisorMessage | null {
+ }
+ 
+ async function statusOf(id: string): Promise<'idle' | 'busy' | 'unknown'> {
++  return (await statusSnapshot(id)).status;
++}
++
++interface StatusSnapshot {
++  status: 'idle' | 'busy' | 'unknown';
++  forms: SupervisorPendingForm[];
++}
++
++/** Statut + questions en attente, en une seule lecture de /api/sessions/status. */
++async function statusSnapshot(id: string): Promise<StatusSnapshot> {
+   try {
+-    const s = await jget('/api/sessions/status') as { sessions?: Record<string, { status?: string }> };
+-    const v = s.sessions?.[id]?.status;
+-    return v === 'busy' ? 'busy' : v === 'idle' ? 'idle' : 'unknown';
+-  } catch { return 'unknown'; }
++    const s = await jget('/api/sessions/status') as {
++      sessions?: Record<string, { status?: string }>;
++      pending?: Record<string, { forms?: SupervisorPendingForm[] }>;
++    };
++    return { status: supervisorStatusOf(s, id), forms: pendingQuestionsOf(s, id) };
++  } catch {
++    return { status: 'unknown', forms: [] };
++  }
+ }
+ 
+ interface SessionMeta {
+@@ -499,12 +569,14 @@ let lastStatus: 'idle' | 'busy' | 'unknown' = 'unknown';
+ 
+ export async function getSupervisorState(): Promise<SupervisorState> {
+   try {
+-    const { id, agent } = await ensureSupervisorSession();
+-    const [messages, status, queued] = await Promise.all([
++    const { id, agent, model } = await ensureSupervisorSession();
++    const [messages, snapshot, queued] = await Promise.all([
+       jget(`/api/session/${id}/message?limit=80&order=desc`) as Promise<{ data?: WireMessage[] }>,
+-      statusOf(id),
++      statusSnapshot(id),
+       queuedOf(id),
+     ]);
++    const status = snapshot.status;
++    const pendingForms = snapshot.forms;
+     const list = (messages.data ?? [])
+       .map(toMessage)
+       .filter((m): m is SupervisorMessage => !!m)
+@@ -520,20 +592,30 @@ export async function getSupervisorState(): Promise<SupervisorState> {
+     if (effective === 'idle' && lastStatus === 'busy') void quietWork(id);
+     lastStatus = effective;
+     const mode = getSupervisorMode();
++    const modelInfo: SupervisorModelInfo | null = model?.id && model.providerID
++      ? {
++          ref: `${model.providerID}/${model.id}`,
++          providerID: model.providerID,
++          modelID: model.id,
++          name: (await modelLabel(`${model.providerID}/${model.id}`)) ?? model.id,
++        }
++      : null;
+     return {
+-      sessionId: id, status: effective, agent, directory: SUPERVISOR_DIR,
+-      mode: mode.mode, projectDirectory: mode.projectDir, messages: list, queued,
++      sessionId: id, status: effective, agent, model: modelInfo, directory: SUPERVISOR_DIR,
++      mode: mode.mode, projectDirectory: mode.projectDir, messages: list, queued, pendingForms,
+     };
+   } catch (e) {
+     return {
+       sessionId: getSupervisorSession()?.oc_session_id ?? null,
+       status: 'unknown',
+       agent: getSupervisorSession()?.agent ?? null,
++      model: null,
+       directory: SUPERVISOR_DIR,
+       mode: getSupervisorMode().mode,
+       projectDirectory: getSupervisorMode().projectDir,
+       messages: [],
+       queued: [],
++      pendingForms: [],
+       error: String(e),
+     };
+   }
+@@ -673,15 +755,91 @@ export async function revertSupervisor(messageId: string): Promise<SupervisorSta
+ export function newSupervisorConversation(): Promise<SupervisorState> {
+   return serializedSupervisor(async () => {
+     const version = getOrchestratorVersion();
+-    const agent = ensureOrchestratorDefinition(version);
++    const agent = (await chatAgentRef()) ?? ensureOrchestratorDefinition(version);
+     const id = await createSupervisorSession(agent);
+     setSupervisorSession({ ocSessionId: id, agent, version, title: 'Superviseur' });
+     logEvent('supervisor', 'note', `nouvelle conversation #${id.slice(-6)}`);
+     // session neuve : pas besoin de relire 80 messages ni le statut, elle est vide
+     const mode = getSupervisorMode();
++    const model = (await sessionMeta(id))?.model ?? null;
++    const modelInfo: SupervisorModelInfo | null = model?.id && model.providerID
++      ? {
++          ref: `${model.providerID}/${model.id}`,
++          providerID: model.providerID,
++          modelID: model.id,
++          name: (await modelLabel(`${model.providerID}/${model.id}`)) ?? model.id,
++        }
++      : null;
++    return {
++      sessionId: id, status: 'idle' as const, agent, model: modelInfo, directory: SUPERVISOR_DIR,
++      mode: mode.mode, projectDirectory: mode.projectDir, messages: [], queued: [], pendingForms: [],
++    };
++  });
++}
++
++/**
++ * Applique à chaud la configuration du chat à la conversation courante :
++ * agent et modèle changent en place (`POST /api/session/:id/agent|model`),
++ * l'historique et l'id restent. Appelé par `POST /api/supervisor/config`.
++ * Si la conversation n'existe pas encore, rien n'est créé : la préférence
++ * sera appliquée au prochain `ensureSupervisorSession`.
++ */
++export async function applySupervisorChatConfig(): Promise<{
++  sessionId: string | null;
++  agent: string | null;
++  model: string | null;
++  applied: boolean;
++  error?: string;
++}> {
++  return serializedSupervisor(async () => {
++    const known = getSupervisorSession();
++    const id = known?.oc_session_id ?? '';
++    if (!id) return { sessionId: null, agent: null, model: null, applied: false };
++    const meta = await liveSessionMeta(id);
++    if (!meta?.id) {
++      return {
++        sessionId: null, agent: null, model: null, applied: false,
++        error: 'la conversation courante n’est plus vivante',
++      };
++    }
++    const version = getOrchestratorVersion();
++    const agent = (await chatAgentRef()) ?? ensureOrchestratorDefinition(version);
++    let applied = true;
++    let error: string | undefined;
++    if (meta.agent !== agent) {
++      const switched = await switchSessionAgent(id, agent);
++      if (!switched) {
++        applied = false;
++        error = 'changement d’agent impossible pour l’instant (tour en cours ?)';
++      }
++    }
++    // le modèle voulu : préférence explicite, sinon défaut d'OpenChamber (un
++    // retour au défaut doit aussi ramener la session au modèle par défaut)
++    const ref = (await chatModelRef()) ?? await defaultModelRef();
++    if (ref) {
++      const current = meta.model?.id && meta.model.providerID
++        ? `${meta.model.providerID}/${meta.model.id}` : '';
++      const payload = modelPayload(ref);
++      if (payload && current !== ref) {
++        const ok = await jpost(`/api/session/${encodeURIComponent(id)}/model`, { model: payload })
++          .then(out => out.ok).catch(() => false);
++        if (!ok) {
++          applied = false;
++          error = error ?? 'changement de modèle impossible pour l’instant (tour en cours ?)';
++        }
++      }
++    }
++    // l'agent stocké doit refléter la session réelle, pas le souhait
++    const fresh = await sessionMeta(id);
++    const effectiveAgent = fresh?.agent ?? meta.agent ?? agent;
++    setSupervisorSession({
++      ocSessionId: id, agent: effectiveAgent, version, title: known?.title ?? 'Superviseur',
++    });
++    logEvent('supervisor', 'note',
++      `config chat appliquée : agent ${effectiveAgent}${ref ? `, modèle ${ref}` : ''}${applied ? '' : ' (partiel)'}`);
+     return {
+-      sessionId: id, status: 'idle' as const, agent, directory: SUPERVISOR_DIR,
+-      mode: mode.mode, projectDirectory: mode.projectDir, messages: [], queued: [],
++      sessionId: id, agent: effectiveAgent, model: ref, applied,
++      ...(error ? { error } : {}),
+     };
+   });
+ }
+
+## git diff -- daemon/src/tools.mts
+diff --git a/daemon/src/tools.mts b/daemon/src/tools.mts
+index 299c9f4..076025d 100644
+--- a/daemon/src/tools.mts
++++ b/daemon/src/tools.mts
+@@ -20,6 +20,8 @@ import {
+   putTaskBrief, reviveTaskResume, setSupervisorMode, upsertTaskState,
+ } from './state.mts';
+ import { isSupervisorBusy, isSupervisorSession, SUPERVISOR_DIR, wrapOwnerPrompt } from './supervisor.mts';
++import { taskModelRef } from './prefs.mts';
++import { findModel } from './models.mts';
+ 
+ export interface ToolResult {
+   ok: boolean;
+@@ -290,8 +292,11 @@ function composePrompt(p: {
+     'Critères : ta tâche est jugée sur des critères d\'acceptation (AC-01, AC-02, ...) : crée-les avec `criteria_add` (titre, détail, au moins une méthode de validation), soumets tes preuves avec `criteria_to_validate` et relis la liste avec `criteria_list`.',
+     'Le vérificateur du Superviseur valide ou refuse tes preuves ; ses rejets t\'arrivent en notification avec leur raison : corrige puis resoumets une preuve. N\'invente pas de validation toi-même.',
+     'Réponse au propriétaire : dès qu\'une information attendue par le propriétaire est prête (réponse à la consigne, point à valider, résultat demandé), envoie-la avec le tool `answer` : elle s\'affiche dans le Superviseur, rendue en markdown (titres, listes, gras quand la réponse le justifie, sans forcer la longueur) ; si la réponse rattache à une question posée, passe cette question dans le champ `question`.',
+-    'Le propriétaire ne lit PAS la conversation de la tâche (ni le rendu `openchamber_render`, ni un tableau laissé dans la session) : la réponse doit tenir debout seule, et tout tableau ou classement utile est reproduit en markdown dans le texte de `answer`, jamais renvoyé au chat.',
++    'Le propriétaire ne lit PAS la conversation de la tâche (ni le rendu `openchamber_render`, ni un tableau laissé dans la session) : la réponse doit tenir debout seule, et tout tableau ou classement utile est reproduit en markdown dans le texte de `answer`, jamais renvoyé au chat. Un bloc `Table`, `Steps` ou `Callout` y est aussi dessiné.',
+     'Pose les questions avec le tool `question` : le formulaire s\'affiche dans le Superviseur ; une question posée en texte dans la conversation n\'arrive jamais au propriétaire.',
++    'Toute question au propriétaire passe par le tool `question`, jamais par un bloc openui-lang (Choice, Input, Button) : un bloc interactif resterait inerte dans le Superviseur, alors qu\'une question du tool est affichée, répondable et annulable.',
++    'Structure : pour un parcours d\'étapes, un tableau comparatif ou un avertissement, tu peux écrire un bloc `openui-lang` (root = Stack([...]) avec Steps, Table, Callout) dans ton dernier message ou dans `answer` ; le Superviseur le dessine. Un bloc invalide ou un composant non dessiné (graphiques, champs interactifs) s\'affiche en code brut : préfère ces composants, et pas de bloc décoratif.',
++    'Exemple : ```openui-lang\nroot = Stack([note, flow])\nnote = Callout("Le build est vert.", "success")\nflow = Steps([{title: "Cadrer", status: "done"}, {title: "Coder", status: "current"}])\n```',
+     'N\'en envoie pas sans attente du propriétaire : une validation de rendu ou un commentaire de confort n\'est pas une réponse, le rendu se vérifie avec le build, les tests ou la flotte.',
+     'L\'usage (rappel) est aussi dans les messages du propriétaire ; ce tool n\'est pas pour le bilan final, qui continue de s\'écrire à la fin de la session.',
+     'Bilan : à la fin, écris un court bilan (fait, reste, décisions) dans ton dernier message.',
+@@ -359,6 +364,26 @@ export async function getTask(args: { task?: string } = {}): Promise<ToolResult>
+   };
+ }
+ 
++/**
++ * Modèle d'une tâche au lancement : le choix explicite de l'appelant prime,
++ * sinon la préférence « tâches ». Une référence inconnue ne part pas telle
++ * quelle : repli sur la préférence (ou le défaut de la session) et
++ * avertissement structuré pour l'agent.
++ */
++export async function resolveTaskModel(requested?: string): Promise<{
++  model: string | null;
++  warning: string | null;
++  requested: string | null;
++}> {
++  const wanted = String(requested ?? '').trim();
++  if (!wanted) return { model: await taskModelRef(), warning: null, requested: null };
++  if (await findModel(wanted)) return { model: wanted, warning: null, requested: wanted };
++  const fallback = await taskModelRef();
++  const warning = `modèle « ${wanted} » inconnu : ${fallback ? `repli sur ${fallback}` : 'défaut de la session'}`;
++  logEvent('supervisor', 'note', `start_task : ${warning}`);
++  return { model: fallback, warning, requested: wanted };
++}
++
+ export async function startTask(args: {
+   title?: string; goal?: string; project?: string;
+   done_criteria?: unknown; constraints?: unknown; agent?: string; model?: string; context?: string;
+@@ -428,13 +453,17 @@ export async function startTask(args: {
+ 
+     const prompt = composePrompt({ goal, doneCriteria, constraints, context: args.context, project: project.name });
+     const agent = String(args.agent ?? '').trim() || 'build';
++    // modèle : le choix de l'appelant prime, sinon la préférence « tâches ».
++    const chosen = await resolveTaskModel(args.model);
++    const model = chosen.model;
++    const modelWarning = chosen.warning;
+     const body: Record<string, unknown> = {
+       title,
+       prompt,
+       directory: project.directory,
+       agent,
+     };
+-    if (args.model) body.model = String(args.model);
++    if (model) body.model = model;
+     const out = await jpost('/api/openchamber/sessions', body);
+     const taskId = (out.data as { sessionId?: string })?.sessionId;
+     if (!out.ok || !taskId) {
+@@ -453,7 +482,7 @@ export async function startTask(args: {
+       constraints,
+       projectDir: project.directory,
+       agent,
+-      model: args.model ?? null,
++      model: model ?? null,
+     });
+     upsertTaskState(taskId, { title, goal });
+     // la tâche est armée pour l'auto-restart dès sa création : si sa session
+@@ -463,7 +492,7 @@ export async function startTask(args: {
+       title,
+       projectDir: project.directory,
+       agent,
+-      model: args.model ?? null,
++      model: model ?? null,
+     });
+     logEvent(taskId, 'open', `lancé depuis le chat : ${title}`.slice(0, 180));
+     logEvent('supervisor', 'note', `start_task ${title} → ${taskId}`);
+@@ -475,6 +504,8 @@ export async function startTask(args: {
+       project: project.name,
+       directory: project.directory,
+       status: 'created',
++      model: model ?? null,
++      ...(modelWarning ? { modelWarning } : {}),
+     };
+   } finally {
+     creating.delete(key);

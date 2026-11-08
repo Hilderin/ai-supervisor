@@ -33,7 +33,7 @@ export interface PendingForm {
   id: string;
   sessionID?: string;
   title?: string;
-  metadata?: { kind?: string };
+  metadata?: { kind?: string; tool?: { messageID?: string; id?: string } };
   fields?: FormField[];
 }
 
@@ -197,12 +197,94 @@ export interface SupervisorState {
   sessionId: string | null;
   status: 'idle' | 'busy' | 'unknown';
   agent: string | null;
+  /** modèle effectif de la conversation (visible dans l'en-tête) */
+  model?: SupervisorModelInfo | null;
   directory: string;
   mode: 'pilot' | 'investigation';
   projectDirectory: string | null;
   messages: SupervisorMessage[];
   queued: QueuedSupervisorMessage[];
+  /** questions du tool `question` en attente de réponse */
+  pendingForms: PendingForm[];
   error?: string;
+}
+
+export interface SupervisorModelInfo {
+  ref: string;
+  providerID: string;
+  modelID: string;
+  name: string;
+}
+
+/** `GET /api/supervisor/config` : catalogue et préférences du bouton config. */
+export interface SupervisorModelOption {
+  ref: string;
+  providerID: string;
+  modelID: string;
+  name: string;
+  providerName: string;
+  context?: number;
+}
+
+export interface SupervisorAgentOption {
+  id: string;
+  name: string;
+  description?: string;
+}
+
+export type SupervisorPrefField = 'chatModel' | 'chatAgent' | 'taskModel' | 'companionModel';
+
+export interface SupervisorPrefs {
+  chatModel: string | null;
+  chatAgent: string | null;
+  taskModel: string | null;
+  companionModel: string | null;
+}
+
+export interface SupervisorConfig {
+  prefs: SupervisorPrefs;
+  defaults: {
+    chatAgent: null;
+    chatAgentLabel: string;
+    chatModel: string | null;
+    taskModel: null;
+    taskModelLabel: string;
+    companionModel: null;
+    companionModelLabel: string;
+  };
+  models: SupervisorModelOption[];
+  agents: SupervisorAgentOption[];
+  updatedAt: number | null;
+  /** préférences enregistrées devenues invalides (affichées à l'ouverture) */
+  warnings?: SupervisorConfigWarning[];
+}
+
+export interface SupervisorConfigWarning {
+  field: SupervisorPrefField;
+  value: string;
+  message: string;
+}
+
+/** Modèle propre à une tâche (`GET /api/fleet/model?sessionId=…`). */
+export interface TaskModelInfo {
+  sessionId: string;
+  /** préférence de la tâche, null = défaut de la session */
+  model: string | null;
+  /** modèle réellement porté par la session */
+  effective: string | null;
+  /** nom lisible du modèle effectif, sinon de la préférence */
+  name: string | null;
+  models: SupervisorModelOption[];
+  defaultModel: string | null;
+}
+
+export interface TaskModelSaveResult {
+  ok: boolean;
+  info?: TaskModelInfo;
+  error?: 'invalid_model' | 'no_default' | 'apply_failed' | string;
+  message?: string;
+  /** false : appliqué à la session, mais aucun brief/registre à mettre à jour */
+  persisted?: boolean;
 }
 
 export interface SupervisorProject {

@@ -13,7 +13,10 @@ import { readSessionAsset } from './assets.mts';
 import { companionSessionOf } from './companion.mts';
 import { openChamberMiniChatUrl } from './openchamber-link.mts';
 import { getSupervisorSession, logEvent, upsertTaskState, getTaskState, reopenTaskState } from './state.mts';
-import { abortSupervisor, cancelQueuedSupervisor, getSupervisorState, newSupervisorConversation, queueSupervisor, revertSupervisor, sendSupervisor, SUPERVISOR_DIR, wrapOwnerPrompt } from './supervisor.mts';
+import { abortSupervisor, applySupervisorChatConfig, cancelQueuedSupervisor, getSupervisorState, newSupervisorConversation, queueSupervisor, revertSupervisor, sendSupervisor, SUPERVISOR_DIR, wrapOwnerPrompt } from './supervisor.mts';
+import { getSupervisorConfig, saveSupervisorConfig } from './prefs.mts';
+import { applyCompanionModelPref } from './companion.mts';
+import { getTaskModelInfo, setTaskModel } from './task-model.mts';
 import { cancelPendingForms, configureSupervisorMode, pendingFor, runTool, supervisorProjects } from './tools.mts';
 import { runCriteriaTool } from './criteria-tools.mts';
 import { runVerifierTool } from './verifier-tools.mts';
@@ -116,6 +119,36 @@ async function handleApi(req: http.IncomingMessage, res: http.ServerResponse, ur
   }
   if (path === '/api/supervisor' && req.method === 'GET') {
     json(res, 200, await getSupervisorState());
+    return;
+  }
+  if (path === '/api/supervisor/config' && req.method === 'GET') {
+    // catalogue frais (modèles, providers, agents) + préférences enregistrées
+    try { json(res, 200, await getSupervisorConfig()); }
+    catch (e) { json(res, 502, { error: String(e) }); }
+    return;
+  }
+  if (path === '/api/supervisor/config' && req.method === 'POST') {
+    // enregistre, puis applique À CHAUD : agent/modèle du chat sur la session
+    // vivante, modèle du compagnon aux conversations d'analyse existantes
+    const body = await readBody(req);
+    try {
+      const saved = await saveSupervisorConfig(body);
+      const [applied, companions] = await Promise.all([
+        applySupervisorChatConfig().catch((e) => ({
+          sessionId: null, agent: null, model: null, applied: false, error: String(e),
+        })),
+        applyCompanionModelPref().catch(() => ({ updated: 0, failed: 0 })),
+      ]);
+      json(res, 200, {
+        ok: true,
+        config: await getSupervisorConfig(),
+        warnings: saved.warnings,
+        applied,
+        companions,
+      });
+    } catch (e) {
+      json(res, 502, { ok: false, error: String(e) });
+    }
     return;
   }
   if (path === '/api/openchamber/mini-chat' && req.method === 'GET') {
@@ -237,6 +270,36 @@ async function handleApi(req: http.IncomingMessage, res: http.ServerResponse, ur
     const body = await readBody(req);
     const result = await runVerifierTool(name, String(body.sessionId ?? ''), (body.args ?? {}) as Record<string, unknown>);
     json(res, 200, result);
+    return;
+  }
+  if (path === '/api/fleet/model' && req.method === 'GET') {
+    // modèle de la tâche, à la demande : la flotte ne transporte pas la liste
+    // des modèles ; le panneau de détail l'affiche et le change ici
+    const sessionId = (url.searchParams.get('sessionId') ?? '').trim();
+    if (!sessionId) { json(res, 400, { error: 'sessionId requis' }); return; }
+    const supervisorId = getSupervisorSession()?.oc_session_id;
+    const row = currentFleet().rows.find(r => r.id === sessionId);
+    if (sessionId === supervisorId || row?.dir === SUPERVISOR_DIR) {
+      json(res, 400, { error: 'not_task' });
+      return;
+    }
+    json(res, 200, await getTaskModelInfo(sessionId));
+    return;
+  }
+  if (path === '/api/fleet/model' && req.method === 'POST') {
+    // changer le modèle d'une tâche : la session vivante d'abord, puis le
+    // brief et le registre de reprise ; aucune session recréée
+    const body = await readBody(req);
+    const sessionId = String(body.sessionId ?? '').trim();
+    if (!sessionId) { json(res, 400, { error: 'sessionId requis' }); return; }
+    const supervisorId = getSupervisorSession()?.oc_session_id;
+    const row = currentFleet().rows.find(r => r.id === sessionId);
+    if (sessionId === supervisorId || row?.dir === SUPERVISOR_DIR) {
+      json(res, 400, { error: 'not_task' });
+      return;
+    }
+    const result = await setTaskModel(sessionId, body.model == null ? '' : String(body.model));
+    json(res, result.ok ? 200 : 400, result);
     return;
   }
   if (path === '/api/fleet/criteria' && req.method === 'GET') {

@@ -144,15 +144,15 @@ L'autorisation des outils se juge par **dossier** : toute conversation vivante d
 
 Allowlist :
 
-- activés en Piloter : les outils superviseur (`list_projects`, `list_tasks`, `get_task`, `start_task`, etc.) ;
+- activés en Piloter : les outils superviseur (`list_projects`, `list_tasks`, `get_task`, `start_task`, etc.) et le tool natif `question` pour poser une question au propriétaire ;
 - activés en Investigation : `read_project`, `glob_project`, `grep_project`, outils directs du plugin qui ne font que des lectures bornées dans le projet sélectionné ;
-- désactivés dans la définition OpenCode : `bash`, `edit`, `write`, `read`, `glob`, `grep`, `webfetch`, `todowrite`, `question`, `task`, `execute` et les outils `openchamber_*`. `task` est désactivé pour empêcher tout sous-agent ; `todowrite` appartient aux sessions de travail.
+- désactivés dans la définition OpenCode : `bash`, `edit`, `write`, `read`, `glob`, `grep`, `webfetch`, `todowrite`, `task`, `execute` et les outils `openchamber_*`. `task` est désactivé pour empêcher tout sous-agent ; `todowrite` appartient aux sessions de travail.
 
 Le plugin expose les outils des deux modes, mais **l'autorité est le dispatcher du daemon** : en mode Investigation, il n'accepte que les trois outils de lecture dédiés ; en mode Piloter, ces lectures fichier sont refusées. Le projet est sélectionné dans le catalogue OpenChamber et relu côté daemon à chaque appel. Le sélecteur de mode et le dossier sont persistés ; le changement de mode est refusé pendant un tour.
 
 Les chemins sont relatifs à la racine du projet ; les traversées, tous les liens symboliques, `.git`, `.superviseur`, `node_modules`, la base `superviseur.db`, les fichiers binaires et les retours trop volumineux sont refusés ou bornés. `grep_project` prend une chaîne littérale, pas une expression régulière. Aucun outil de commande ou d'accès réseau n'est exposé en Investigation.
 
-Pas de `question` : dans un chat, une question en texte est plus naturelle et évite un formulaire bloquant que notre panneau devrait rendre. Pas de `webfetch` en phase 1 : le chat n'est pas un assistant généraliste, mais une information inaccessible n'est pas une impasse. Une question comme la météo reçoit « je n'ai pas la météo en direct ici, mais je peux lancer une tâche de recherche ; tu veux, et pour quelle ville ? ». Une demande explicite (« cherche la météo à Montréal ») lance directement la tâche dans le projet `chats`. Une question à laquelle l'agent peut répondre de sa connaissance reste une réponse, pas une tâche.
+Le tool `question` est activé : dans un chat, une question qui attend une réponse doit devenir une carte répondable, pas un texte à recopier. Le formulaire s'affiche dans le fil, se répond en un clic (ou en texte libre) et s'annule sans laisser une question orpheline. L'instruction du prompt est stricte : une question passe par `question`, jamais par un bloc `openui-lang` interactif (`Choice`, `Input`, `Button`), qui resterait inerte dans le Superviseur. Une information inaccessible n'est pas une impasse : une question comme la météo reçoit « je n'ai pas la météo en direct ici, mais je peux lancer une tâche de recherche », puis le formulaire demande la ville et l'accord. Une demande explicite (« cherche la météo à Montréal ») lance directement la tâche dans le projet `chats`. Une question à laquelle l'agent peut répondre de sa connaissance reste une réponse, pas une tâche.
 
 ### 4.3 Le « global »
 
@@ -468,7 +468,7 @@ L'agent doit lister explicitement ses outils. Les noms exacts dépendent du tran
 - **En-tête** : « Superviseur », une petite indication de l'agent ou du modèle, une icône de balai avec l'infobulle « Nettoyer le chat » (vide le chat et démarre une conversation neuve ; l'ancienne reste dans OpenChamber), l'icône de panneau pour replier, et une petite flèche « Ouvrir dans OpenChamber » à droite, comme sur les cartes de conversation.
 - **État vide** : une phrase et une phrase d'aide, pas de suggestions. Pas de mur de texte.
 - **Messages utilisateur** : bulle discrète à droite, texte simple, horodatage sous la bulle.
-- **Messages assistant** : à gauche, markdown GFM, `skipHtml`, pas de `rehype-raw`, liens `target="_blank" rel="noreferrer noopener"`. Code et tableaux stylés avec les jetons existants.
+- **Messages assistant** : à gauche, markdown GFM, `skipHtml`, pas de `rehype-raw`, liens `target="_blank" rel="noreferrer noopener"`. Code et tableaux stylés avec les jetons existants. Les blocs `openui-lang` de structure (`Steps`, `Table`, `Callout`, `Stack`) sont dessinés par le même parseur que le chat OpenChamber ; un bloc invalide, partiel ou non supporté retombe en code brut, jamais en vide. Une question du tool `question` s'affiche comme une carte répondable dans le fil, rattachée au message qui l'a posée ; si le message n'est plus dans la fenêtre, elle reste visible en fin de fil. L'en-tête indique « attend ta réponse » tant que la question n'a pas de réponse.
 - **Actions de message** : sur la ligne de l'heure, à côté d'elle : à droite pour les messages utilisateur, à gauche pour ceux de l'agent. Deux icônes avec infobulle et libellé accessible. « Copier le message » copie le texte dans le presse-papiers ; « Revenir à partir d'ici » supprime les messages à partir de ce point (stage puis commit OpenCode, avec arrêt du tour en cours). Le texte d'un message utilisateur revient dans le composer pour être corrigé et renvoyé.
 - **Appels d'outils** : une ligne compacte, pas le JSON brut. Exemples : « a consulté la flotte », « a lancé Audit du module auth », « échec : projet inconnu ». En cas d'erreur, la ligne est rouge et l'agent explique. Pour `send_task`, un bloc sous la puce affiche `Envoyé à « titre »` puis le texte complet envoyé ; le titre est relu dans la flotte à l'affichage (un renommage reste correct) et remplacé par « une tâche qui n’est plus dans la flotte » si elle a disparu.
 - **Streaming** : poll 1,2 s quand le superviseur travaille, 4 s au repos. Le compagnon a déjà un pattern de lecture ; le chat a besoin d'un flux plus réactif. Un SSE filtré pourra remplacer le poll si l'usage le réclame.
@@ -482,6 +482,22 @@ L'agent doit lister explicitement ses outils. Les noms exacts dépendent du tran
 - **Pas de pièces jointes, pas de vocal, pas de threads, pas de réactions** en phase 1. Pour ces besoins, « Ouvrir dans OpenChamber ».
 - **Pas de bloc de proposition, pas de bouton Lancer global.** Le lancement est un appel d'outil ; la carte qui apparaît à droite est la confirmation visuelle.
 
+#### Configuration des modèles et de l'agent
+
+- **Bouton** : un petit engrenage dans l'en-tête, à côté de Nettoyer, ouvre un popover compact (pas un écran de réglages). Le sous-titre de l'en-tête affiche l'agent et le modèle effectifs quand le chat est au repos.
+- **Réglages** : agent du chat, modèle du chat, modèle des tâches, modèle du compagnon, chacun indépendant.
+- **Application à chaud** : l'agent et le modèle du chat changent sur la session vivante (`POST /api/session/:id/agent` et `/model`), sans recréer la conversation ni perdre l'historique. Le modèle du compagnon est aussi poussé aux conversations d'analyse déjà vivantes. Le réglage global « Modèle des tâches » ne sert qu'aux **nouvelles** tâches : une tâche existante garde son modèle propre, réglable dans son détail.
+- **Défauts** : sans choix explicite, les valeurs actuelles restent en place (orchestrateur versionné, modèle par défaut OpenChamber, défaut de la session pour les tâches). Un modèle ou un agent inconnu n'est jamais stocké : repli sur le défaut et avertissement lisible dans le popover.
+- **Persistance** : table `supervisor_pref` (une ligne). Elle ne contient que des références `provider/model`, un id d'agent et un horodatage : aucune clé ni secret.
+- **Listes** : `GET /api/model`, `GET /api/provider` et `GET /api/agent` ; seuls les modèles de type `chat` (ou sans `type`, cas des sources custom comme Skytech), activés, et les agents primaires non internes (analyste, vérificateur, versions de l'orchestrateur) sont proposés. Les types explicitement non chat (`image`, `embedding`, `decision`) restent exclus.
+
+#### Modèle d'une tâche dans le détail
+
+- **Lecture** : le détail affiche `modèle · <nom effectif>` dans sa ligne d'en-tête (`task-model`, appel `GET /api/fleet/model?sessionId=…`). La préférence propre à la tâche et le modèle réellement porté par la session sont distingués : si aucune préférence n'existe, le détail le dit et montre le modèle effectif.
+- **Changement** : un engrenage dans l'en-tête, immédiatement à gauche de la flèche OpenChamber, ouvre un popover compact (même gabarit que le bouton du chat). Enregistrer applique le modèle à la session vivante (`POST /api/session/:id/model`) puis le persiste dans `task_brief.model` et `task_resume.model` ; aucune session n'est recréée.
+- **Défaut** : la valeur vide « Défaut de la session » ramène la tâche au modèle par défaut d'OpenChamber et efface la préférence. Un modèle inconnu est refusé avant tout appel, avec un message dans le popover ; la tâche reste intacte.
+- **Portée** : le réglage global « Modèle des tâches » ne s'applique qu'à `start_task` sans modèle explicite. La reprise automatique relit le modèle de la tâche, puis le défaut ; elle ne consulte jamais le réglage global, sinon changer ce réglage déplacerait toutes les tâches existantes.
+
 ### 8.3 Flotte
 
 - Les cartes, les sections et la livraison ne changent pas.
@@ -494,6 +510,8 @@ L'agent doit lister explicitement ses outils. Les noms exacts dépendent du tran
 ### 8.4 Rendu et réutilisation
 
 - Le markdown du chat peut réutiliser `DeliveryMarkdown`, ou une variante sans la résolution d'images de session. En phase 1, pas d'images locales dans le chat.
+- Les blocs `openui-lang` sont rendus par `ui/src/components/UiBlock.tsx`, avec le catalogue et le parseur repris d'OpenChamber (`ui/src/openui`, `@openuidev/lang-core`). `ChatMarkdown` les dessine dans le chat ; `DeliveryMarkdown` les dessine dans les réponses `answer` et le résultat. Un composant non rendu (`BarChart`, `Choice`, etc.) ou un bloc invalide affiche son code source.
+- Preuves visuelles : [chat avec blocs et carte question](preuves/openui-chat-blocs-question.jpg) et [réponse answer et résultat](preuves/openui-answer-resultat.jpg).
 - Les tool parts des messages assistant sont déjà parsés pour la livraison. Extraire un helper commun pour les appels d'outils du chat.
 - Le rendu `openchamber_render` n'est pas affiché dans le chat. Si l'agent en produit un, le chat montre un lien vers la carte ou OpenChamber.
 
@@ -505,6 +523,10 @@ L'agent doit lister explicitement ses outils. Les noms exacts dépendent du tran
 | --- | --- | --- |
 | `GET /api/supervisor` | GET | id de session, état occupé, métadonnées |
 | `GET /api/supervisor/projects` | GET | catalogue des projets éligibles à l'investigation |
+| `GET /api/supervisor/config` | GET | catalogue des modèles, providers et agents + préférences enregistrées |
+| `POST /api/supervisor/config` | POST | enregistrer agent et modèles, appliquer à chaud au chat et aux compagnons |
+| `GET /api/fleet/model` | GET | modèle d'une tâche : préférence, modèle effectif et catalogue (`?sessionId=…`) |
+| `POST /api/fleet/model` | POST | changer le modèle d'une tâche, l'appliquer à sa session et le persister |
 | `POST /api/supervisor/mode` | POST | basculer entre Piloter et Investigation, choisir le projet |
 | `GET /api/supervisor/messages` | GET | messages paginés du chat |
 | `POST /api/supervisor/send` | POST | envoyer un texte au chat |
@@ -535,6 +557,7 @@ Après le lancement, le daemon lit le dernier `todowrite` de la session pour la 
 | Table | Rôle |
 | --- | --- |
 | `supervisor_session` | id OpenChamber de la session de chat, titre, dates |
+| `supervisor_pref` | agent du chat, modèles du chat, des tâches et du compagnon (références `provider/model`, aucun secret) |
 | `task_brief` | goal, critères, contraintes, projet, agent, modèle |
 | `tool_calls` | journal des appels d'outils, optionnel mais recommandé |
 | `task_state` | existant : clôtures et réouvertures |
@@ -726,6 +749,7 @@ Les décisions ci-dessous viennent de la conversation ou des constats ci-dessus.
 | Le chat superviseur est retiré de « In work » (`metadata.openchamber.work = null`) après création, réutilisation et chaque envoi : le dossier `~/.superviseur` ne suffit pas à le sortir du home | 2026-11-06 | Implémentation |
 | Le compagnon ne produit plus de plan ; le `todowrite` de la tâche est la source | 2026-11-06 | Progression |
 | Mode Investigation explicite, projet choisi dans OpenChamber, trois outils de lecture bornés et refus côté daemon de toutes les autres opérations ; le cadrage reste dans le fil, lancement après retour explicite en Piloter | 2026-11-07 | Sécurité et agent |
+| Bouton config du chat : agent et modèle changent à chaud sur la session vivante ; modèles du chat, des tâches et du compagnon réglables séparément et persistés (`supervisor_pref`), repli sur le défaut avec avertissement pour une valeur inconnue | 2026-11-08 | UI, modèles |
 
 ### 15.2 Ouvertes
 

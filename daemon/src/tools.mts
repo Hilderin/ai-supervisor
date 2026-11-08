@@ -20,6 +20,8 @@ import {
   putTaskBrief, reviveTaskResume, setSupervisorMode, upsertTaskState,
 } from './state.mts';
 import { isSupervisorBusy, isSupervisorSession, SUPERVISOR_DIR, wrapOwnerPrompt } from './supervisor.mts';
+import { taskModelRef } from './prefs.mts';
+import { findModel } from './models.mts';
 
 export interface ToolResult {
   ok: boolean;
@@ -290,8 +292,11 @@ function composePrompt(p: {
     'Critères : ta tâche est jugée sur des critères d\'acceptation (AC-01, AC-02, ...) : crée-les avec `criteria_add` (titre, détail, au moins une méthode de validation), soumets tes preuves avec `criteria_to_validate` et relis la liste avec `criteria_list`.',
     'Le vérificateur du Superviseur valide ou refuse tes preuves ; ses rejets t\'arrivent en notification avec leur raison : corrige puis resoumets une preuve. N\'invente pas de validation toi-même.',
     'Réponse au propriétaire : dès qu\'une information attendue par le propriétaire est prête (réponse à la consigne, point à valider, résultat demandé), envoie-la avec le tool `answer` : elle s\'affiche dans le Superviseur, rendue en markdown (titres, listes, gras quand la réponse le justifie, sans forcer la longueur) ; si la réponse rattache à une question posée, passe cette question dans le champ `question`.',
-    'Le propriétaire ne lit PAS la conversation de la tâche (ni le rendu `openchamber_render`, ni un tableau laissé dans la session) : la réponse doit tenir debout seule, et tout tableau ou classement utile est reproduit en markdown dans le texte de `answer`, jamais renvoyé au chat.',
+    'Le propriétaire ne lit PAS la conversation de la tâche (ni le rendu `openchamber_render`, ni un tableau laissé dans la session) : la réponse doit tenir debout seule, et tout tableau ou classement utile est reproduit en markdown dans le texte de `answer`, jamais renvoyé au chat. Un bloc `Table`, `Steps` ou `Callout` y est aussi dessiné.',
     'Pose les questions avec le tool `question` : le formulaire s\'affiche dans le Superviseur ; une question posée en texte dans la conversation n\'arrive jamais au propriétaire.',
+    'Toute question au propriétaire passe par le tool `question`, jamais par un bloc openui-lang (Choice, Input, Button) : un bloc interactif resterait inerte dans le Superviseur, alors qu\'une question du tool est affichée, répondable et annulable.',
+    'Structure : pour un parcours d\'étapes, un tableau comparatif ou un avertissement, tu peux écrire un bloc `openui-lang` (root = Stack([...]) avec Steps, Table, Callout) dans ton dernier message ou dans `answer` ; le Superviseur le dessine. Un bloc invalide ou un composant non dessiné (graphiques, champs interactifs) s\'affiche en code brut : préfère ces composants, et pas de bloc décoratif.',
+    'Exemple : ```openui-lang\nroot = Stack([note, flow])\nnote = Callout("Le build est vert.", "success")\nflow = Steps([{title: "Cadrer", status: "done"}, {title: "Coder", status: "current"}])\n```',
     'N\'en envoie pas sans attente du propriétaire : une validation de rendu ou un commentaire de confort n\'est pas une réponse, le rendu se vérifie avec le build, les tests ou la flotte.',
     'L\'usage (rappel) est aussi dans les messages du propriétaire ; ce tool n\'est pas pour le bilan final, qui continue de s\'écrire à la fin de la session.',
     'Bilan : à la fin, écris un court bilan (fait, reste, décisions) dans ton dernier message.',
@@ -357,6 +362,26 @@ export async function getTask(args: { task?: string } = {}): Promise<ToolResult>
       delivery: delivery?.markdown ? delivery.markdown.slice(0, 2000) : '',
     },
   };
+}
+
+/**
+ * Modèle d'une tâche au lancement : le choix explicite de l'appelant prime,
+ * sinon la préférence « tâches ». Une référence inconnue ne part pas telle
+ * quelle : repli sur la préférence (ou le défaut de la session) et
+ * avertissement structuré pour l'agent.
+ */
+export async function resolveTaskModel(requested?: string): Promise<{
+  model: string | null;
+  warning: string | null;
+  requested: string | null;
+}> {
+  const wanted = String(requested ?? '').trim();
+  if (!wanted) return { model: await taskModelRef(), warning: null, requested: null };
+  if (await findModel(wanted)) return { model: wanted, warning: null, requested: wanted };
+  const fallback = await taskModelRef();
+  const warning = `modèle « ${wanted} » inconnu : ${fallback ? `repli sur ${fallback}` : 'défaut de la session'}`;
+  logEvent('supervisor', 'note', `start_task : ${warning}`);
+  return { model: fallback, warning, requested: wanted };
 }
 
 export async function startTask(args: {
@@ -428,13 +453,17 @@ export async function startTask(args: {
 
     const prompt = composePrompt({ goal, doneCriteria, constraints, context: args.context, project: project.name });
     const agent = String(args.agent ?? '').trim() || 'build';
+    // modèle : le choix de l'appelant prime, sinon la préférence « tâches ».
+    const chosen = await resolveTaskModel(args.model);
+    const model = chosen.model;
+    const modelWarning = chosen.warning;
     const body: Record<string, unknown> = {
       title,
       prompt,
       directory: project.directory,
       agent,
     };
-    if (args.model) body.model = String(args.model);
+    if (model) body.model = model;
     const out = await jpost('/api/openchamber/sessions', body);
     const taskId = (out.data as { sessionId?: string })?.sessionId;
     if (!out.ok || !taskId) {
@@ -453,7 +482,7 @@ export async function startTask(args: {
       constraints,
       projectDir: project.directory,
       agent,
-      model: args.model ?? null,
+      model: model ?? null,
     });
     upsertTaskState(taskId, { title, goal });
     // la tâche est armée pour l'auto-restart dès sa création : si sa session
@@ -463,7 +492,7 @@ export async function startTask(args: {
       title,
       projectDir: project.directory,
       agent,
-      model: args.model ?? null,
+      model: model ?? null,
     });
     logEvent(taskId, 'open', `lancé depuis le chat : ${title}`.slice(0, 180));
     logEvent('supervisor', 'note', `start_task ${title} → ${taskId}`);
@@ -475,6 +504,8 @@ export async function startTask(args: {
       project: project.name,
       directory: project.directory,
       status: 'created',
+      model: model ?? null,
+      ...(modelWarning ? { modelWarning } : {}),
     };
   } finally {
     creating.delete(key);

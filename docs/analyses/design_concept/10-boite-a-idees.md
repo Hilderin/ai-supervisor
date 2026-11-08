@@ -13,10 +13,6 @@ Les idées à faire sont triées par priorité. Les idées complétées ou close
 | # | Idée | Pourquoi ce rang | Coût | État |
 |---|------|------------------|------|------|
 | 18 | Supporter Markdown dans le chat du superviseur | Lisibilité de ce qu'écrivent les agents, d'abord dans le chat du superviseur où le texte d'agent est le plus dense (brief, questions et tooltips restent l'analyse de fond) ; coût faible | faible | Partiel : chat seulement |
-| 22 | Rendre les blocs `openui-lang` des agents : chat du superviseur, réponses `answer`, résultat | OpenChamber sait dessiner ces blocs nativement ; le Superviseur les laisse en texte brut, alors que Steps, Table ou Callout disent mieux qu'un paragraphe ce qu'un agent a fait | moyen | À faire |
-| 23 | Le chat du superviseur gère le tool `question` (et le préfère aux blocs openui-lang) | Une question de l'orchestrateur est aujourd'hui du texte à recopier ; le tool `question` donne une carte répondable, et l'instruction évite des blocs openui-lang inertes dans le Superviseur | faible à moyen | À faire |
-| 19 | Un petit bouton config dans la conversation | Confort (modèle et agent à chaud), le plus simple des deux réglages de modèle ; utile dès que la flotte tourne | faible | À faire |
-| 20 | Choisir le modèle du chat, des tâches et du compagnon | Le modèle est un levier de coût et de qualité invisible aujourd'hui ; il manque un geste simple pour régler chaque type de conversation | faible à moyen | À faire |
 | 1 | Le superviseur fixe l'objectif, et peut stopper ou rediriger un agent qui dérape | Protège du travail qui part dans la mauvaise direction, né d'un cas réel : c'est la raison d'être du Superviseur (porter l'attention) | moyen | À faire |
 | 24 | Stop et revert pour une tâche (comme pour le chat) | Une erreur sur une tâche ne se rattrape pas : ni stop du tour, ni retrait de la file, ni revert, alors que le chat sait déjà faire les deux et que l'idée 1 suppose ce geste | moyen | À faire |
 | 5 | Envoyer des instructions pendant qu'une tâche travaille | Capacité de pilotage centrale (queue, direct, fork, btw), mais dépend de ce que l'API permet réellement | moyen à élevé | Partiel : file d'attente |
@@ -25,9 +21,8 @@ Les idées à faire sont triées par priorité. Les idées complétées ou close
 | 12 | Notifications desktop + badge d'attention sur l'icône | Le Superviseur doit venir vers l'utilisateur quand il n'est pas devant ; sans ça, tout le reste suppose l'œil sur la fenêtre | moyen | À faire |
 | 13 | Chemins de fichiers et URL cliquables dans les résultats | Aller du résultat au fichier sans copier-coller ; s'appuie sur le rendu existant de la livraison et sur `/api/fleet/asset` | faible à moyen | À faire |
 | 15 | Always on top + une UI qui tient dans un coin | Définit le mode d'usage (patch d'écran) ; à faire une fois les signaux essentiels arrêtés | moyen | À faire |
-| 21 | Coller des images dans le chat et les cartes | Le presse-papiers est le chemin le plus court pour montrer une maquette, une erreur ou un rendu cassé ; confort réel, mais secondaire face au pilotage | faible à moyen | À faire |
 
-> Ordre révisé le 2026-11-08 : le markdown du chat, les blocs `openui-lang`, le tool `question` du chat puis les deux réglages de modèle passent en tête ; le reste garde son ordre d'origine. Les raisons de rang sont celles d'origine, ajustées seulement là où elles contredisaient la nouvelle position.
+> Ordre révisé le 2026-11-08 : le markdown du chat, les blocs `openui-lang`, le tool `question` du chat puis les deux réglages de modèle passent en tête ; le reste garde son ordre d'origine. Les raisons de rang sont celles d'origine, ajustées seulement là où elles contredisaient la nouvelle position. Les idées 22 et 23 sont faites le 2026-11-08 et passent dans les complétées ; les idées 19, 20 et 21 sont faites le même jour.
 
 ### Complétées / closes
 
@@ -43,6 +38,11 @@ Les idées à faire sont triées par priorité. Les idées complétées ou close
 | 14 | Pinner des conversations / indiquer une priorité | Triage quand la flotte grossit ; secondaire tant que l'ordre des cartes n'est pas stabilisé | faible à moyen | Clos : l'ordre des cartes est stable |
 | 16 | Date et heure de la dernière activité sur une conversation | Petit signal complémentaire (session vivante ou morte), peu coûteux, non bloquant | faible | Fait |
 | 17 | Un chat permanent, à droite ? (le « poste de commandement » conversationnel) | Gros pari d'architecture, à trancher après les signaux de base : il peut réorienter toute l'UI | élevé | Fait : chat à gauche |
+| 22 | Rendre les blocs `openui-lang` des agents : chat du superviseur, réponses `answer`, résultat | OpenChamber sait dessiner ces blocs nativement ; le Superviseur les laissait en texte brut, alors que Steps, Table ou Callout disent mieux qu'un paragraphe ce qu'un agent a fait | moyen | Fait : chat, `answer` et résultat |
+| 23 | Le chat du superviseur gère le tool `question` (et le préfère aux blocs openui-lang) | Une question de l'orchestrateur était du texte à recopier ; le tool `question` donne une carte répondable, et l'instruction évite des blocs openui-lang inertes dans le Superviseur | faible à moyen | Fait : carte question dans le chat |
+| 19 | Un petit bouton config dans la conversation | Le modèle et l'agent se changeaient seulement en sortant du Superviseur ; un geste direct dans l'en-tête évite de rouvrir OpenChamber pour un réglage de confort | faible | Fait : engrenage dans l'en-tête du chat |
+| 20 | Choisir le modèle du chat, des tâches et du compagnon | Le modèle est un levier de coût et de qualité invisible ; il manquait un geste simple pour régler chaque type de conversation | faible à moyen | Fait : trois modèles séparés, persistés, appliqués ; modèle propre par tâche |
+| 21 | Coller des images dans le chat et les cartes | Le presse-papiers est le chemin le plus court pour montrer une maquette, une erreur ou un rendu cassé ; un collage évite l'aller-retour par un fichier à nommer | faible à moyen | Fait : collage, dépôt et citation dans le chat et le détail |
 
 ## Idées
 
@@ -427,6 +427,8 @@ Dans l'en-tête d'une conversation (sans doute à côté du modèle/agent affich
 
 À creuser : le changement s'applique-t-il immédiatement (au prochain tour de la session) ou seulement nouvel envoi ? Faut-il une confirmation avant de basculer ? Comment signaler dans l'historique qu'un changement de modèle/agent a eu lieu (traçabilité des échanges) ?
 
+> Fait le 2026-11-08 : un engrenage dans l'en-tête du chat ouvre un popover compact (agent, modèle du chat, modèle des tâches, modèle du compagnon). Le changement d'agent et de modèle s'applique à chaud sur la session (`POST /api/session/:id/agent` et `/model`), sans recréer la conversation ni perdre l'historique. Pas de message synthétique dans le fil : le changement est journalisé côté daemon et le sous-titre affiche l'agent et le modèle effectifs. Pas de confirmation : le geste reste léger, et un agent standard choisi affiche un avertissement (il ne porte pas les consignes de supervision du chat).
+
 ### Choisir le modèle du chat, des tâches et du compagnon
 
 Discussion du 7 nov : le modèle devient un choix de pilotage (un modèle fort pour réfléchir, un modèle rapide et bon marché pour les petites tâches), mais le Superviseur ne permet pas de le choisir : tout est régi par défaut de la session, invisible, et le changer suppose de ressortir de l'interface.
@@ -456,6 +458,8 @@ Constat sur le code actuel :
 
 Lien : idée « un petit bouton config dans la conversation » (le changement sur une carte lancée), `daemon/src/supervisor.mts` (`sendConfigOf`), leçon « File d'attente OpenChamber » dans `AGENTS.md` (`sendConfig` obligatoire), doc [mvp1/chat-superviseur.md](../mvp1/chat-superviseur.md) pour le composer.
 
+> Fait le 2026-11-08, avec l'idée 19 : table `supervisor_pref` (références `provider/model`, id d'agent, aucun secret), listes `/api/model`, `/api/provider` et `/api/agent`. Le chat s'applique à chaud ; le réglage global des tâches ne sert qu'aux **nouvelles** tâches, et chaque tâche garde son modèle propre, visible et changeable dans son détail (engrenage à gauche de la flèche OpenChamber). La reprise automatique relit le modèle de la tâche, puis le défaut. Le compagnon reçoit le modèle à la création et sur ses conversations d'analyse déjà vivantes. Sans choix explicite, les défauts actuels restent en place ; une valeur inconnue retombe sur le défaut avec un avertissement dans le popover. Le catalogue traite un `type` absent comme un modèle de chat, sinon les modèles d'une source custom (Skytech) disparaissent de la liste alors que le modèle par défaut peut en venir. Reste ouvert : le choix de la variante (`thinking`, rapide) et un favori par projet pour les tâches.
+
 ### Coller des images dans le chat et les cartes
 
 Discussion du 6 nov : on colle souvent une capture dans une conversation (maquette, message d'erreur, rendu cassé), et le Superviseur n'accepte aujourd'hui que du texte. Il faut d'abord enregistrer le fichier, le nommer, puis demander à l'agent de l'ouvrir : un aller-retour pour une information que le presse-papiers portait déjà.
@@ -480,6 +484,8 @@ Constat sur le code actuel :
 
 Lien : leçons « Images locales de la livraison » et « Rendu openchamber_render » dans `AGENTS.md`, idée « chemins de fichiers et URL cliquables » (même route asset), doc [mvp1/chat-superviseur.md](../mvp1/chat-superviseur.md) pour le composer du chat.
 
+> Fait le 2026-11-08 : un seul composant de saisie (`ui/src/components/ComposerInput.tsx`) sert le chat du superviseur et le détail d'une carte. Collage (Ctrl+V), glisser-déposer natif avec retour de survol, bouton trombone, aperçus compacts (miniature ou icône, nom, taille) et retrait avant envoi. Images PNG, JPEG, GIF et WebP, PDF et fichiers texte, 10 Mo au plus, envoyés en data URL inline. Un collage ou un dépôt insère `[nom]` au curseur ; les images sans nom parlant deviennent `image-1.png`, `image-2.png`, etc., et le fichier transmis porte exactement le nom cité. Reste ouvert : afficher la pièce jointe dans le fil du chat (le fil affiche le texte, pas encore le fichier). Voir [implementation-ui-react.md §17](../mvp1/implementation-ui-react.md) et les preuves `pieces-jointes-*` dans [preuves](../mvp1/preuves/).
+
 ### Rendre les blocs `openui-lang` des agents (étapes, tableaux, graphiques)
 
 Discussion du 7 nov : OpenChamber sait dessiner des blocs d'interface écrits en `openui-lang`, son petit langage de composants (Stack, Steps, Callout, Table, Badge, Progress, graphiques) : un agent qui écrit un tel bloc dans une conversation OpenChamber obtient un rendu natif, par exemple un parcours d'étapes avec flèches et un encadré d'avertissement. Le Superviseur, lui, n'a pas ce rendu.
@@ -502,6 +508,8 @@ Constat sur le code actuel :
 - **usage** : une règle pour les agents dans `composePrompt` et les prompts : bloc = structure (étapes, tableau, graphique), jamais décoratif ; sinon le canal se remplit d'encadrés inutiles.
 
 Lien : idée « markdown dans l'affichage » (même terrain, un cran au-dessus), idée « coller des images » (le même canal d'affichage riche), `ui/src/components/DeliveryMarkdown.tsx` et `SandboxedRender.tsx`, leçon « Rendu openchamber_render » dans `AGENTS.md`.
+
+Fait le 2026-11-08 : catalogue et parseur OpenChamber repris dans `ui/src/openui`, rendu dans `ui/src/components/UiBlock.tsx`, branché sur `ChatMarkdown` (chat) et `DeliveryMarkdown` (réponses `answer` et résultat). Les composants de structure (`Steps`, `Table`, `Callout`, `Stat`, `Progress`, `KeyValue`, `Card`, `Row`) sont dessinés ; tout autre composant ou bloc invalide retombe en code brut.
 
 ### Le chat gère le tool `question` (et le préfère aux blocs openui-lang)
 
@@ -528,6 +536,8 @@ Constat sur le code actuel :
 - **articulation avec l'idée 22** : openui-lang reste pour la structure (étapes, tableaux, graphiques), `question` pour ce qui attend une réponse ; les deux instructions se rédigent ensemble.
 
 Lien : idée « rendre les blocs `openui-lang` » (la complémentarité des deux canaux), leçon « Les questions passent par le tool `question` » dans `AGENTS.md`, `ui/src/components/QuestionBox.tsx`, `ui/src/lib/api.ts` (`replyForm`, `cancelQuestion`), doc [mvp1/chat-superviseur.md](../mvp1/chat-superviseur.md).
+
+Fait le 2026-11-08 : `/api/supervisor` expose `pendingForms` (formulaires `metadata.kind === 'question'`), le chat rend `QuestionBox` sous le message qui a posé la question, et l'en-tête affiche « attend ta réponse ». Le prompt de l'orchestrateur active `question` et interdit les blocs `openui-lang` interactifs ; `composePrompt` et le plugin `superviseur-task` portent la même règle.
 
 ### Stop et revert pour une tâche (comme pour le chat)
 

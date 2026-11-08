@@ -230,3 +230,33 @@
   color: var(--color-muted);
   font-size: 11.5px;
 }
+
+/*
+ * Blocs openui-lang : le composant porte ses marges, le markdown interne ne
+ * doit pas ajouter de vide en haut ni en bas (Callout, étapes, Text).
+ */
+.ui-block {
+  margin: 0 0 8px;
+}
+
+.ui-block:last-child {
+  margin-bottom: 0;
+}
+
+.ui-block-md {
+  min-width: 0;
+}
+
+.ui-block-md > :first-child {
+  margin-top: 0;
+}
+
+.ui-block-md > :last-child {
+  margin-bottom: 0;
+}
+
+.ui-block-raw {
+  margin: 0 0 8px;
+  color: var(--color-muted);
+}
+

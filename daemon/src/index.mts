@@ -11,13 +11,15 @@ import { setActivityBase } from './activity.mts';
 import { setVerifierBase } from './verifier.mts';
 import { startIndexing } from './message-index.mts';
 import { ensureSupervisorSession, ensureSupervisorWorkspace, setBase as setSupervisorBase } from './supervisor.mts';
+import { setBase as setModelsBase } from './models.mts';
+import { setBase as setTaskModelBase } from './task-model.mts';
 import { startServer } from './server.mts';
 import { db } from './state.mts';
 
 async function main() {
   const port = await discoverOpenChamberPort();
   const base = `http://127.0.0.1:${port}`;
-  setBase(base); setCompanionBase(base); setDeliveryBase(base); setPlanBase(base); setSupervisorBase(base); setVerifierBase(base); setActivityBase(base);
+  setBase(base); setCompanionBase(base); setDeliveryBase(base); setPlanBase(base); setSupervisorBase(base); setVerifierBase(base); setActivityBase(base); setModelsBase(base); setTaskModelBase(base);
   ensureSupervisorWorkspace();
   console.log(`[superviseur] OpenChamber découvert sur 127.0.0.1:${port}`);
   try {

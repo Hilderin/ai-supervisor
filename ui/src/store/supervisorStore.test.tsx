@@ -13,6 +13,7 @@ const base = (over: Partial<SupervisorState> = {}): SupervisorState => ({
   projectDirectory: null,
   messages: [],
   queued: [],
+  pendingForms: [],
   ...over,
 });
 

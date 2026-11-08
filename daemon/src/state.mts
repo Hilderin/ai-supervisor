@@ -64,6 +64,17 @@ CREATE TABLE IF NOT EXISTS supervisor_mode (
   mode TEXT NOT NULL DEFAULT 'pilot',
   project_dir TEXT
 );
+-- Préférences de modèles et d'agent du chat (bouton config de la conversation).
+-- Aucune clé ni secret : des références « provider/model » et un id d'agent.
+-- NULL = pas de choix explicite, le défaut d'OpenChamber s'applique.
+CREATE TABLE IF NOT EXISTS supervisor_pref (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  chat_model TEXT,
+  chat_agent TEXT,
+  task_model TEXT,
+  companion_model TEXT,
+  updated_at INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS task_brief (
   session_id TEXT PRIMARY KEY,
   title TEXT,
@@ -472,6 +483,45 @@ export function setSupervisorMode(mode: SupervisorMode, projectDir: string | nul
     .run(mode, projectDir);
 }
 
+export interface SupervisorPrefRow {
+  chat_model: string | null;
+  chat_agent: string | null;
+  task_model: string | null;
+  companion_model: string | null;
+  updated_at: number | null;
+}
+
+/** Préférences explicites : une colonne NULL = pas de choix, le défaut s'applique. */
+export function getSupervisorPref(): SupervisorPrefRow {
+  const row = db.query('SELECT chat_model, chat_agent, task_model, companion_model, updated_at FROM supervisor_pref WHERE id = 1')
+    .get() as SupervisorPrefRow | undefined;
+  return {
+    chat_model: row?.chat_model ?? null,
+    chat_agent: row?.chat_agent ?? null,
+    task_model: row?.task_model ?? null,
+    companion_model: row?.companion_model ?? null,
+    updated_at: row?.updated_at ?? null,
+  };
+}
+
+export function setSupervisorPref(p: {
+  chatModel: string | null; chatAgent: string | null;
+  taskModel: string | null; companionModel: string | null;
+}): void {
+  db.query(`INSERT INTO supervisor_pref (id, chat_model, chat_agent, task_model, companion_model, updated_at)
+            VALUES (1, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET chat_model=excluded.chat_model, chat_agent=excluded.chat_agent,
+              task_model=excluded.task_model, companion_model=excluded.companion_model,
+              updated_at=excluded.updated_at`)
+    .run(p.chatModel, p.chatAgent, p.taskModel, p.companionModel, Date.now());
+}
+
+/** Compagnons vivants connus (mapping parent → enfant), pour propager un modèle. */
+export function listCompanions(): Array<{ parentId: string; companionId: string }> {
+  return (db.query('SELECT parent_session_id p, companion_session_id c FROM companion_map').all() as
+    Array<{ p: string; c: string }>).map(r => ({ parentId: r.p, companionId: r.c }));
+}
+
 export function setSupervisorSession(p: {
   ocSessionId: string; agent: string; version: number; title: string;
 }) {
@@ -550,6 +600,40 @@ export function getTaskResume(taskId: string): TaskResumeRow | null {
 
 export function getTaskResumeBySession(sessionId: string): TaskResumeRow | null {
   return (db.query('SELECT * FROM task_resume WHERE session_id = ?').get(sessionId) as TaskResumeRow | undefined) ?? null;
+}
+
+/**
+ * Modèle propre à une tâche. Le brief fait foi, puis le registre de reprise :
+ * le réglage global `supervisor_pref.task_model` ne sert qu'aux nouvelles
+ * tâches et n'est jamais lu ici.
+ */
+export function getTaskModelStored(sessionId: string): string | null {
+  const brief = db.query('SELECT model FROM task_brief WHERE session_id = ?')
+    .get(sessionId) as { model?: string | null } | undefined;
+  if (brief?.model) return brief.model;
+  const resume = getTaskResumeBySession(sessionId) ?? getTaskResume(sessionId);
+  return resume?.model ?? null;
+}
+
+/**
+ * Écrit le modèle propre à la tâche dans le brief et le registre de reprise.
+ * Retourne false quand la tâche n'a ni brief ni registre : le modèle a bien
+ * été appliqué à la session vivante, mais il ne survivra pas à une reprise.
+ */
+export function updateTaskModel(sessionId: string, model: string | null): boolean {
+  let persisted = false;
+  const brief = db.query('SELECT session_id FROM task_brief WHERE session_id = ?').get(sessionId);
+  if (brief) {
+    db.query('UPDATE task_brief SET model = ? WHERE session_id = ?').run(model, sessionId);
+    persisted = true;
+  }
+  const row = getTaskResumeBySession(sessionId) ?? getTaskResume(sessionId);
+  if (row) {
+    db.query('UPDATE task_resume SET model = ?, updated_at = ? WHERE task_id = ?')
+      .run(model, Date.now(), row.task_id);
+    persisted = true;
+  }
+  return persisted;
 }
 
 export function listTaskResume(): TaskResumeRow[] {

@@ -173,7 +173,7 @@ export const useSupervisorStore = create<SupervisorStore>((set, get) => ({
       refreshError: null,
       draft: '',
       attachments: [],
-      state: before ? { ...before, sessionId: null, messages: [], queued: [], status: 'idle', error: undefined } : before,
+      state: before ? { ...before, sessionId: null, messages: [], queued: [], pendingForms: [], status: 'idle', error: undefined } : before,
     });
     try {
       const next = await newSupervisor();

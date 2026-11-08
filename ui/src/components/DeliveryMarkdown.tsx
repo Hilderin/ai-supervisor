@@ -1,40 +1,9 @@
-import { memo, useState } from 'react';
+import { memo, useMemo } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-
-interface ImageProps {
-  src?: string;
-  alt?: string;
-  sessionId: string;
-}
-
-/**
- * Image d'une réponse agent. Les sources locales (capture dans le dossier de
- * la session) sont servies par le daemon via `/api/fleet/asset` : le
- * navigateur ne peut pas lire un chemin du disque, et l'UI n'est pas servie
- * par OpenChamber. Une image introuvable ou refusée affiche un texte discret
- * au lieu d'une icône cassée.
- */
-function DeliveryImage({ src, alt, sessionId }: ImageProps) {
-  const [failed, setFailed] = useState(false);
-  if (!src) return null;
-  if (failed) {
-    return <span className="delivery-img-error">Image indisponible{alt ? ` : ${alt}` : ''}</span>;
-  }
-  const local = !/^(?:https?:)?\/\//i.test(src) && !/^(?:data|blob):/i.test(src);
-  const url = local
-    ? `/api/fleet/asset?sessionId=${encodeURIComponent(sessionId)}&path=${encodeURIComponent(src)}`
-    : src;
-  return (
-    <img
-      src={url}
-      alt={alt ?? ''}
-      loading="lazy"
-      className="delivery-img"
-      onError={() => setFailed(true)}
-    />
-  );
-}
+import { fenceUiBlocks } from '../openui/taggedBlocks';
+import { DeliveryImage } from './DeliveryImage';
+import { uiBlockComponents } from './UiBlock';
 
 /**
  * Markdown de la réponse agent : titres, listes, code, tableaux (GFM).
@@ -49,12 +18,14 @@ export const DeliveryMarkdown = memo(function DeliveryMarkdown({
   markdown: string;
   sessionId: string;
 }) {
+  const prepared = useMemo(() => fenceUiBlocks(markdown), [markdown]);
   return (
     <div className="delivery-md">
       <Markdown
         remarkPlugins={[remarkGfm]}
         skipHtml
         components={{
+          ...uiBlockComponents(sessionId),
           a: ({ href, children }) => (
             <a href={href} target="_blank" rel="noreferrer noopener">
               {children}
@@ -68,7 +39,7 @@ export const DeliveryMarkdown = memo(function DeliveryMarkdown({
           ),
         }}
       >
-        {markdown}
+        {prepared}
       </Markdown>
     </div>
   );

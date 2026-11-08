@@ -10,13 +10,15 @@
  */
 import { createHash } from 'node:crypto';
 import {
-  ensureAgentDefinition, getAgentVersion, getCompanion, getTaskState, getVerdict, logEvent,
+  ensureAgentDefinition, getAgentVersion, getCompanion, getTaskState, getVerdict, listCompanions, logEvent,
   putCompanion, setTaskObjective, setTaskPlan, upsertVerdict,
 } from './state.mts';
 import { getPlanSnapshot, planStepsOf } from './plan.mts';
 import { criteriaCounts, criteriaPushMessage, listCriteria, statusLabel } from './criteria.mts';
 import { takeKick, kick as pushKick } from './kicks.mts';
 import { isDaemonNotice, messageText } from './messages.mts';
+import { companionModelRef } from './prefs.mts';
+import { modelPayload } from './models.mts';
 import {
   detectHumanQuestion, emptyWait, lintSummary, normalizeVerdict, parsePlanFromDb,
   parseVerdictText, resolveObjective, scrubSummary, shouldRepair, toolActionLine,
@@ -224,13 +226,43 @@ async function ensureCompanion(sid: string, s: CompanionState) {
     logEvent(sid, 'note', `compagnon ${presence === 'gone' ? 'supprimé' : 'archivé'} : recréation`);
   }
   // l'agent est fixé dès la création : l'API send ne l'impose pas toujours aux sessions enfants
-  const r = await jpost('/api/session', { parentID: sid, title: 'comp. supervision', agent: currentAgent });
+  const model = modelPayload((await companionModelRef()) ?? '');
+  const r = await jpost('/api/session', {
+    parentID: sid,
+    title: 'comp. supervision',
+    agent: currentAgent,
+    ...(model ? { model } : {}),
+  });
   const id = (r.data as { data?: { id?: string } })?.data?.id;
   if (!id) throw new Error('session compagnon non créée');
   s.compSession = id;
   rememberCompanion(sid, id, currentAgent);
-  logEvent(sid, 'note', `compagnon #${id.slice(-6)} (${currentAgent})`);
+  logEvent(sid, 'note', `compagnon #${id.slice(-6)} (${currentAgent}${model ? `, modèle ${model.providerID}/${model.id}` : ''})`);
   return id;
+}
+
+/**
+ * Applique le modèle du compagnon aux conversations d'analyse déjà vivantes.
+ * Sans préférence, on ne touche à rien : les compagnons existants gardent le
+ * modèle qu'ils avaient, seuls les nouveaux suivent le défaut d'OpenChamber.
+ */
+export async function applyCompanionModelPref(): Promise<{ updated: number; failed: number }> {
+  const model = modelPayload((await companionModelRef()) ?? '');
+  if (!model) return { updated: 0, failed: 0 };
+  let updated = 0;
+  let failed = 0;
+  for (const { companionId } of listCompanions()) {
+    const out = await jpost(`/api/session/${encodeURIComponent(companionId)}/model`, { model })
+      .catch(() => ({ ok: false }));
+    if (out.ok) updated++;
+    else failed++;
+  }
+  if (updated || failed) {
+    logEvent('supervisor', 'note',
+      `compagnons : modèle ${model.providerID}/${model.id} appliqué à ${updated}`
+      + (failed ? `, ${failed} en échec` : ''));
+  }
+  return { updated, failed };
 }
 
 async function waitReply(compId: string, sinceMs: number, timeoutMs = MAX_WAIT_MS): Promise<string> {

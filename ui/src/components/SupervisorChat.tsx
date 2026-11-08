@@ -4,9 +4,11 @@ import { cx } from '../lib/cx';
 import { taskTitleOf } from '../lib/fleet';
 import { useFleetStore } from '../store/fleetStore';
 import { useSupervisorStore } from '../store/supervisorStore';
-import type { ChatTool, Fleet, SupervisorMessage } from '../types';
+import type { ChatTool, Fleet, PendingForm, SupervisorMessage } from '../types';
 import { ChatMarkdown } from './ChatMarkdown';
 import { ComposerInput } from './ComposerInput';
+import { ConfigPopover } from './ConfigPopover';
+import { QuestionBox } from './QuestionBox';
 import { BroomIcon, CopyIcon, OpenChamberIcon, PanelLeftIcon, RevertIcon, SendIcon, StopIcon } from './Icons';
 
 interface Props {
@@ -211,6 +213,50 @@ export function MessageMeta({
   );
 }
 
+/** Libellé de l'en-tête du chat : une question en attente prime sur le tour en cours. */
+export function supervisorStatusLabel({
+  offline,
+  waiting,
+  busy,
+  idleLabel,
+}: {
+  offline: boolean;
+  waiting: boolean;
+  busy: boolean;
+  idleLabel: string;
+}): string {
+  if (offline) return 'hors ligne';
+  if (waiting) return 'attend ta réponse';
+  if (busy) return 'réfléchit…';
+  return idleLabel;
+}
+
+/** Cartes des questions du tool `question` : une par formulaire en attente. */
+export function ChatQuestionCards({ sessionId, forms }: { sessionId: string; forms: PendingForm[] }) {
+  return (
+    <>
+      {forms.map((form) => (
+        <div key={form.id} data-testid="chat-question" data-form-id={form.id}>
+          <QuestionBox sessionId={sessionId} form={form} embedded />
+        </div>
+      ))}
+    </>
+  );
+}
+
+/** Questions rattachées à un message par `metadata.tool.messageID`. */
+export function questionsForMessage(forms: PendingForm[], messageId: string): PendingForm[] {
+  return forms.filter((form) => form.metadata?.tool?.messageID === messageId);
+}
+
+/** Questions sans message retrouvé : elles restent visibles en fin de fil. */
+export function orphanQuestions(forms: PendingForm[], messageIds: ReadonlySet<string>): PendingForm[] {
+  return forms.filter((form) => {
+    const messageId = form.metadata?.tool?.messageID;
+    return !messageId || !messageIds.has(messageId);
+  });
+}
+
 export function SupervisorChat({ onCollapse, onOpenMiniChat }: Props) {
   useSupervisor();
   const state = useSupervisorStore((s) => s.state);
@@ -244,6 +290,12 @@ export function SupervisorChat({ onCollapse, onOpenMiniChat }: Props) {
 
   const messages = state?.messages ?? [];
   const queued = state?.queued ?? [];
+  const pendingForms = state?.pendingForms ?? [];
+  const waiting = pendingForms.length > 0;
+  const messageIds = new Set(messages.map((m) => m.id));
+  // une question sans message retrouvé (fil tronqué, message hors fenêtre)
+  // reste visible en fin de fil plutôt que de disparaître.
+  const orphanForms = orphanQuestions(pendingForms, messageIds);
   const busy = sending || state?.status === 'busy';
   const canStop = !sending && state?.status === 'busy';
   const offline = !!refreshError;
@@ -319,6 +371,17 @@ export function SupervisorChat({ onCollapse, onOpenMiniChat }: Props) {
     void refresh();
   };
 
+  // modèle et agent effectifs, visibles au repos : le geste de config doit
+  // laisser une trace lisible, pas seulement changer une valeur cachée
+  const agentLabel = state?.agent && !state.agent.startsWith('superviseur-orchestrateur')
+    ? state.agent
+    : 'orchestrateur';
+  const modelLabel = state?.model?.name ?? null;
+  const idleLabel = mode === 'investigation'
+    ? 'investigation en lecture seule'
+    : [agentLabel, modelLabel].filter(Boolean).join(' · ');
+  const statusLabel = supervisorStatusLabel({ offline, waiting, busy, idleLabel });
+
   return (
     <aside
       data-testid="supervisor-chat"
@@ -327,18 +390,19 @@ export function SupervisorChat({ onCollapse, onOpenMiniChat }: Props) {
       <header className="flex items-center gap-[8px] border-b border-border px-[13px] py-[10px]">
         <span
           data-testid="supervisor-status"
-          title={busy ? 'Le superviseur travaille' : 'Superviseur prêt'}
+          title={offline ? 'Superviseur hors ligne' : waiting ? 'Le superviseur attend ta réponse' : busy ? 'Le superviseur travaille' : 'Superviseur prêt'}
           className={cx(
             'h-[8px] w-[8px] shrink-0 rounded-full',
-            offline ? 'bg-dot-off' : busy ? 'bg-orange animate-dot-blink' : 'bg-green',
+            offline ? 'bg-dot-off' : waiting ? 'bg-orange' : busy ? 'bg-orange animate-dot-blink' : 'bg-green',
           )}
         />
         <div className="min-w-0 flex-1">
           <div className="truncate text-[14px] font-bold">Superviseur</div>
-          <div className="text-[11px] text-muted">
-            {offline ? 'hors ligne' : busy ? 'réfléchit…' : mode === 'investigation' ? 'investigation en lecture seule' : 'orchestrateur'}
+          <div data-testid="supervisor-subtitle" title={statusLabel} className="truncate text-[11px] text-muted">
+            {statusLabel}
           </div>
         </div>
+        <ConfigPopover />
         <CleanChatButton
           busy={busy}
           creating={creating}
@@ -380,7 +444,7 @@ export function SupervisorChat({ onCollapse, onOpenMiniChat }: Props) {
       >
         {loading ? (
           <div className="mt-[8px] text-[12.5px] text-muted">Connexion au superviseur…</div>
-        ) : messages.length === 0 ? (
+        ) : messages.length === 0 && orphanForms.length === 0 ? (
           <div data-testid="supervisor-empty" className="flex h-full flex-col justify-center gap-[10px]">
             <div className="text-[14px] font-semibold">{mode === 'investigation' ? 'Explorons le projet avant de cadrer.' : 'Décris ce que tu veux lancer.'}</div>
             <div className="text-[12.5px] text-muted">
@@ -434,11 +498,26 @@ export function SupervisorChat({ onCollapse, onOpenMiniChat }: Props) {
                           fleet={fleet}
                         />
                       ))}
+                    {questionsForMessage(pendingForms, message.id).length ? (
+                      <ChatQuestionCards
+                        sessionId={state?.sessionId ?? ''}
+                        forms={questionsForMessage(pendingForms, message.id)}
+                      />
+                    ) : null}
                     <MessageMeta message={message} disabled={reverting} onRevert={onRevert} />
                   </div>
                 )}
               </div>
             ))}
+            {orphanForms.length ? (
+              <div
+                data-testid="chat-question-orphan"
+                className="rounded-[8px] border border-wait-border bg-wait px-[10px] py-[8px]"
+              >
+                <div className="mb-[5px] text-[10.5px] font-semibold text-attend">Question en attente</div>
+                <ChatQuestionCards sessionId={state?.sessionId ?? ''} forms={orphanForms} />
+              </div>
+            ) : null}
             {busy ? (
               <div data-testid="supervisor-busy" className="flex items-center gap-[7px] text-[12px] text-muted">
                 <span className="h-[7px] w-[7px] rounded-full bg-orange animate-dot-blink" />

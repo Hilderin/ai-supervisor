@@ -46,4 +46,24 @@ describe('DeliveryMarkdown', () => {
     expect(html).toContain('src="https://example.com/x.png"');
     expect(html).not.toContain('/api/fleet/asset');
   });
+
+  test('dessine les blocs openui-lang des réponses answer et du résultat', () => {
+    const html = renderToStaticMarkup(
+      <DeliveryMarkdown
+        sessionId="ses_1"
+        markdown={'```openui-lang\nroot = Stack([t])\nt = Table(["Étape", "État"], [["Build", "vert"]])\n```'}
+      />,
+    );
+    expect(html).toContain('data-testid="ui-block"');
+    expect(html).toContain('<table>');
+    expect(html).toContain('Build');
+  });
+
+  test('un bloc openui-lang invalide retombe en code brut', () => {
+    const html = renderToStaticMarkup(
+      <DeliveryMarkdown sessionId="ses_1" markdown={'```openui-lang\nroot = Stack([a])\na = Steps([{title: "Cassé"\n```'} />,
+    );
+    expect(html).toContain('data-testid="ui-block-raw"');
+    expect(html).toContain('Cassé');
+  });
 });

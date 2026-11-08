@@ -18,6 +18,7 @@ import {
   getTaskState, listTaskResume, listTaskBriefs, logEvent, migrateTaskSession,
   noteResumeAlive, noteResumeAttempt, resetResumeAttempts,
 } from './state.mts';
+import { defaultModelRef, findModel } from './models.mts';
 
 let base = '';
 export function setBase(b: string) { base = b.replace(/\/$/, ''); }
@@ -183,22 +184,6 @@ export async function sessionGone(id: string): Promise<'gone' | 'alive' | 'archi
   }
 }
 
-/** Le modèle default courant de l'UI : `GET /api/config/settings` → `defaultModel`. */
-export async function defaultModelRef(): Promise<string | null> {
-  try {
-    const settings = await jget('/api/config/settings?directory=') as { defaultModel?: string };
-    const ref = typeof settings?.defaultModel === 'string' ? settings.defaultModel.trim() : '';
-    if (/^[^/]+\/[^/]+$/.test(ref)) return ref;
-  } catch { /* repli plus bas */ }
-  try {
-    const d = await jget('/api/model/default') as { data?: { providerID?: string; id?: string; modelID?: string } };
-    const provider = d?.data?.providerID;
-    const model = d?.data?.id ?? d?.data?.modelID;
-    if (provider && model) return `${provider}/${model}`;
-  } catch { /* modèle inconnu : pas de reprise ce tour-ci */ }
-  return null;
-}
-
 /* --- registre : armement initial des tâches existantes --- */
 
 let backfilled = false;
@@ -327,11 +312,19 @@ export async function resumeTick(liveIds: Set<string>, cfg = resumeConfigFromEnv
         }
         continue;
       }
-      const model = await defaultModelRef();
+      // Le modèle de la tâche prime : le réglage global ne sert qu'aux
+      // nouvelles tâches. Sans modèle propre, la reprise suit le défaut.
+      const storedModel = getTaskBrief(row.session_id)?.model ?? row.model ?? null;
+      const storedValid = storedModel ? await findModel(storedModel) : null;
+      if (storedModel && !storedValid) {
+        logEvent(row.task_id, 'note',
+          `reprise : modèle de la tâche « ${storedModel} » introuvable, repli sur le défaut`);
+      }
+      const model = storedValid?.ref ?? await defaultModelRef();
       if (!model) {
-        // pas de modèle default joignable : pas de départ en aveugle, l'essai peste
+        // pas de modèle joignable : pas de départ en aveugle, l'essai est consommé
         noteResumeAttempt(row.task_id, { at: now });
-        logEvent(row.task_id, 'note', 'reprise reportée : modèle default courant introuvable');
+        logEvent(row.task_id, 'note', 'reprise reportée : modèle de la tâche et défaut introuvables');
         missingSince.delete(row.task_id);
         continue;
       }

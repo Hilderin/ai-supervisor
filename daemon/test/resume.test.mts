@@ -32,6 +32,7 @@ const {
 } = state;
 
 const resume = await import('../src/resume.mts');
+const models = await import('../src/models.mts');
 const {
   resumeConfigFromEnv, shouldRestartTask, nextBackoffMs, composeResumePrompt,
   sessionGone, resumeTick, resetResumeState, backfillResumeTasks,
@@ -122,6 +123,7 @@ describe('registre task_resume', () => {
     console.log('RESUME_DB_FILES', (db as any).query('pragma database_list').all().map((d: any) => d.file));
     db.run('DELETE FROM task_resume; DELETE FROM task_brief; DELETE FROM task_state; DELETE FROM task_log; DELETE FROM task_verdict;');
     resetResumeState();
+    models.resetCatalogCache();
   });
 
   test('armement, suivi de vie, tentative', () => {
@@ -245,6 +247,61 @@ describe('resumeTick de bout en bout', () => {
     await resumeTick(new Set(['ses_fresh']), tickCfg);
     expect(getTaskResume('ses_gone')!.session_since).toBeGreaterThan(0);
 
+    globalThis.fetch = originalFetch;
+  });
+
+  test('la reprise utilise le modèle propre à la tâche, pas le réglage global', async () => {
+    putTaskBrief('ses_task_model', {
+      title: 'Modèle de tâche', goal: 'g', doneCriteria: [], constraints: [],
+      projectDir: '/proj', agent: 'build', model: 'task/model',
+    });
+    upsertTaskState('ses_task_model', { title: 'Modèle de tâche', goal: 'g' });
+    armTaskResume('ses_task_model', {
+      sessionId: 'ses_task_model', title: 'Modèle de tâche', projectDir: '/proj',
+      agent: 'build', model: 'task/model',
+    });
+    // un réglage global différent ne doit pas écraser le modèle de la tâche
+    state.setSupervisorPref({
+      chatModel: null, chatAgent: null, taskModel: 'global/model', companionModel: null,
+    });
+    const tickCfg = { ...cfg, confirmMissingMs: 0 };
+    globalThis.fetch = fakeFetch([
+      { match: '/api/session/ses_task_model', status: 404 },
+      { match: '/api/model', body: { data: [
+        { id: 'model', modelID: 'model', providerID: 'task', name: 'Tâche', type: 'chat', enabled: true, status: 'active' },
+        { id: 'model', modelID: 'model', providerID: 'global', name: 'Global', type: 'chat', enabled: true, status: 'active' },
+      ] } },
+      { match: '/api/provider', body: { data: [] } },
+      { match: '/api/agent', body: { data: [] } },
+      { match: '/api/openchamber/sessions', body: { sessionId: 'ses_task_model2' } },
+    ], calls);
+
+    const stats = await resumeTick(new Set(['ses_live']), tickCfg);
+
+    expect(stats.restarted).toHaveLength(1);
+    const create = callsTo(calls, '/api/openchamber/sessions')[0];
+    expect(JSON.parse(String(create.init!.body)).model).toBe('task/model');
+    globalThis.fetch = originalFetch;
+  });
+
+  test('sans modèle de tâche, la reprise suit le défaut, jamais le réglage global', async () => {
+    putTaskBrief('ses_no_model', { title: 'Sans modèle', goal: 'g', doneCriteria: [], constraints: [], projectDir: '/proj' });
+    upsertTaskState('ses_no_model', { title: 'Sans modèle', goal: 'g' });
+    armTaskResume('ses_no_model', { sessionId: 'ses_no_model', title: 'Sans modèle', projectDir: '/proj' });
+    state.setSupervisorPref({
+      chatModel: null, chatAgent: null, taskModel: 'global/model', companionModel: null,
+    });
+    const tickCfg = { ...cfg, confirmMissingMs: 0 };
+    globalThis.fetch = fakeFetch([
+      { match: '/api/session/ses_no_model', status: 404 },
+      { match: '/api/config/settings', body: { defaultModel: 'provider-x/model-y' } },
+      { match: '/api/openchamber/sessions', body: { sessionId: 'ses_no_model2' } },
+    ], calls);
+
+    await resumeTick(new Set(['ses_live']), tickCfg);
+
+    const create = callsTo(calls, '/api/openchamber/sessions')[0];
+    expect(JSON.parse(String(create.init!.body)).model).toBe('provider-x/model-y');
     globalThis.fetch = originalFetch;
   });
 
