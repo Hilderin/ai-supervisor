@@ -80,7 +80,9 @@ Le flicker d'ordre observé avant la migration avait deux causes cumulées, tout
 | `POST /api/fleet/send` | `{sessionId, text}` (le daemon applique `delivery: steer`) |
 | `POST /api/fleet/done` | `{sessionId}` |
 
-Le formulaire envoie **un objet complet** `{ qN: valeur }` en un seul appel. Un champ `multiselect` est toujours un tableau, y compris quand le texte libre est la seule valeur (`[texte]`). Le champ libre reste disponible à côté des options.
+Le formulaire envoie **un objet complet** `{ qN: valeur }` en un seul appel. Un champ `multiselect` est toujours un tableau, y compris quand le texte libre est la seule valeur (`[texte]`).
+
+Le choix **« Autre »** porte le texte libre : il s'affiche à côté des options, s'active dès la frappe (les options du champ se désélectionnent) et le texte saisi est alors la réponse exacte du champ, sans libellé ajouté. Tant qu'« Autre » est actif sans texte, « Répondre » reste désactivé avec un message sous le champ ; choisir une option efface le texte libre (aucun texte fantôme). L'état (sélection + texte) et l'objet envoyé sont construits dans `lib/answer.ts` (`typeText`, `selectOption`, `otherWithoutText`, `buildAnswer`).
 
 ## 5. Livraison inline (capacité 4)
 
@@ -134,7 +136,7 @@ Le bloc est mémoïsé : les re-rendus 1 s / 2 s de la carte ne relancent ni la 
 - **Attend** : la ligne `sup.attend` en orange sous le résumé.
 - **Progression** : barre verte, ambre entre 1 et 65 %. Le compteur à droite (`x/y`) est un bouton qui ouvre un popup listant les étapes du plan (`todowrite`) avec leur statut. Tant qu'aucune étape n'a commencé, il affiche `N étapes` au lieu de `0/N` ; une tâche terminée affiche `100 %`.
 - **Confiance** : trois pastilles (rouge < 35 %, ambre < 70 %, vert ensuite) et bulle HTML avec `Confiance N %` puis `sup.note` (le `confidence_reason` du compagnon). La bulle est un portail en `position:fixed` (`width:max-content`, 300 px max), ouverte au survol et au focus clavier.
-- **Question** : un bloc par champ, options (mono ou multiselect) et champ libre, un seul bouton « Répondre ».
+- **Question** : un bloc par champ, options (mono ou multiselect), choix « Autre » et son champ de texte libre, un seul bouton « Répondre ».
 - **Permission** : « Permission demandée » + bouton « Autoriser » (`decision: once`).
 - **Résultat** : bloc de livraison sur les cartes TERMINÉ et au repos (texte markdown + rendu `openchamber_render`), aperçu replié, jamais sur une carte busy ou en attente.
 - **Composer** : retiré des cartes le 2026-11-07 (demande du propriétaire, voir §13) : l'écriture à une tâche passe par le détail. Le composer du détail garde hauteur auto jusqu'à 120 px, Entrée envoie, Maj+Entrée saute une ligne, flèche verte dès qu'il y a du texte. Dans le chat de supervision, la hauteur est aussi réglable à la souris (poignée au-dessus du champ, 34 à 360 px, mémorisée) ; le composer reste actif pendant un tour, le texte part alors dans la file d'attente OpenChamber.

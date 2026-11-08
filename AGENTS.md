@@ -54,7 +54,7 @@ Directives pour tout agent travaillant dans ce repo.
 - Variables d'état dans les templates : ne pas composer un préfixe « : » à deux endroits (double `: :` réel). La variable porte déjà sa ponctuation, le template s'abstient.
 - Le sig d'une carte doit inclure **tout ce qui doit rafRAÎCHIR à l'écran** (statut, id de formulaire, progress, comptes critères) sinon la carte semble figée (bug 95 % vs 100 %).
 - Pendant une saisie (focus INPUT/TEXTAREA d'une carte), ne jamais reconstruire cette carte.
-- Formulaire de questions : **multi-champs** (q0, q1 → un seul bouton Répondre) ; `type` variable (`string`, `multiselect` → valeur en TABLEAU) ; répondre par objet `{qN: ...}` complet.
+- Formulaire de questions : **multi-champs** (q0, q1 → un seul bouton Répondre) ; `type` variable (`string`, `multiselect` → valeur en TABLEAU) ; répondre par objet `{qN: ...}` complet. Le choix **« Autre »** porte le champ libre : il s'active dès la frappe (les options se désélectionnent) et envoie EXACTEMENT le texte saisi, jamais le libellé d'une option ; « Répondre » est bloqué tant qu'« Autre » est actif avec un texte vide ou en espaces, et choisir une option efface le texte libre.
 - JSON des agents : clés **en anglais** (`summary/done/progress/pending_human`) + clés toutes déclarées **requises** (les clés optionnelles ne sont pas nourries de façon fiable) ; parser tolérant aux variantes accentuées. Le contrat de l'analyste est réduit depuis le 2026-11-07 (confiance retirée) : `state/summary/next/human_request`.
 - Menu contextuel : `position:absolute` exige un ancêtre positionné: `.card { position:relative }` sinon le menu s'ancre à la page.
 

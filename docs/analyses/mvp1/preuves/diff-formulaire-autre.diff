@@ -1,0 +1,591 @@
+# Diff de la tâche « formulaire Autre » (fichiers touchés par cette tâche)
+# QuestionBox.tsx portait déjà la prop embedded d'une tâche parallèle avant ce travail.
+
+ AGENTS.md                                     |   2 +-
+ docs/analyses/mvp1/implementation-ui-react.md |   6 +-
+ ui/src/components/QuestionBox.tsx             | 184 +++++++++++++++++---------
+ ui/src/lib/answer.test.ts                     | 112 +++++++++++++++-
+ ui/src/lib/answer.ts                          | 100 ++++++++++++--
+ 5 files changed, 330 insertions(+), 74 deletions(-)
+
+diff --git a/ui/src/components/QuestionBox.tsx b/ui/src/components/QuestionBox.tsx
+index a598058..ed296c9 100644
+--- a/ui/src/components/QuestionBox.tsx
++++ b/ui/src/components/QuestionBox.tsx
+@@ -1,38 +1,134 @@
+ import { useState } from 'react';
+ import { cancelQuestion, replyForm } from '../lib/api';
+-import { buildAnswer, type Choice } from '../lib/answer';
++import {
++  buildAnswer,
++  isOther,
++  OTHER,
++  otherWithoutText,
++  selectOption,
++  typeText,
++  type AnswerState,
++} from '../lib/answer';
+ import { cx } from '../lib/cx';
+ import { BTN_GHOST, BTN_GHOST_SELECTED, BTN_PRIMARY, INPUT } from '../lib/ui';
+-import type { PendingForm } from '../types';
++import type { FormField, PendingForm } from '../types';
+ 
+ interface Props {
+   sessionId: string;
+   form: PendingForm;
++  /** intégré sous le titre de la section Questions du détail : pas de bord ni de marge haute */
++  embedded?: boolean;
++}
++
++interface FieldProps {
++  field: FormField;
++  picked: string | string[] | undefined;
++  text: string;
++  onSelect: (value: string) => void;
++  onText: (text: string) => void;
++  onSubmit: () => void;
++}
++
++/**
++ * Un champ du questionnaire : options, choix « Autre » et texte libre.
++ * « Autre » est le choix qui porte le texte libre ; il s'active dès la frappe
++ * et bloque la soumission tant qu'aucun texte n'est saisi.
++ */
++export function QuestionField({ field, picked, text, onSelect, onText, onSubmit }: FieldProps) {
++  const multi = field.type === 'multiselect';
++  const hasOptions = !!field.options?.length;
++  const other = isOther(picked);
++  const blocked = other && !text.trim();
++  const qtext = field.description ?? field.title;
++  return (
++    <div>
++      {field.description || field.title ? (
++        <div className="mb-[8px] text-[14px] leading-[1.45]">{qtext}</div>
++      ) : null}
++      <div className="mb-[6px] flex flex-wrap items-center gap-[7px]">
++        {field.options?.map((o) => {
++          const selected = multi
++            ? Array.isArray(picked) && picked.includes(o.value)
++            : picked === o.value;
++          return (
++            <button
++              key={o.value}
++              type="button"
++              aria-pressed={selected}
++              onClick={() => onSelect(o.value)}
++              className={cx(
++                selected ? BTN_GHOST_SELECTED : BTN_GHOST,
++                selected ? 'hover:text-white' : 'hover:border-green hover:text-green',
++              )}
++            >
++              {o.label}
++            </button>
++          );
++        })}
++        {hasOptions ? (
++          <button
++            type="button"
++            data-testid="question-other"
++            aria-pressed={other}
++            onClick={() => onSelect(OTHER)}
++            style={blocked ? { borderColor: 'var(--color-danger)' } : undefined}
++            className={cx(
++              other ? BTN_GHOST_SELECTED : BTN_GHOST,
++              other ? 'hover:text-white' : 'hover:border-green hover:text-green',
++            )}
++          >
++            Autre
++          </button>
++        ) : null}
++        <input
++          type="text"
++          data-testid="question-free"
++          aria-label="Texte libre, choix « Autre »"
++          aria-invalid={blocked || undefined}
++          value={text}
++          onChange={(e) => onText(e.target.value)}
++          onKeyDown={(e) => {
++            if (e.key === 'Enter') {
++              e.preventDefault();
++              onSubmit();
++            }
++          }}
++          placeholder="… ou répond en texte libre"
++          // couleur de bordure en style inline : deux utilitaires de bordure
++          // (INPUT porte border-border) ne se départagent pas par l'ordre des classes
++          style={
++            blocked
++              ? { borderColor: 'var(--color-danger)' }
++              : other
++                ? { borderColor: 'var(--color-green)' }
++                : undefined
++          }
++          className={cx(INPUT, 'min-w-[200px] flex-[1_1_220px]')}
++        />
++      </div>
++      {blocked ? (
++        <div data-testid="question-other-missing" className="-mt-[4px] mb-[8px] text-[11.5px] text-danger">
++          Saisis un texte pour « Autre », ou choisis une option.
++        </div>
++      ) : null}
++    </div>
++  );
+ }
+ 
+ /**
+- * Questionnaire multi-champs : les options et le champ libre cohabitent,
+- * un seul bouton « Répondre » envoie l'objet complet { qN: valeur }.
++ * Questionnaire multi-champs : les options, le choix « Autre » et son champ de
++ * texte cohabitent, un seul bouton « Répondre » envoie l'objet complet { qN: valeur }.
+  */
+-export function QuestionBox({ sessionId, form }: Props) {
++export function QuestionBox({ sessionId, form, embedded = false }: Props) {
+   const fields = form.fields ?? [];
+-  const [choice, setChoice] = useState<Choice>({});
+-  const [free, setFree] = useState<Record<string, string>>({});
++  const [state, setState] = useState<AnswerState>({ choice: {}, free: {} });
+   const [sending, setSending] = useState(false);
+   const [cancelling, setCancelling] = useState(false);
+   const [error, setError] = useState<string | null>(null);
+ 
+-  const toggle = (key: string, value: string, multi: boolean) => {
+-    setChoice((prev) => {
+-      if (!multi) return { ...prev, [key]: value };
+-      const cur = Array.isArray(prev[key]) ? (prev[key] as string[]) : [];
+-      const next = cur.includes(value) ? cur.filter((v) => v !== value) : [...cur, value];
+-      return { ...prev, [key]: next };
+-    });
+-  };
+-
+-  const answer = buildAnswer(fields, choice, free);
+-  const canSubmit = Object.keys(answer).length > 0;
++  const answer = buildAnswer(fields, state.choice, state.free);
++  const blocked = otherWithoutText(fields, state.choice, state.free);
++  const canSubmit = Object.keys(answer).length > 0 && blocked.length === 0;
+ 
+   const submit = () => {
+     if (sending || !canSubmit) return;
+@@ -55,51 +151,21 @@ export function QuestionBox({ sessionId, form }: Props) {
+   };
+ 
+   return (
+-    <div className="mt-[10px] border-t border-border pt-[10px]">
++    <div className={cx(embedded ? 'mt-[6px]' : 'mt-[10px] border-t border-border pt-[10px]')}>
+       {fields.map((f, i) => {
+         const key = f.key ?? 'q0';
+         const multi = f.type === 'multiselect';
+-        const picked = choice[key];
+-        const qtext = f.description ?? f.title;
++        const hasOptions = !!f.options?.length;
+         return (
+-          <div key={`${key}-${i}`}>
+-            {f.description || f.title ? (
+-              <div className="mb-[8px] text-[14px] leading-[1.45]">{qtext}</div>
+-            ) : null}
+-            <div className="mb-[14px] flex flex-wrap items-center gap-[7px]">
+-              {f.options?.map((o) => {
+-                const selected = multi
+-                  ? Array.isArray(picked) && picked.includes(o.value)
+-                  : picked === o.value;
+-                return (
+-                  <button
+-                    key={o.value}
+-                    type="button"
+-                    onClick={() => toggle(key, o.value, multi)}
+-                    className={cx(
+-                      selected ? BTN_GHOST_SELECTED : BTN_GHOST,
+-                      selected ? 'hover:text-white' : 'hover:border-green hover:text-green',
+-                    )}
+-                  >
+-                    {o.label}
+-                  </button>
+-                );
+-              })}
+-              <input
+-                type="text"
+-                value={free[key] ?? ''}
+-                onChange={(e) => setFree((prev) => ({ ...prev, [key]: e.target.value }))}
+-                onKeyDown={(e) => {
+-                  if (e.key === 'Enter') {
+-                    e.preventDefault();
+-                    submit();
+-                  }
+-                }}
+-                placeholder="… ou répond en texte libre"
+-                className={cx(INPUT, 'min-w-[200px] flex-[1_1_220px]')}
+-              />
+-            </div>
+-          </div>
++          <QuestionField
++            key={`${key}-${i}`}
++            field={f}
++            picked={state.choice[key]}
++            text={state.free[key] ?? ''}
++            onSelect={(value) => setState((s) => selectOption(s, key, value, multi))}
++            onText={(text) => setState((s) => typeText(s, key, text, hasOptions))}
++            onSubmit={submit}
++          />
+         );
+       })}
+       {error ? <div className="mb-[6px] text-[11.5px] text-danger">{error}</div> : null}
+diff --git a/ui/src/lib/answer.test.ts b/ui/src/lib/answer.test.ts
+index bd49b5d..4b7b08b 100644
+--- a/ui/src/lib/answer.test.ts
++++ b/ui/src/lib/answer.test.ts
+@@ -1,12 +1,22 @@
+ import { describe, expect, test } from 'bun:test';
+ import type { FormField } from '../types';
+-import { buildAnswer } from './answer';
++import {
++  buildAnswer,
++  isOther,
++  OTHER,
++  otherWithoutText,
++  selectOption,
++  typeText,
++  type AnswerState,
++} from './answer';
+ 
+ const fields: FormField[] = [
+   { key: 'q0', type: 'string', options: [{ value: 'bun', label: 'Bun' }] },
+   { key: 'q1', type: 'multiselect', options: [{ value: 'flotte', label: 'Flotte' }] },
+ ];
+ 
++const empty: AnswerState = { choice: {}, free: {} };
++
+ describe('buildAnswer', () => {
+   test('options : mono en chaîne, multiselect en tableau', () => {
+     expect(buildAnswer(fields, { q0: 'bun', q1: ['flotte', 'rendus'] }, {})).toEqual({
+@@ -26,8 +36,22 @@ describe('buildAnswer', () => {
+     expect(buildAnswer(fields, { q1: [] }, { q1: 'mobile' })).toEqual({ q1: ['mobile'] });
+   });
+ 
+-  test('une sélection prime sur le champ libre du même champ', () => {
+-    expect(buildAnswer(fields, { q0: 'bun' }, { q0: 'rust' })).toEqual({ q0: 'bun' });
++  test('un texte saisi gagne sur une option résiduelle, jamais remplacé par le libellé', () => {
++    expect(buildAnswer(fields, { q0: 'bun' }, { q0: 'rust' })).toEqual({ q0: 'rust' });
++  });
++
++  test('« Autre » actif : exactement le texte saisi, sans libellé ajouté', () => {
++    expect(buildAnswer(fields, { q0: OTHER }, { q0: '  ma réponse  ' })).toEqual({
++      q0: 'ma réponse',
++    });
++  });
++
++  test('« Autre » actif en multiselect : le texte part en tableau', () => {
++    expect(buildAnswer(fields, { q1: OTHER }, { q1: 'mobile' })).toEqual({ q1: ['mobile'] });
++  });
++
++  test('« Autre » actif sans texte : rien (soumission bloquée en amont)', () => {
++    expect(buildAnswer(fields, { q0: OTHER }, { q0: '   ' })).toEqual({});
+   });
+ 
+   test('sans réponse → objet vide', () => {
+@@ -38,3 +62,85 @@ describe('buildAnswer', () => {
+     expect(buildAnswer([{ type: 'string' }], {}, { q0: 'ok' })).toEqual({ q0: 'ok' });
+   });
+ });
++
++describe('typeText', () => {
++  test('la frappe active « Autre » et désélectionne les autres options', () => {
++    const typed = typeText({ choice: { q0: 'bun' }, free: {} }, 'q0', 'a');
++    expect(typed.choice.q0).toBe(OTHER);
++    expect(isOther(typed.choice.q0)).toBe(true);
++    expect(typed.free.q0).toBe('a');
++  });
++
++  test('la frappe en multiselect remplace les options cochées', () => {
++    const typed = typeText({ choice: { q1: ['flotte', 'rendus'] }, free: {} }, 'q1', 'mobile');
++    expect(typed.choice.q1).toBe(OTHER);
++  });
++
++  test('effacer le texte laisse « Autre » actif (blocage visible)', () => {
++    const typed = typeText({ choice: { q0: OTHER }, free: { q0: 'a' } }, 'q0', '');
++    expect(typed.choice.q0).toBe(OTHER);
++    expect(typed.free.q0).toBe('');
++  });
++
++  test('saisir des espaces active « Autre » et bloque', () => {
++    const typed = typeText(empty, 'q0', '   ');
++    expect(typed.choice.q0).toBe(OTHER);
++    expect(otherWithoutText(fields, typed.choice, typed.free)).toEqual(['q0']);
++  });
++
++  test('un champ sans options ne pose pas « Autre » (comportement inchangé)', () => {
++    const typed = typeText(empty, 'q0', 'mon texte', false);
++    expect(typed.choice.q0).toBeUndefined();
++    expect(typed.free.q0).toBe('mon texte');
++    expect(buildAnswer([{ type: 'string' }], typed.choice, typed.free)).toEqual({ q0: 'mon texte' });
++  });
++});
++
++describe('selectOption', () => {
++  test('choisir une option après avoir tapé efface le texte fantôme', () => {
++    const typed = typeText(empty, 'q0', 'rust');
++    const picked = selectOption(typed, 'q0', 'bun', false);
++    expect(picked.choice.q0).toBe('bun');
++    expect(picked.free.q0).toBe('');
++    expect(buildAnswer(fields, picked.choice, picked.free)).toEqual({ q0: 'bun' });
++  });
++
++  test('le choix « Autre » garde le texte déjà saisi', () => {
++    const typed = typeText(empty, 'q0', 'rust');
++    const picked = selectOption(typed, 'q0', OTHER, false);
++    expect(picked.choice.q0).toBe(OTHER);
++    expect(picked.free.q0).toBe('rust');
++  });
++
++  test('multiselect : « Autre » puis une option repart sur l’option, texte effacé', () => {
++    const typed = typeText(empty, 'q1', 'mobile');
++    const picked = selectOption(typed, 'q1', 'flotte', true);
++    expect(picked.choice.q1).toEqual(['flotte']);
++    expect(picked.free.q1).toBe('');
++  });
++
++  test('multiselect : désélectionner une option garde le tableau cohérent', () => {
++    const picked = selectOption({ choice: { q1: ['flotte', 'rendus'] }, free: {} }, 'q1', 'flotte', true);
++    expect(picked.choice.q1).toEqual(['rendus']);
++  });
++});
++
++describe('otherWithoutText', () => {
++  test('aucun blocage sans « Autre »', () => {
++    expect(otherWithoutText(fields, { q0: 'bun' }, {})).toEqual([]);
++  });
++
++  test('« Autre » avec texte : pas de blocage', () => {
++    expect(otherWithoutText(fields, { q0: OTHER }, { q0: 'rust' })).toEqual([]);
++  });
++
++  test('« Autre » avec des espaces seulement : blocage', () => {
++    expect(otherWithoutText(fields, { q0: OTHER }, { q0: '  ' })).toEqual(['q0']);
++  });
++
++  test('un champ bloqué n’empêche pas un autre champ de compter', () => {
++    const answer = buildAnswer(fields, { q0: OTHER, q1: ['flotte'] }, { q0: ' ' });
++    expect(answer).toEqual({ q1: ['flotte'] });
++    expect(otherWithoutText(fields, { q0: OTHER, q1: ['flotte'] }, { q0: ' ' })).toEqual(['q0']);
++  });
++});
+diff --git a/ui/src/lib/answer.ts b/ui/src/lib/answer.ts
+index 084907f..f3621ed 100644
+--- a/ui/src/lib/answer.ts
++++ b/ui/src/lib/answer.ts
+@@ -2,11 +2,93 @@ import type { FormField } from '../types';
+ 
+ export type Choice = Record<string, string | string[]>;
+ 
++/**
++ * Sentinelle du choix « Autre », associé au champ de texte libre.
++ * Elle ne vit que dans l'état local du formulaire : `buildAnswer` la remplace
++ * TOUJOURS par le texte saisi, elle n'est jamais envoyée au daemon.
++ */
++export const OTHER = '\u0000autre';
++
++export function isOther(value: string | string[] | undefined): boolean {
++  if (Array.isArray(value)) return value.includes(OTHER);
++  return value === OTHER;
++}
++
++/** État du formulaire : la sélection et le texte libre, tenus ensemble. */
++export interface AnswerState {
++  choice: Choice;
++  free: Record<string, string>;
++}
++
++/**
++ * Clic sur un choix : une option remplace la sélection (mono) ou s'ajoute
++ * (multi), et le texte libre du champ est effacé, pour qu'aucun texte fantôme
++ * ne subsiste à côté d'une option choisie. Le choix « Autre », lui, garde le
++ * texte déjà saisi : il ne fait que rendre le champ libre actif.
++ */
++export function selectOption(
++  state: AnswerState,
++  key: string,
++  value: string,
++  multi: boolean,
++): AnswerState {
++  if (value === OTHER) {
++    return { choice: { ...state.choice, [key]: OTHER }, free: state.free };
++  }
++  const prev = state.choice[key];
++  let picked: string | string[];
++  if (!multi) {
++    picked = value;
++  } else {
++    const cur = Array.isArray(prev) ? prev.filter((v) => v !== OTHER) : [];
++    picked = cur.includes(value) ? cur.filter((v) => v !== value) : [...cur, value];
++  }
++  return {
++    choice: { ...state.choice, [key]: picked },
++    free: { ...state.free, [key]: '' },
++  };
++}
++
++/**
++ * Frappe dans le champ libre : dès qu'un texte est saisi, « Autre » devient le
++ * choix actif et les options du champ sont désélectionnées. Effacer le texte
++ * laisse « Autre » actif (la soumission reste bloquée, avec le retour visuel).
++ * Un champ sans options garde le comportement d'avant : pas de choix « Autre »,
++ * le texte est simplement la réponse.
++ */
++export function typeText(
++  state: AnswerState,
++  key: string,
++  text: string,
++  withOther = true,
++): AnswerState {
++  const free = { ...state.free, [key]: text };
++  if (!withOther || text === '') return { choice: state.choice, free };
++  return { choice: { ...state.choice, [key]: OTHER }, free };
++}
++
++/** Champs où « Autre » est actif sans texte : la soumission doit être refusée. */
++export function otherWithoutText(
++  fields: FormField[],
++  choice: Choice,
++  free: Record<string, string>,
++): string[] {
++  const keys: string[] = [];
++  for (const f of fields) {
++    const key = f.key ?? 'q0';
++    if (isOther(choice[key]) && !(free[key] ?? '').trim()) keys.push(key);
++  }
++  return keys;
++}
++
+ /**
+  * Construit l'objet attendu par le daemon : { qN: valeur } complet.
++ * - un texte saisi est TOUJOURS la réponse du champ (choix « Autre »), exactement
++ *   le texte, sans libellé ajouté : il ne peut plus être remplacé par une option
++ * - « Autre » actif sans texte : rien (la soumission est bloquée en amont par
++ *   `otherWithoutText`)
+  * - multiselect : valeur en TABLEAU
+- * - une sélection d'options prime sur le champ libre du même champ
+- * - un multiselect vide + texte libre devient [texte]
++ * - multiselect vide sans texte : rien
+  */
+ export function buildAnswer(
+   fields: FormField[],
+@@ -18,14 +100,14 @@ export function buildAnswer(
+     const key = f.key ?? 'q0';
+     const picked = choice[key];
+     const value = (free[key] ?? '').trim();
+-    if (picked != null) {
+-      if (f.type === 'multiselect' && Array.isArray(picked) && picked.length === 0) {
+-        if (value) answer[key] = [value];
+-      } else {
+-        answer[key] = picked;
+-      }
+-    } else if (value) {
++    if (value) {
+       answer[key] = f.type === 'multiselect' ? [value] : value;
++      continue;
++    }
++    if (isOther(picked)) continue;
++    if (picked != null) {
++      if (f.type === 'multiselect' && Array.isArray(picked) && picked.length === 0) continue;
++      answer[key] = picked;
+     }
+   }
+   return answer;
+diff --git a/ui/src/components/QuestionBox.test.tsx b/ui/src/components/QuestionBox.test.tsx
+new file mode 100644
+index 0000000..eb4b336
+--- /dev/null
++++ b/ui/src/components/QuestionBox.test.tsx
+@@ -0,0 +1,94 @@
++import { describe, expect, test } from 'bun:test';
++import { renderToStaticMarkup } from 'react-dom/server';
++import type { FormField, PendingForm } from '../types';
++import { OTHER } from '../lib/answer';
++import { QuestionBox, QuestionField } from './QuestionBox';
++
++const field: FormField = {
++  key: 'q0',
++  title: 'Quelle version ?',
++  type: 'string',
++  options: [
++    { value: 'bun', label: 'Bun' },
++    { value: 'node', label: 'Node' },
++  ],
++};
++
++function renderField(picked: string | string[] | undefined, text: string): string {
++  return renderToStaticMarkup(
++    <QuestionField
++      field={field}
++      picked={picked}
++      text={text}
++      onSelect={() => {}}
++      onText={() => {}}
++      onSubmit={() => {}}
++    />,
++  );
++}
++
++function form(fields: FormField[]): PendingForm {
++  return { id: 'form_1', title: 'Question', fields };
++}
++
++describe('QuestionBox', () => {
++  test('propose un choix « Autre » associé au champ de texte libre', () => {
++    const html = renderToStaticMarkup(<QuestionBox sessionId="ses_test" form={form([field])} />);
++    expect(html).toContain('data-testid="question-other"');
++    expect(html).toContain('Autre');
++    expect(html).toContain('data-testid="question-free"');
++    expect(html).toContain('Bun');
++    expect(html).toContain('Node');
++  });
++
++  test('une question sans options garde son seul champ de texte, sans bouton « Autre »', () => {
++    const html = renderToStaticMarkup(
++      <QuestionBox sessionId="ses_test" form={form([{ key: 'q0', title: 'Ton nom ?' }])} />,
++    );
++    expect(html).toContain('data-testid="question-free"');
++    expect(html).not.toContain('data-testid="question-other"');
++  });
++
++  test('sans réponse, « Répondre » est désactivé', () => {
++    const html = renderToStaticMarkup(<QuestionBox sessionId="ses_test" form={form([field])} />);
++    expect(html).toContain('Répondre');
++    expect(html).toMatch(/<button[^>]*disabled[^>]*>Répondre<\/button>/);
++  });
++});
++
++describe('QuestionField', () => {
++  test('sans texte, « Autre » n’est pas actif et aucun blocage n’est affiché', () => {
++    const html = renderField(undefined, '');
++    expect(html).toMatch(/data-testid="question-other"[^>]*aria-pressed="false"/);
++    expect(html).not.toContain('data-testid="question-other-missing"');
++  });
++
++  test('« Autre » actif avec un texte : actif, champ vert, aucun blocage', () => {
++    const html = renderField(OTHER, 'mon texte');
++    expect(html).toMatch(/data-testid="question-other"[^>]*aria-pressed="true"/);
++    expect(html).toContain('border-color:var(--color-green)');
++    expect(html).not.toContain('data-testid="question-other-missing"');
++  });
++
++  test('« Autre » actif sans texte : blocage visible, champ en alerte', () => {
++    const html = renderField(OTHER, '');
++    expect(html).toContain('data-testid="question-other-missing"');
++    expect(html).toContain('Saisis un texte pour « Autre », ou choisis une option.');
++    expect(html).toContain('aria-invalid="true"');
++    expect(html).toContain('border-color:var(--color-danger)');
++    expect(html).toContain('value=""');
++  });
++
++  test('« Autre » actif avec des espaces seulement : blocage aussi', () => {
++    const html = renderField(OTHER, '   ');
++    expect(html).toContain('data-testid="question-other-missing"');
++    expect(html).toContain('aria-invalid="true"');
++  });
++
++  test('une option choisie avec du texte fantôme : l’option est active, le texte disparaît', () => {
++    const html = renderField('bun', '');
++    expect(html).toMatch(/aria-pressed="true"[^>]*>Bun</);
++    expect(html).toMatch(/data-testid="question-other"[^>]*aria-pressed="false"/);
++    expect(html).not.toContain('data-testid="question-other-missing"');
++  });
++});

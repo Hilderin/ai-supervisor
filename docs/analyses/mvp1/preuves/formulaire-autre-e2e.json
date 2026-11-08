@@ -1,0 +1,39 @@
+{
+  "sessionId": "ses_e4425ab7affegZgPJ1edEiHV53",
+  "capturedAt": "2026-11-08",
+  "question": {
+    "status": "completed",
+    "input": {
+      "questions": [
+        {
+          "question": "TEST E2E : ne pas répondre, je clique moi-même. Quelle couleur ?",
+          "header": "Couleur",
+          "options": [
+            {
+              "label": "Rouge",
+              "description": "Couleur primaire vive, associée au rouge."
+            },
+            {
+              "label": "Bleu",
+              "description": "Couleur froide, associée au bleu."
+            }
+          ]
+        }
+      ]
+    },
+    "content": [
+      {
+        "type": "text",
+        "text": "User has answered your questions: \"TEST E2E : ne pas répondre, je clique moi-même. Quelle couleur ?\"=\"Réponse libre E2E 2026-11-08, rien à voir avec Rouge\". You can now continue with the user's answers in mind."
+      }
+    ],
+    "metadata": {
+      "answers": [
+        [
+          "Réponse libre E2E 2026-11-08, rien à voir avec Rouge"
+        ]
+      ],
+      "truncated": false
+    }
+  }
+}
