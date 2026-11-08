@@ -31,7 +31,7 @@ const CHANGE_COOLDOWN_MS = 60_000;
 const MAX_CONCURRENT = Number(process.env.SUPERVISEUR_VERIFIER_CONCURRENCY ?? 2);
 const MAX_WAIT_MS = 150_000;
 const REPAIR_WAIT_MS = 60_000;
-const MAX_INJECT_CHARS = 9000;
+const MAX_INJECT_CHARS = 20000;   // la liste et l'objectif ne sont JAMAIS coupés (voir buildPhasePrompt)
 const MAX_ACTIONS = 12;
 const MAX_EXCERPT_MESSAGES = 8;
 
@@ -217,9 +217,9 @@ async function conversationExcerpt(taskId: string): Promise<string> {
       .slice(-MAX_EXCERPT_MESSAGES);
     const parts: string[] = [];
     for (const m of conv) {
-      let txt = messageText(m).slice(0, 500);
+      let txt = cutText(messageText(m), 500);
       if (!txt && m.type === 'assistant') {
-        txt = (m.content ?? []).filter(p => p.type === 'reasoning').map(p => p.text ?? '').join(' ').slice(0, 300);
+        txt = cutText((m.content ?? []).filter(p => p.type === 'reasoning').map(p => p.text ?? '').join(' '), 300);
       }
       const tag = m.type === 'user' ? '[PROPRIO]' : '[AGENT]';
       if (txt) parts.push(`${tag} ${txt}`);
@@ -232,8 +232,43 @@ async function conversationExcerpt(taskId: string): Promise<string> {
   } catch { return '(conversation illisible pour le moment)'; }
 }
 
-function criteriaText(taskId: string, lastUpdateAt?: number): string {
-  const rows = listCriteria(taskId);
+/**
+ * Coupe PROPRE d'un texte long : jamais en pleine phrase ni pleine ligne ;
+ * recule sur la fin de phrase ou, à défaut, le dernier espace, et marque la
+ * suite avec « … ». Les coupes ne concernent que les textes de preuve et
+ * l'extrait de conversation, JAMAIS la liste des critères ni l'objectif.
+ */
+export function cutText(text: string, max: number): string {
+  const t = String(text ?? '');
+  if (t.length <= max) return t;
+  let cut = t.slice(0, max);
+  // fin de phrase / fin de ligne raisonnablement proche de la coupe
+  const boundary = Math.max(cut.lastIndexOf('\n'), cut.lastIndexOf('. '), cut.lastIndexOf('! '), cut.lastIndexOf('? '));
+  if (boundary > max * 0.5) cut = cut.slice(0, boundary + 1);
+  else {
+    const space = cut.lastIndexOf(' ');
+    if (space > max * 0.5) cut = cut.slice(0, space);
+  }
+  return `${cut.trimEnd()} …`;
+}
+
+/** Forme minimale d'un critère pour le formatage (CriterionRow de criteria.mts convient). */
+export interface CriterionRowLite {
+  ref: string;
+  title: string;
+  detail: string | null;
+  methods: string[];
+  status: string;
+  evidence: Array<{ kind: string; text: string; path?: string; start_line?: number; line_count?: number }>;
+  review: string | null;
+  version: number;
+  remove_proposed_at: number | null;
+  remove_reason: string | null;
+  validated_at: number | null;
+}
+
+/** Formatage de la liste des critères (jamais coupée : voir buildPhasePrompt). */
+function criteriaRowsText(rows: CriterionRowLite[], lastUpdateAt?: number): string {
   if (!rows.length) return '(aucun critère)';
   return rows.map(r => {
     const lines = [
@@ -243,9 +278,9 @@ function criteriaText(taskId: string, lastUpdateAt?: number): string {
     if (r.methods.length) lines.push(`    méthodes : ${r.methods.join(', ')}`);
     for (const ev of r.evidence.slice(0, 3)) {
       const loc = ev.path ? (ev.start_line ? ` (${ev.path} lignes ${ev.start_line}-${(ev.start_line ?? 1) + (ev.line_count ?? 1) - 1})` : ` (${ev.path})`) : '';
-      lines.push(`    preuve [${ev.kind}]${loc} : ${ev.text.slice(0, 400)}`);
+      lines.push(`    preuve [${ev.kind}]${loc} : ${cutText(ev.text, 400)}`);
     }
-    if (r.review) lines.push(`    dernier commentaire : ${r.review.slice(0, 300)}`);
+    if (r.review) lines.push(`    dernier commentaire : ${cutText(r.review, 300)}`);
     if (r.remove_proposed_at != null) {
       lines.push(`    RETRAIT PROPOSÉ : ${r.remove_reason ?? ''} : déjà enregistré, ne le re-propose pas ; il partira si l'agent confirme`);
     }
@@ -254,6 +289,45 @@ function criteriaText(taskId: string, lastUpdateAt?: number): string {
     }
     return lines.filter(Boolean).join('\n');
   }).join('\n');
+}
+
+/**
+ * Composition du prompt de phase, testable (verifierInject.test.mts).
+ * INVARIANTS (retour du vérificateur, 2026-11-08, constatés sur deux phases) :
+ * l'objectif complet ET la liste entière des critères, preuves incluses,
+ * arrivent au vérificateur, y compris la dernière ref en attente ; AUCUNE
+ * coupe en pleine phrase ou en plein critère. La partie élastique est
+ * l'extrait de conversation : tronqué proprement, puis omis si la liste est
+ * très longue.
+ */
+export interface PhasePromptInput {
+  title: string;
+  objective: string;
+  rows: CriterionRowLite[];
+  counts: { validated: number; total: number };
+  pending: number;
+  excerpt: string;
+  lastUpdateAt?: number;
+}
+
+export function buildPhasePrompt(p: PhasePromptInput): string {
+  const head = [
+    `Tâche : ${p.title}`,
+    `Objectif actuel : ${p.objective || 'inconnu'}`,
+    `Critères (${p.counts.validated}/${p.counts.total} validés) :`,
+    criteriaRowsText(p.rows, p.lastUpdateAt),
+    p.pending ? `${p.pending} preuve(s) attend(ent) un jugement.` : 'Aucune preuve en attente de jugement.',
+  ].join('\n\n');
+  const tail = 'Consignes : juge les preuves « à valider » (recoupe avec les outils de lecture si nécessaire), propose les ajustements de la liste, surveille la cohérence. Réponds par le JSON seul.';
+  // l'extrait n'est là qu'en contexte : il cède la place à la liste, jamais l'inverse
+  const budget = MAX_INJECT_CHARS - head.length - tail.length;
+  let excerptPart = '';
+  if (budget > 200) {
+    excerptPart = `\n\nExtrait récent de la conversation de l'agent principal :\n\n${cutText(p.excerpt, budget)}`;
+  } else {
+    excerptPart = '\n\n(extrait de conversation omis : la liste des critères est très longue, recoupe avec tes outils de lecture si besoin)';
+  }
+  return `${head}${excerptPart}\n\n${tail}`;
 }
 
 /* --- Application du JSON et notification --- */
@@ -406,16 +480,15 @@ async function runPhase(taskId: string, title: string, dir: string | undefined, 
     const counts = criteriaCounts(rows);
     const objective = (getTaskState(taskId) as { objective?: string } | null)?.objective ?? '';
     const excerpt = await conversationExcerpt(taskId);
-    const inject = [
-      `Tâche : ${title}`,
-      `Objectif actuel : ${objective || 'inconnu'}`,
-      `Critères (${counts.validated}/${counts.total} validés) :`,
-      criteriaText(taskId, lastUpdateAt),
-      pending ? `${pending} preuve(s) attend(ent) un jugement.` : 'Aucune preuve en attente de jugement.',
-      'Extrait récent de la conversation de l\'agent principal :',
+    const inject = buildPhasePrompt({
+      title,
+      objective,
+      rows,
+      counts: { validated: counts.validated, total: counts.total },
+      pending,
       excerpt,
-      'Consignes : juge les preuves « à valider » (recoupe avec les outils de lecture si nécessaire), propose les ajustements de la liste, surveille la cohérence. Réponds par le JSON seul.',
-    ].join('\n\n').slice(0, MAX_INJECT_CHARS);
+      lastUpdateAt,
+    });
 
     const verifierId = await ensureVerifier(taskId, s);
     logEvent(taskId, 'note', `vérificateur : phase envoyée (${counts.toValidate} preuve(s) à juger)`);

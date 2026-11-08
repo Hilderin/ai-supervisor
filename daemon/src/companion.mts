@@ -16,7 +16,7 @@ import {
 import { getPlanSnapshot, planStepsOf } from './plan.mts';
 import { criteriaCounts, criteriaPushMessage, listCriteria, statusLabel } from './criteria.mts';
 import { takeKick, kick as pushKick } from './kicks.mts';
-import { messageText } from './messages.mts';
+import { isDaemonNotice, messageText } from './messages.mts';
 import {
   detectHumanQuestion, emptyWait, lintSummary, normalizeVerdict, parsePlanFromDb,
   parseVerdictText, resolveObjective, scrubSummary, shouldRepair, toolActionLine,
@@ -121,9 +121,9 @@ async function firstUserText(sid: string): Promise<string> {
   try {
     const first = await jget(`/api/session/${sid}/message?limit=20&order=asc`) as { data?: WireMessage[] };
     const conv = (first.data ?? [])
-      .filter(m => m.type === 'user')
+      .filter(m => m.type === 'user' && !isDaemonNotice(m))   // une notification du daemon n'est pas l'objectif initial
       .sort((a, b) => (a.time?.created ?? 0) - (b.time?.created ?? 0));
-    return messageText(conv[0] ?? ({ type: 'user' } as WireMessage)).slice(0, 400);
+    return messageText(conv[0] ?? ({ type: 'user' } as WireMessage));
   } catch { return ''; }
 }
 
@@ -134,9 +134,9 @@ async function digestNew(sid: string, s: CompanionState, force: boolean): Promis
     .sort((a, b) => (a.time?.created ?? 0) - (b.time?.created ?? 0));
   if (!conv.length) return null;
 
-  const lastUserMsg = [...conv].reverse().find(m => m.type === 'user');
+  const lastUserMsg = [...conv].reverse().find(m => m.type === 'user' && !isDaemonNotice(m));
   const lastUser = lastUserMsg
-    ? { id: lastUserMsg.id, text: messageText(lastUserMsg).slice(0, 400) }
+    ? { id: lastUserMsg.id, text: messageText(lastUserMsg) }   // texte COMPLET : l'objectif est la consigne entière, pas un extrait
     : undefined;
 
   // du frais : messages apparus depuis la dernière analyse ; premier passage ou force = les 4 derniers

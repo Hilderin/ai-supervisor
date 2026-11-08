@@ -16,3 +16,13 @@ export function messageText(m: MessageLike): string {
   if (direct) return direct;
   return (m.content ?? []).filter(c => c.type === 'text').map(c => c.text ?? '').join(' ').trim();
 }
+
+/**
+ * Les notifications du daemon à une tâche (critères, rappels) arrivent comme
+ * des messages « user » dans la conversation : elles ne doivent JAMAIS devenir
+ * l'objectif de la tâche (déjà arrivé : la notification « AC-08 validé » a
+ * écrasé la consigne du propriétaire dans task_state.objective).
+ */
+export function isDaemonNotice(m: MessageLike): boolean {
+  return messageText(m).startsWith('[superviseur]');
+}

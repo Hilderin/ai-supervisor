@@ -199,12 +199,17 @@ sans texte ne doit pas masquer le JSON, constat réel : 151 s d'attente ramenée
 
 ### 4.4 Injection et contrat JSON
 
-Le daemon injecte : objectif courant, liste des critères avec états, VERSION de
-contenu de chacun, preuves soumises (texte), derniers commentaires, propositions
-de retrait en cours, marqueur « VALIDÉ AVANT LES DERNIÈRES MODIFICATIONS »
-(`validated_at` antérieur à la dernière activité de la tâche), extrait de
-conversation récent, et le rappel du contrat. Le vérificateur répond par UN
-SEUL bloc JSON, clés en anglais :
+Le daemon injecte : objectif courant (consigne COMPLÈTE, jamais la notification
+du daemon ni un extrait tronqué), liste des critères avec états, VERSION de
+contenu de chacun, preuves soumises (texte, coupes propres), derniers
+commentaires, propositions de retrait en cours, marqueur « VALIDÉ AVANT LES
+DERNIÈRES MODIFICATIONS » (`validated_at` antérieur à la dernière activité de
+la tâche), extrait de conversation récent, et le rappel du contrat. La
+composition est `buildPhasePrompt` (testée) : l'objectif et la liste entière
+(y compris la dernière ref en attente) ne sont JAMAIS coupés ; l'extrait de
+conversation est la partie élastique (coupe propre, puis omission explicite si
+la liste est très longue). Le vérificateur répond par UN SEUL bloc JSON, clés
+en anglais :
 
 ```json
 {
