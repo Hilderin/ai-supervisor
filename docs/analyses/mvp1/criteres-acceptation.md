@@ -83,15 +83,30 @@ Règles dures :
    JSON du vérificateur.
 2. **Un critère `validated` reste validé** tant que son contenu ne change pas
    (`criteria_update` le repasse `todo`) et qu'il n'est pas retiré. Un nouvel
-   objectif de tâche ne réinitialise pas les critères (les critères appartiennent
-   au goal initial ; une consigne qui les rend absurdes passe par
-   `criteria_update` ou `criteria_remove`).
+   objectif de tâche ne réinitialise pas les critères. Un critère validé peut
+   être OBSOLÈTE sans changer : chaque critère porte `validated_at` et une
+   **version de contenu** (incrémentée à chaque preuve soumise ou contenu
+   modifié) ; quand le travail a bougé depuis l'approbation, l'injection du
+   vérificateur marque « VALIDÉ AVANT LES DERNIÈRES MODIFICATIONS » pour qu'il
+   recoupe ou suggère une revalidation (retour du propriétaire, 2026-11-08 :
+   pas de système de dépendances fichiers/critères, un signal suffit).
 3. **Nouvelle phase de validation** : `criteria_add`, `criteria_remove` et
    `criteria_update` (et l'application daemon d'une suggestion du vérificateur)
    réveillent le vérificateur pour une revalidation de la liste.
 4. **Refs jamais réattribuées** : un compteur par tâche (`task_state.criteria_seq`)
    donne le prochain numéro ; un retrait ne libère pas son numéro.
-5. Chaque transition est journalisée (`task_log`, kind `criteria`) et visible
+5. **Approche et rejet sont versionnés et atomiques** : l'approbation vise la
+   `submission_version` du critère telle que le vérificateur l'a vue ;
+   `UPDATE ... WHERE status='to_validate' AND version = ?` ; un jugement sur
+   une version périmée (l'agent a soumis une preuve ou modifié le critère
+   pendant la phase) est ignoré (`stale_judgment`), jamais appliqué.
+6. **Retrait** : `criteria_remove` (agent) est une SUPPRESSION DOUCE
+   (`removed_at`, la ligne reste consultable : un critère retiré sert à
+   comprendre une régression passée) ; le vérificateur ne supprime jamais
+   physiquement : son op `remove` enregistre une **proposition persistée**
+   (raison obligatoire) que l'agent confirme (`criteria_remove`) ou refuse
+   (`criteria_update`, qui efface la proposition).
+7. Chaque transition est journalisée (`task_log`, kind `criteria`) et visible
    dans le journal de la carte.
 
 ## 3. Tools criteria (agent principal)
@@ -107,11 +122,11 @@ pas côté agent.
 
 | Tool | Entrée | Effet |
 | --- | --- | --- |
-| `criteria_add` | `{title, detail?, methods[]}` | crée le critère au prochain ref libre, statut `todo` ; réveille le vérificateur |
-| `criteria_remove` | `{ref}` | supprime la ligne ; réveille le vérificateur ; ref jamais réattribué |
-| `criteria_update` | `{ref, title?, detail?, methods?}` | modifie le contenu ; un critère non `todo` repasse `todo` (preuve invalidée) ; réveille le vérificateur |
-| `criteria_to_validate` | `{ref, evidence[]}` | exige au moins un item de preuve valide ; `todo`/`to_fix` → `to_validate` ; remplace l'ancienne preuve |
-| `criteria_list` | `{}` (lecture) | renvoie la liste complète avec états, preuves et commentaires ; ne déclenche rien |
+| `criteria_add` | `{title, detail?, methods[]}` | crée le critère au prochain ref libre, statut `todo`, version 0 ; réveille le vérificateur |
+| `criteria_remove` | `{ref}` | suppression DOUCE (historique conservé, `include_removed` pour le relire) ; réveille le vérificateur ; ref jamais réattribuée |
+| `criteria_update` | `{ref, title?, detail?, methods?}` | modifie le contenu (version + 1) ; un critère non `todo` repasse `todo` (preuve invalidée) ; efface une proposition de retrait ; réveille le vérificateur |
+| `criteria_to_validate` | `{ref, evidence[]}` | exige au moins un item de preuve valide ; `todo`/`to_fix` → `to_validate` (version + 1) ; remplace l'ancienne preuve |
+| `criteria_list` | `{include_removed?}` (lecture) | renvoie la liste complète avec états, versions, preuves, propositions et commentaires ; ne déclenche rien |
 
 Gardes communs : `title` non vide (200 car.), `detail` (2000 car.), `ref`
 inconnu → erreur `unknown_ref` ; plus de 12 critères par tâche → `limit` ;
@@ -141,7 +156,7 @@ liste après application) pour que l'agent reste aligné sans relecture.
 
 ### 4.2 Lectures bornées de la conversation de l'agent principal
 
-Plugin `superviseur-verifier` : trois outils de lecture qui postent vers le
+Plugin `superviseur-verifier` : cinq outils de lecture qui postent vers le
 daemon (`POST /api/verifier/:name`), lequel vérifie que l'appelant est bien le
 vérificateur de la tâche (`verifier_map`) et interroge OpenChamber pour la
 seule session parent. Rien d'autre : le vérificateur n'a AUCUN tool de
@@ -150,9 +165,11 @@ dans le frontmatter de l'agent).
 
 | Tool | Bornes |
 | --- | --- |
-| `verifier_messages` | liste des messages du parent (`limit` 60 max, desc), textes tronqués |
+| `verifier_messages` | liste des messages du parent (`limit` 60 max), textes tronqués ; lecture du texte racine (`m.text`, leçon du prompt humain) |
 | `verifier_tools` | liste des tool calls récents (`limit` 40 max) : nom, statut, entrée résumée |
-| `verifier_search` | recherche d'un texte dans la conversation du parent (30 matches max) |
+| `verifier_tool_result` | UN tool call précis avec entrée et sortie COMPLÈTES (bornées) : `{index}` ou `{tool, query?}` ; c'est ce qui permet de juger la preuve elle-même, pas sa description |
+| `verifier_artifact` | lit un artefact de preuve dans le dossier du projet du parent (extrait de code avec lignes, texte, document) ; une image n'en donne pas le rendu visuel : le tool le dit et une preuve textuelle complémentaire est exigée |
+| `verifier_search` | recherche (30 matches max) dans les messages ET les entrées de tool calls, sur l'historique couvert (union des deux extrémités du listing : l'API ignore offset/curseurs, vérifié sur l'instance ; la recherche serveur d'OpenChamber est désactivée) |
 
 Chaque lecture porte un horodatage de fenêtre optionnel (`since`) pour ne pas
 relire toute la conversation à chaque phase.
@@ -182,18 +199,20 @@ sans texte ne doit pas masquer le JSON, constat réel : 151 s d'attente ramenée
 
 ### 4.4 Injection et contrat JSON
 
-Le daemon injecte : objectif courant, liste des critères avec états, preuves
-soumises (texte), derniers commentaires, extrait de conversation récent, et le
-rappel du contrat. Le vérificateur répond par UN SEUL bloc JSON, clés en
-anglais :
+Le daemon injecte : objectif courant, liste des critères avec états, VERSION de
+contenu de chacun, preuves soumises (texte), derniers commentaires, propositions
+de retrait en cours, marqueur « VALIDÉ AVANT LES DERNIÈRES MODIFICATIONS »
+(`validated_at` antérieur à la dernière activité de la tâche), extrait de
+conversation récent, et le rappel du contrat. Le vérificateur répond par UN
+SEUL bloc JSON, clés en anglais :
 
 ```json
 {
   "review": "ok",
   "notes": "Une phrase pour la carte ou le journal, en français.",
   "actions": [
-    { "op": "approve", "ref": "AC-02", "comment": "Les tests sont visibles et passent." },
-    { "op": "reject", "ref": "AC-03", "reason": "La capture ne montre pas l'état final." },
+    { "op": "approve", "ref": "AC-02", "submission_version": 2, "comment": "Les tests sont visibles et passent." },
+    { "op": "reject", "ref": "AC-03", "submission_version": 1, "reason": "La capture ne montre pas l'état final." },
     { "op": "add", "title": "Aucune régression du build UI", "detail": "...", "methods": ["unit_test"], "reason": "Le plan touche l'UI sans critère associé." },
     { "op": "remove", "ref": "AC-05", "reason": "Doublon de AC-04." },
     { "op": "update", "ref": "AC-01", "title": "...", "detail": "...", "methods": ["unit_test"], "reason": "Le détail ne précise pas la commande." }
@@ -203,17 +222,23 @@ anglais :
 
 Règles du contrat :
 
-- `approve` et `reject` ne visent que des critères `to_validate` ; un ref
+- `approve` et `reject` ne visent que des critères `to_validate` et portent la
+  `submission_version` vue par le vérificateur : un jugement périmé (le critère
+  a changé pendant la phase) est ignoré et journalisé, jamais appliqué ; un ref
   invalide est ignoré et journalisé (le daemon garde la main) ;
 - `reject` exige `reason` (l'explication devient `review` du critère et part
   dans la notification) ; `approve` peut porter un `comment` court ;
 - `add` exige `title` et au moins une méthode ; `update` exige au moins un
   champ de contenu ; chaque suggestion peut porter une `reason` ;
+- `remove` n'est PAS une suppression : une proposition persistée (raison
+  obligatoire), le critère reste en place jusqu'à confirmation ou refus de
+  l'agent ; idempotente à raison identique ;
 - au plus 12 actions par réponse, inconnues ignorées avec journal ;
 - cohérence des états : le vérificateur signale en `notes` toute incohérence
-  qu'il constate (p. ex. un `validated` dont la preuve ne tient plus), le
-  daemon ne dégrade JAMAIS un `validated` sur seul avis du texte `notes` :
-  une dégradation passe par `update` (suggestion) qui repasse le critère `todo`.
+  qu'il constate (p. ex. un `validated` dont la preuve ne tient plus, ou validé
+  avant les dernières modifications), le daemon ne dégrade JAMAIS un `validated`
+  sur seul avis du texte `notes` : une dégradation passe par `update`
+  (suggestion) qui repasse le critère `todo`.
 
 ## 5. Application par le daemon et notifications
 
@@ -226,14 +251,20 @@ Règles du contrat :
 - **Notification à l'agent principal** : après chaque phase de vérificateur qui
   a produit au moins une transition, le daemon envoie UN message à la session
   de la tâche (`POST /api/session/:id/prompt`, `delivery: 'steer'`) qui liste
-  chaque transition appliquée :
+  chaque transition appliquée, structurée : la justification d'une approbation
+  (`comment`) est transmise, les ajouts portent titre, détail et méthodes, les
+  propositions de retrait expliquent comment confirmer ou refuser :
 
-  > [superviseur] Critères : AC-02 validé. AC-03 à corriger : la capture ne
-  > montre pas l'état final. Nouveau critère AC-05 : aucun régression du build
-  > UI. Ne réponds pas à ce message : applique les corrections nécessaires.
+  > [superviseur] Critères : AC-02 validé : la sortie de test passe. AC-03 à
+  > corriger : la capture ne montre pas l'état final. AC-05 ajouté par le
+  > vérificateur : « aucune régression du build UI » : le plan touche l'UI
+  > sans critère associé. Ne réponds pas à ce message : applique les
+  > corrections nécessaires.
 
   Un message par phase (jamais un prompt par transition) ; l'agent initie
-  ensuite lui-même ses `criteria_*`.
+  ensuite lui-même ses `criteria_*`. Livraison fiable : 3 essais de steer, puis
+  repli sur la file d'attente OpenChamber (`sendConfig` repris de la session) ;
+  si les deux échouent, journal et reprise au prochain kick.
 - Les transitions initiées par l'agent lui-même (`criteria_to_validate`,
   add/remove/update via tools) ne génèrent pas de notification à lui-même.
 - **Rappel critères (analyste)** : un verdict `done` avec un trou de critères

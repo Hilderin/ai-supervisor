@@ -39,7 +39,7 @@ describe('vérificateur : application du JSON par le daemon', () => {
     expect(parseVerifierJson('{"review":"issues"}')).toEqual({ review: 'issues' });
   });
 
-  test('approve et reject appliqués, lignes de notification', async () => {
+  test('approve et reject appliqués, lignes de notification structurées', async () => {
     addCriterion(TASK, { title: 'A', methods: ['unit_test'] });
     addCriterion(TASK, { title: 'B', methods: ['unit_test'] });
     addCriterion(TASK, { title: 'C', methods: ['unit_test'] });
@@ -49,17 +49,35 @@ describe('vérificateur : application du JSON par le daemon', () => {
       review: 'issues',
       notes: 'deux preuves jugées',
       actions: [
-        { op: 'approve', ref: 'AC-01', comment: 'la sortie de test passe' },
-        { op: 'reject', ref: 'AC-02', reason: 'la sortie ne montre pas le bon fichier' },
+        { op: 'approve', ref: 'AC-01', submission_version: 1, comment: 'la sortie de test passe' },
+        { op: 'reject', ref: 'AC-02', submission_version: 1, reason: 'la sortie ne montre pas le bon fichier' },
       ],
     };
     const applied = applyVerifierActions(TASK, json);
     expect(getCriterion(TASK, 'AC-01')!.status).toBe('validated');
+    expect(getCriterion(TASK, 'AC-01')!.validated_at).toBeGreaterThan(0);
     expect(getCriterion(TASK, 'AC-02')!.status).toBe('to_fix');
     expect(transitionLines(applied)).toEqual([
-      'AC-01 validé',
+      'AC-01 validé : la sortie de test passe',
       'AC-02 à corriger : la sortie ne montre pas le bon fichier',
     ]);
+  });
+
+  test('un jugement sur une version périmée est ignoré (l agent a changé la preuve pendant la phase)', async () => {
+    await pending('AC-03');   // version 1
+    const applied = applyVerifierActions(TASK, {
+      review: 'ok',
+      actions: [{ op: 'approve', ref: 'AC-03', submission_version: 0, comment: 'obsolète' }],
+    });
+    expect(applied).toEqual([]);
+    expect(getCriterion(TASK, 'AC-03')!.status).toBe('to_validate');
+    // le même jugement à la bonne version est appliqué
+    const applied2 = applyVerifierActions(TASK, {
+      review: 'ok',
+      actions: [{ op: 'approve', ref: 'AC-03', submission_version: 1, comment: 'à jour' }],
+    });
+    expect(getCriterion(TASK, 'AC-03')!.status).toBe('validated');
+    expect(transitionLines(applied2)[0]).toBe('AC-03 validé : à jour');
   });
 
   test('approve sur un critère non « à valider » : ignoré, sans casser les suivantes', async () => {
@@ -76,23 +94,29 @@ describe('vérificateur : application du JSON par le daemon', () => {
     expect(listCriteria(TASK).map(r => r.status)).toEqual(before);
   });
 
-  test('add, remove et update appliqués ; add alloue la prochaine ref libre', async () => {
+  test('add, update et remove-aproposition appliqués ; add alloue la prochaine ref libre', async () => {
     const refsBefore = listCriteria(TASK).length;
     const applied = applyVerifierActions(TASK, {
       review: 'issues',
       actions: [
-        { op: 'add', title: 'Aucune régression du build UI', methods: ['unit_test'], reason: 'le plan touche l\'UI' },
+        { op: 'add', title: 'Aucune régression du build UI', detail: 'build passe après chaque lot', methods: ['unit_test'], reason: 'le plan touche l\'UI' },
         { op: 'update', ref: 'AC-03', detail: 'détail précisé avec la commande', reason: 'détail trop vague' },
         { op: 'remove', ref: 'AC-03', reason: 'doublon de AC-02' },
       ],
     });
-    expect(listCriteria(TASK).length).toBe(refsBefore);   // add (AC-04) puis remove (AC-03)
+    // remove du vérificateur : une PROPOSITION, le critère reste en place
+    expect(listCriteria(TASK).length).toBe(refsBefore + 1);
     const added = listCriteria(TASK).at(-1)!;
     expect(added.ref).toBe('AC-04');
     expect(added.status).toBe('todo');
     expect(added.methods).toEqual(['unit_test']);
     expect(applied.map(t => t.op)).toEqual(['add', 'update', 'remove']);
     expect(transitionLines(applied)[1]).toContain('AC-03 modifié');
+    expect(transitionLines(applied)[2]).toContain('AC-03 : retrait proposé');
+    const c3 = getCriterion(TASK, 'AC-03')!;
+    expect(c3.remove_proposed_at).toBeGreaterThan(0);
+    expect(c3.remove_reason).toBe('doublon de AC-02');
+    expect(c3.status).toBe('todo');   // pas de changement d'état sur une proposition
   });
 
   test('update d\'un critère validé le repasse « à faire » (cohérence des états)', async () => {

@@ -18,6 +18,8 @@ tools:
   criteria_list: false
   verifier_messages: false
   verifier_tools: false
+  verifier_tool_result: false
+  verifier_artifact: false
   verifier_search: false
   question: false
   task: false

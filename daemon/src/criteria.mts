@@ -60,6 +60,13 @@ export interface CriterionRow {
   review_at: number | null;
   created_at: number;
   updated_at: number;
+  /** version du contenu jugé (preuve ou contenu) : l'approbation vise une version précise */
+  version: number;
+  validated_at: number | null;
+  /** proposition de retrait du vérificateur (jamais une suppression physique) */
+  remove_proposed_at: number | null;
+  remove_reason: string | null;
+  removed_at: number | null;
 }
 
 export class CriteriaError extends Error {
@@ -161,6 +168,8 @@ interface RawCriterion {
   id: number; task_id: string; ref: string; title: string;
   detail: string | null; methods: string; status: string; evidence: string | null;
   review: string | null; review_at: number | null; created_at: number; updated_at: number;
+  version: number | null; validated_at: number | null;
+  remove_proposed_at: number | null; remove_reason: string | null; removed_at: number | null;
 }
 
 function rowOf(raw: RawCriterion): CriterionRow {
@@ -170,18 +179,28 @@ function rowOf(raw: RawCriterion): CriterionRow {
   if (!Array.isArray(methods)) methods = [];
   try { evidence = JSON.parse(raw.evidence ?? '[]'); } catch { /* pas de preuve */ }
   if (!Array.isArray(evidence)) evidence = [];
-  return { ...raw, methods, evidence, status: raw.status as CriterionStatus };
+  return {
+    ...raw,
+    methods,
+    evidence,
+    status: raw.status as CriterionStatus,
+    version: raw.version ?? 0,
+  };
 }
 
-export function listCriteria(taskId: string): CriterionRow[] {
+export function listCriteria(taskId: string, opts: { includeRemoved?: boolean } = {}): CriterionRow[] {
   if (!taskId) return [];
-  return (db.query('SELECT * FROM criteria WHERE task_id = ? ORDER BY id ASC').all(taskId) as RawCriterion[])
+  const rows = db.query('SELECT * FROM criteria WHERE task_id = ? ORDER BY id ASC').all(taskId) as RawCriterion[];
+  return rows
+    .filter(r => opts.includeRemoved || r.removed_at == null)
     .map(rowOf);
 }
 
-export function getCriterion(taskId: string, ref: string): CriterionRow | null {
+export function getCriterion(taskId: string, ref: string, opts: { includeRemoved?: boolean } = {}): CriterionRow | null {
   const raw = db.query('SELECT * FROM criteria WHERE task_id = ? AND ref = ?').get(taskId, String(ref ?? '').trim()) as RawCriterion | undefined;
-  return raw ? rowOf(raw) : null;
+  if (!raw) return null;
+  if (raw.removed_at != null && !opts.includeRemoved) return null;
+  return rowOf(raw);
 }
 
 export interface CriteriaCounts {
@@ -237,8 +256,8 @@ export function addCriterion(taskId: string, p: { title: string; detail?: string
   const methods = parseMethods(p.methods) ?? [];
   const ref = nextRef(taskId);
   const at = Date.now();
-  db.query(`INSERT INTO criteria (task_id, ref, title, detail, methods, status, created_at, updated_at)
-            VALUES (?,?,?,?,?,'todo',?,?)`)
+  db.query(`INSERT INTO criteria (task_id, ref, title, detail, methods, status, version, created_at, updated_at)
+            VALUES (?,?,?,?,?,'todo',0,?,?)`)
     .run(taskId, ref, title.slice(0, MAX_TITLE), String(p.detail ?? '').trim().slice(0, MAX_DETAIL) || null,
       JSON.stringify(methods), at, at);
   bumpRef(taskId);
@@ -249,7 +268,11 @@ export function addCriterion(taskId: string, p: { title: string; detail?: string
 export function removeCriterion(taskId: string, ref: string, source: 'agent' | 'verifier' = 'agent'): boolean {
   const row = getCriterion(taskId, ref);
   if (!row) throw new CriteriaError('unknown_ref', `critère inconnu : ${ref}`);
-  db.query('DELETE FROM criteria WHERE task_id = ? AND ref = ?').run(taskId, row.ref);
+  // suppression DOUCE : la ligne reste (historique des régressions), filtrée
+  // des listes et comptes ; le vérificateur, lui, ne propose jamais de retrait
+  // physique (voir proposeRemoval)
+  db.query(`UPDATE criteria SET removed_at = ?, updated_at = ? WHERE task_id = ? AND ref = ?`)
+    .run(Date.now(), Date.now(), taskId, row.ref);
   logTransition(taskId, row.ref, row.status, 'removed', source);
   return true;
 }
@@ -270,7 +293,9 @@ export function updateCriterion(taskId: string, ref: string, patch: { title?: st
   const invalidate = row.status !== 'todo';
   db.query(`UPDATE criteria SET
       title = COALESCE(?, title), detail = COALESCE(?, detail), methods = COALESCE(?, methods),
-      status = ?, evidence = NULL, review = NULL, review_at = NULL, updated_at = ?
+      status = ?, evidence = NULL, review = NULL, review_at = NULL, validated_at = NULL,
+      remove_proposed_at = NULL, remove_reason = NULL,
+      version = version + 1, updated_at = ?
       WHERE task_id = ? AND ref = ?`)
     .run(
       title ?? null, detail !== undefined ? (detail || null) : null,
@@ -303,7 +328,8 @@ export async function submitEvidence(taskId: string, ref: string, rawEvidence: u
     }
     evidence.push(ev);
   }
-  db.query(`UPDATE criteria SET status = 'to_validate', evidence = ?, review = NULL, review_at = NULL, updated_at = ?
+  db.query(`UPDATE criteria SET status = 'to_validate', evidence = ?, review = NULL, review_at = NULL, validated_at = NULL,
+              remove_proposed_at = NULL, remove_reason = NULL, version = version + 1, updated_at = ?
             WHERE task_id = ? AND ref = ?`)
     .run(JSON.stringify(evidence), Date.now(), taskId, row.ref);
   logTransition(taskId, row.ref, row.status, 'to_validate', source,
@@ -313,29 +339,68 @@ export async function submitEvidence(taskId: string, ref: string, rawEvidence: u
 
 /* --- Transitions (daemon seul : retour JSON du vérificateur) --- */
 
-export function approveCriterion(taskId: string, ref: string, comment: string): CriterionRow {
+/**
+ * Approbation ATOMIQUE et versionnée : `UPDATE ... WHERE status='to_validate'
+ * AND version = ?` ; si la version ne correspond plus (l'agent a soumis une
+ * nouvelle preuve ou modifié le critère pendant la phase), le jugement périmé
+ * est ignoré (`stale_judgment`) : jamais une approbation d'un état devenu
+ * autre. `version` absent : repli sur la version courante (compatibilité).
+ */
+export function approveCriterion(taskId: string, ref: string, comment: string, version?: number): CriterionRow {
   const row = getCriterion(taskId, ref);
   if (!row) throw new CriteriaError('unknown_ref', `critère inconnu : ${ref}`);
-  if (row.status !== 'to_validate') {
-    throw new CriteriaError('invalid_transition', `approbation impossible : ${row.ref} est « ${statusLabel(row.status)} » (attendu : à valider)`);
+  const v = version ?? row.version;
+  const at = Date.now();
+  const changes = db.query(`UPDATE criteria SET status = 'validated', review = ?, review_at = ?, validated_at = ?, updated_at = ?
+            WHERE task_id = ? AND ref = ? AND status = 'to_validate' AND version = ?`)
+    .run(String(comment ?? '').trim().slice(0, 500) || null, at, at, at, taskId, row.ref, v).changes;
+  if (!changes) {
+    if (row.status !== 'to_validate') {
+      throw new CriteriaError('invalid_transition', `approbation impossible : ${row.ref} est « ${statusLabel(row.status)} » (attendu : à valider)`);
+    }
+    throw new CriteriaError('stale_judgment', `jugement périmé : ${row.ref} a changé depuis (version examinée ${v}, version courante ${row.version})`);
   }
-  db.query(`UPDATE criteria SET status = 'validated', review = ?, review_at = ?, updated_at = ? WHERE task_id = ? AND ref = ?`)
-    .run(String(comment ?? '').trim().slice(0, 500) || null, Date.now(), Date.now(), taskId, row.ref);
   logTransition(taskId, row.ref, 'to_validate', 'validated', 'verifier', comment);
   return getCriterion(taskId, row.ref)!;
 }
 
-export function rejectCriterion(taskId: string, ref: string, reason: string): CriterionRow {
+/** Rejet versionné et atomique : même garde anti-péremption que l'approbation. */
+export function rejectCriterion(taskId: string, ref: string, reason: string, version?: number): CriterionRow {
   const row = getCriterion(taskId, ref);
   if (!row) throw new CriteriaError('unknown_ref', `critère inconnu : ${ref}`);
-  if (row.status !== 'to_validate') {
-    throw new CriteriaError('invalid_transition', `rejet impossible : ${row.ref} est « ${statusLabel(row.status)} » (attendu : à valider)`);
-  }
   const reasonClean = String(reason ?? '').trim();
   if (!reasonClean) throw new CriteriaError('invalid', 'une raison est requise pour un rejet');
-  db.query(`UPDATE criteria SET status = 'to_fix', review = ?, review_at = ?, updated_at = ? WHERE task_id = ? AND ref = ?`)
-    .run(reasonClean.slice(0, 500), Date.now(), Date.now(), taskId, row.ref);
+  const v = version ?? row.version;
+  const at = Date.now();
+  const changes = db.query(`UPDATE criteria SET status = 'to_fix', review = ?, review_at = ?, updated_at = ?
+            WHERE task_id = ? AND ref = ? AND status = 'to_validate' AND version = ?`)
+    .run(reasonClean.slice(0, 500), at, at, taskId, row.ref, v).changes;
+  if (!changes) {
+    if (row.status !== 'to_validate') {
+      throw new CriteriaError('invalid_transition', `rejet impossible : ${row.ref} est « ${statusLabel(row.status)} » (attendu : à valider)`);
+    }
+    throw new CriteriaError('stale_judgment', `jugement périmé : ${row.ref} a changé depuis (version examinée ${v}, version courante ${row.version})`);
+  }
   logTransition(taskId, row.ref, 'to_validate', 'to_fix', 'verifier', reasonClean);
+  return getCriterion(taskId, row.ref)!;
+}
+
+/**
+ * Proposition de retrait : le vérificateur ne supprime JAMAIS physiquement.
+ * La proposition reste visible (injection, UI, notification) jusqu'à ce que
+ * l'agent retire le critère (criteria_remove) ou le modifie (criteria_update,
+ * qui l'efface) ; idempotente à raison identique.
+ */
+export function proposeRemoval(taskId: string, ref: string, reason: string): CriterionRow {
+  const row = getCriterion(taskId, ref);
+  if (!row) throw new CriteriaError('unknown_ref', `critère inconnu : ${ref}`);
+  const reasonClean = String(reason ?? '').trim();
+  if (!reasonClean) throw new CriteriaError('invalid', 'une raison est requise pour une proposition de retrait');
+  if (row.remove_proposed_at != null && row.remove_reason === reasonClean) return row;
+  db.query(`UPDATE criteria SET remove_proposed_at = ?, remove_reason = ?, updated_at = ? WHERE task_id = ? AND ref = ?`)
+    .run(Date.now(), reasonClean.slice(0, 500), Date.now(), taskId, row.ref);
+  logEvent(taskId, 'criteria', `${row.ref} : retrait proposé par le vérificateur : ${reasonClean.slice(0, 120)}`,
+    { ref: row.ref, from: row.status, to: row.status, source: 'verifier', removal_proposed: true });
   return getCriterion(taskId, row.ref)!;
 }
 
@@ -362,6 +427,6 @@ export function criteriaPushMessage(rows: CriterionRow[]): string | null {
 /** Signature de l'état critères : le dédoublonnage du vérificateur s'appuie dessus. */
 export function criteriaSignature(taskId: string): string {
   return listCriteria(taskId)
-    .map(r => `${r.ref}|${r.status}|${r.updated_at}`)
+    .map(r => `${r.ref}|${r.status}|${r.version}|${r.updated_at}|${r.remove_proposed_at ?? 0}`)
     .join(';');
 }

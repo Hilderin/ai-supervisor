@@ -76,6 +76,14 @@ export interface Criterion {
   review_at: number | null;
   created_at: number;
   updated_at: number;
+  /** version du contenu jugé (l'approbation vise cette version) */
+  version?: number;
+  validated_at?: number | null;
+  /** proposition de retrait du vérificateur (jamais une suppression physique) */
+  remove_proposed_at?: number | null;
+  remove_reason?: string | null;
+  /** suppression douce : la ligne reste, filtrée des listes */
+  removed_at?: number | null;
 }
 
 export interface CriteriaCounts {

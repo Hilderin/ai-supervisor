@@ -122,6 +122,14 @@ CREATE TABLE IF NOT EXISTS criteria (
   review_at INTEGER,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
+  -- version du contenu jugé : incrémentée à chaque preuve soumise ou contenu
+  -- modifié ; l'approbation vise une version précise, périmée elle est ignorée
+  version INTEGER NOT NULL DEFAULT 0,
+  validated_at INTEGER,              -- horodatage de l'approbation (staleness)
+  -- proposition de retrait (jamais une suppression physique par le vérificateur)
+  remove_proposed_at INTEGER,
+  remove_reason TEXT,
+  removed_at INTEGER,                -- suppression douce : l'historique reste
   UNIQUE(task_id, ref)
 );
 CREATE INDEX IF NOT EXISTS idx_criteria_task ON criteria(task_id);
@@ -149,6 +157,12 @@ try { db.exec('ALTER TABLE task_state ADD COLUMN last_user_id TEXT'); } catch { 
 try { db.exec('ALTER TABLE task_state ADD COLUMN plan TEXT'); } catch { /* colonne déjà présente */ }
 // compteur des refs de critères (AC-01, AC-02, ...) : un retrait ne libère pas son numéro
 try { db.exec('ALTER TABLE task_state ADD COLUMN criteria_seq INTEGER'); } catch { /* colonne déjà présente */ }
+// colonnes critères (version de soumission, staleness, proposition de retrait, suppression douce)
+try { db.exec('ALTER TABLE criteria ADD COLUMN version INTEGER NOT NULL DEFAULT 0'); } catch { /* colonne déjà présente */ }
+try { db.exec('ALTER TABLE criteria ADD COLUMN validated_at INTEGER'); } catch { /* colonne déjà présente */ }
+try { db.exec('ALTER TABLE criteria ADD COLUMN remove_proposed_at INTEGER'); } catch { /* colonne déjà présente */ }
+try { db.exec('ALTER TABLE criteria ADD COLUMN remove_reason TEXT'); } catch { /* colonne déjà présente */ }
+try { db.exec('ALTER TABLE criteria ADD COLUMN removed_at INTEGER'); } catch { /* colonne déjà présente */ }
 // état sémantique du verdict (working/waiting_human/done/blocked) et provenance de l'attente
 try { db.exec('ALTER TABLE task_verdict ADD COLUMN state TEXT'); } catch { /* colonne déjà présente */ }
 try { db.exec('ALTER TABLE task_verdict ADD COLUMN human_source TEXT'); } catch { /* colonne déjà présente */ }

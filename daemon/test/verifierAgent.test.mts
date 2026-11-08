@@ -17,7 +17,7 @@ const CRITERIA_TOOLS = [
   'criteria_add', 'criteria_remove', 'criteria_update',
   'criteria_to_validate', 'criteria_list',
 ];
-const VERIFIER_TOOLS = ['verifier_messages', 'verifier_tools', 'verifier_search'];
+const VERIFIER_TOOLS = ['verifier_messages', 'verifier_tools', 'verifier_tool_result', 'verifier_artifact', 'verifier_search'];
 
 async function frontmatterTools(file: string): Promise<Map<string, boolean>> {
   const text = await Bun.file(join(here, '..', 'agent', file)).text();

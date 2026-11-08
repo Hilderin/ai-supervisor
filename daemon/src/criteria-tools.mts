@@ -23,8 +23,8 @@ function projectDirOf(taskId: string): string | undefined {
     ?? undefined;
 }
 
-function criteriaView(taskId: string) {
-  const rows = listCriteria(taskId);
+function criteriaView(taskId: string, includeRemoved = false) {
+  const rows = listCriteria(taskId, { includeRemoved });
   return { ok: true, criteria: rows, counts: criteriaCounts(rows) };
 }
 
@@ -50,7 +50,7 @@ export async function runCriteriaTool(name: string, callerSessionId: string, arg
   try {
     switch (name) {
       case 'criteria_list':
-        return criteriaView(taskId);
+        return criteriaView(taskId, args.include_removed === true);
       case 'criteria_add':
         addCriterion(taskId, {
           title: String(args.title ?? ''),

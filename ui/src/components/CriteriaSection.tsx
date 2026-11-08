@@ -117,6 +117,11 @@ export function CriterionRow({ sessionId, criterion }: { sessionId: string; crit
           Vérificateur : preuve acceptée : {criterion.review}
         </div>
       ) : null}
+      {criterion.remove_proposed_at != null ? (
+        <div className="mt-[4px] text-[11.5px] leading-[1.4] text-attend">
+          Suppression proposée par le vérificateur : {criterion.remove_reason}
+        </div>
+      ) : null}
     </li>
   );
 }

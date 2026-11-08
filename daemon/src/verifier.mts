@@ -17,7 +17,7 @@ import {
 } from './state.mts';
 import {
   CriteriaError, approveCriterion, addCriterion, criteriaCounts, criteriaSignature,
-  listCriteria, removeCriterion, rejectCriterion, statusLabel, updateCriterion,
+  listCriteria, proposeRemoval, rejectCriterion, statusLabel, updateCriterion,
 } from './criteria.mts';
 import { takeVerifierKick } from './verifier-kicks.mts';
 import { toolActionLine } from './verdict.mts';
@@ -232,12 +232,12 @@ async function conversationExcerpt(taskId: string): Promise<string> {
   } catch { return '(conversation illisible pour le moment)'; }
 }
 
-function criteriaText(taskId: string): string {
+function criteriaText(taskId: string, lastUpdateAt?: number): string {
   const rows = listCriteria(taskId);
   if (!rows.length) return '(aucun critère)';
   return rows.map(r => {
     const lines = [
-      `${r.ref} [${statusLabel(r.status)}] ${r.title}`,
+      `${r.ref} [${statusLabel(r.status)}] (version ${r.version}) ${r.title}`,
       r.detail ? `    détail : ${r.detail}` : '',
     ];
     if (r.methods.length) lines.push(`    méthodes : ${r.methods.join(', ')}`);
@@ -246,6 +246,12 @@ function criteriaText(taskId: string): string {
       lines.push(`    preuve [${ev.kind}]${loc} : ${ev.text.slice(0, 400)}`);
     }
     if (r.review) lines.push(`    dernier commentaire : ${r.review.slice(0, 300)}`);
+    if (r.remove_proposed_at != null) {
+      lines.push(`    RETRAIT PROPOSÉ : ${r.remove_reason ?? ''} : déjà enregistré, ne le re-propose pas ; il partira si l'agent confirme`);
+    }
+    if (r.status === 'validated' && r.validated_at != null && lastUpdateAt != null && r.validated_at < lastUpdateAt) {
+      lines.push(`    VALIDÉ AVANT LES DERNIÈRES MODIFICATIONS : le travail a bougé depuis l'approbation : recoupe ou suggère une revalidation (update).`);
+    }
     return lines.filter(Boolean).join('\n');
   }).join('\n');
 }
@@ -258,17 +264,30 @@ interface AppliedTransition {
   line: string;
 }
 
-/** Construit la notification pour l'agent principal : une ligne par transition. */
+/** Lignes de notification : une par transition, structurées (P5). */
 export function transitionLines(applied: AppliedTransition[]): string {
   return applied.map(t => t.line);
 }
 
-function actionLine(op: string, ref: string, reason?: string): string {
-  if (op === 'approve') return `${ref} validé`;
-  if (op === 'reject') return `${ref} à corriger : ${reason ?? 'raison non fournie'}`;
-  if (op === 'add') return `${ref} ajouté par le vérificateur : ${reason ?? ''}`.trim();
-  if (op === 'remove') return `${ref} retiré par le vérificateur : ${reason ?? ''}`.trim();
-  if (op === 'update') return `${ref} modifié par le vérificateur : ${reason ?? ''}`.trim();
+function versionOf(a: Record<string, unknown>): number | undefined {
+  const raw = a.submission_version ?? a.submissionVersion ?? a.version;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? n : undefined;
+}
+
+function actionLine(op: string, ref: string, a: Record<string, unknown>): string {
+  const reason = String(a.reason ?? '').trim();
+  const comment = String(a.comment ?? '').trim();
+  if (op === 'approve') return `${ref} validé${comment ? ` : ${comment}` : ' : preuve acceptée'}`;
+  if (op === 'reject') return `${ref} à corriger : ${reason || 'raison non fournie'}`;
+  if (op === 'add') {
+    const title = String(a.title ?? '').trim();
+    const detail = String(a.detail ?? '').trim();
+    const methods = Array.isArray(a.methods) ? a.methods.map(String) : [];
+    return `${ref} ajouté par le vérificateur : « ${title} »${detail ? ` : ${detail}` : ''}${methods.length ? ` (méthodes : ${methods.join(', ')})` : ''}${reason ? ` : ${reason}` : ''}`;
+  }
+  if (op === 'remove') return `${ref} : retrait proposé par le vérificateur : ${reason || 'raison non fournie'} : confirme avec criteria_remove, ou refuse en modifiant le critère`;
+  if (op === 'update') return `${ref} modifié par le vérificateur : ${reason || 'sans raison fournie'}`;
   return `${ref} : ${op}`;
 }
 
@@ -286,52 +305,89 @@ export function applyVerifierActions(taskId: string, json: VerifierJson): Applie
     const a = raw as Record<string, unknown>;
     const op = String(a.op ?? '').trim().toLowerCase();
     const ref = String(a.ref ?? '').trim();
-    const reason = String(a.reason ?? '').trim().slice(0, 500);
-    const comment = String(a.comment ?? '').trim().slice(0, 500);
     try {
       if (op === 'approve') {
-        approveCriterion(taskId, ref, comment);
-        applied.push({ ref, op, line: actionLine('approve', ref) });
+        approveCriterion(taskId, ref, String(a.comment ?? ''), versionOf(a));
+        applied.push({ ref, op, line: actionLine('approve', ref, a) });
       } else if (op === 'reject') {
-        rejectCriterion(taskId, ref, reason);
-        applied.push({ ref, op, line: actionLine('reject', ref, reason) });
+        rejectCriterion(taskId, ref, String(a.reason ?? ''), versionOf(a));
+        applied.push({ ref, op, line: actionLine('reject', ref, a) });
       } else if (op === 'add') {
         const title = String(a.title ?? '').trim();
         addCriterion(taskId, { title, detail: String(a.detail ?? ''), methods: a.methods }, 'verifier');
-        applied.push({ ref: addRefOf(taskId), op, line: actionLine('add', addRefOf(taskId), `${title}${reason ? ` (${reason})` : ''}`) });
+        const addedRef = addRefOf(taskId);
+        applied.push({ ref: addedRef, op, line: actionLine('add', addedRef, a) });
       } else if (op === 'remove') {
-        removeCriterion(taskId, ref, 'verifier');
-        applied.push({ ref, op, line: actionLine('remove', ref, reason) });
+        // jamais de suppression physique par le vérificateur : une PROPOSITION
+        // persistée, que l'agent confirme (criteria_remove) ou refuse (update)
+        proposeRemoval(taskId, ref, String(a.reason ?? ''));
+        applied.push({ ref, op, line: actionLine('remove', ref, a) });
       } else if (op === 'update') {
         updateCriterion(taskId, ref, {
           title: a.title != null ? String(a.title) : undefined,
           detail: a.detail != null ? String(a.detail) : undefined,
           methods: a.methods,
         }, 'verifier');
-        applied.push({ ref, op, line: actionLine('update', ref, reason) });
+        applied.push({ ref, op, line: actionLine('update', ref, a) });
       } else {
         logEvent(taskId, 'note', `vérificateur : action ignorée (${op || 'vide'} ${ref})`);
       }
     } catch (e) {
-      // transition impossible (état inattendu, ref inconnu) : ignorée et journalisée,
-      // le daemon garde la main
+      // transition impossible : état inattendu, ref inconnu ou JUGEMENT PÉRIMÉ
+      // (le critère a changé pendant la phase) : ignoré, le daemon garde la main
       const msg = e instanceof CriteriaError ? `${e.code} : ${e.message}` : String((e as Error)?.message ?? e);
-      logEvent(taskId, 'note', `vérificateur : ${op} ${ref} refusé (${msg.slice(0, 120)})`);
+      logEvent(taskId, 'note', `vérificateur : ${op} ${ref} refusé (${msg.slice(0, 140)})`);
     }
   }
   return applied;
 }
 
-async function notifyMainAgent(taskId: string, applied: AppliedTransition[]): Promise<void> {
+/**
+ * Notification à l'agent principal : UN message par phase, avec les lignes
+ * structurées (justification d'approbation, détail des ajouts, attentes des
+ * corrections). Livraison `steer` avec reprises (3 essais) ; en cas d'échec
+ * final, repli sur la file d'attente OpenChamber (qui exige le sendConfig de
+ * la session, repris de /api/session/:id).
+ */
+/** Exportée pour verifierNotify.test.mts ; appelée par runPhase. */
+export async function notifyMainAgent(taskId: string, applied: AppliedTransition[]): Promise<void> {
   const head = 'Ne réponds pas à ce message : applique les corrections nécessaires.';
-  const text = `[superviseur] Critères : ${transitionLines(applied).join('. ')}. ${head}`;
-  const out = await jpost(`/api/session/${taskId}/prompt`, { text, delivery: 'steer' });
-  if (!out.ok) logEvent(taskId, 'note', `notification critères refusée (${out.status})`);
+  const text = `[superviseur] Critères : ${transitionLines(applied)}. ${head}`;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const out = await jpost(`/api/session/${taskId}/prompt`, { text, delivery: 'steer' }, 8000);
+    if (out.ok) return;
+    if (attempt < 3) await new Promise(r => setTimeout(r, attempt * 2000));
+  }
+  const queued = await queueFallback(taskId, text);
+  logEvent(taskId, 'note', queued
+    ? 'notification critères : steer échoué, mise dans la file d\'attente'
+    : 'notification critères : steer ET file d\'attente échoués (reprise au prochain kick)');
+}
+
+async function queueFallback(taskId: string, text: string): Promise<boolean> {
+  try {
+    const meta = await jget(`/api/session/${taskId}`) as {
+      data?: { model?: { providerID?: string; id?: string }; location?: { directory?: string } };
+    };
+    const model = meta?.data?.model;
+    const directory = meta?.data?.location?.directory;
+    if (!model?.providerID || !model?.id || !directory) return false;
+    const out = await jpost(`/api/message-queue/sessions/${taskId}/items`, {
+      directory,
+      item: {
+        text,
+        sendConfig: { providerID: model.providerID, modelID: model.id },
+      },
+    }, 8000);
+    return !!out.ok;
+  } catch {
+    return false;
+  }
 }
 
 /* --- Phase --- */
 
-async function runPhase(taskId: string, title: string, dir: string | undefined): Promise<void> {
+async function runPhase(taskId: string, title: string, dir: string | undefined, lastUpdateAt?: number): Promise<void> {
   const s = get(taskId);
   const rows = listCriteria(taskId);
   if (!rows.length) return;
@@ -354,7 +410,7 @@ async function runPhase(taskId: string, title: string, dir: string | undefined):
       `Tâche : ${title}`,
       `Objectif actuel : ${objective || 'inconnu'}`,
       `Critères (${counts.validated}/${counts.total} validés) :`,
-      criteriaText(taskId),
+      criteriaText(taskId, lastUpdateAt),
       pending ? `${pending} preuve(s) attend(ent) un jugement.` : 'Aucune preuve en attente de jugement.',
       'Extrait récent de la conversation de l\'agent principal :',
       excerpt,
@@ -422,7 +478,7 @@ interface TickSession {
  */
 export async function verifierTick(
   sessions: TickSession[],
-  statusMap: Record<string, { status: string }>,
+  statusMap: Record<string, { status: string; lastUpdateAt?: number }>,
 ): Promise<void> {
   if (process.env.SUPERVISEUR_VERIFIER === 'off' || process.env.SUPERVISEUR_CRITERIA === 'off') return;
   for (const sess of sessions) {
@@ -459,7 +515,7 @@ export async function verifierTick(
     if (!due && !k?.criteria) continue;
     if (s.cooldownUntil && now < s.cooldownUntil && !k?.criteria) continue;
 
-    void runPhase(taskId, sess.title ?? taskId.slice(0, 12), sess.location?.directory);
+    void runPhase(taskId, sess.title ?? taskId.slice(0, 12), sess.location?.directory, statusMap[taskId]?.lastUpdateAt);
   }
 }
 

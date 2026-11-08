@@ -89,11 +89,56 @@ export default {
       });
 
       editor.add({
+        name: "verifier_tool_result",
+        description: [
+          "Inspecte UN tool call précis de l'agent principal avec son entrée et sa sortie COMPLÈTES : la façon de vérifier une preuve « sortie de test » plutôt que sa description.",
+          ...LIMITS,
+          "Entrée : {index} (position dans la liste récente, du plus récent au plus ancien) ou {tool} + {query?} (premier call du nom donné dont l'entrée contient la requête) ; {since?}.",
+          "Résultat : {toolCall: {at, name, status, input, output, outputTruncated?, detail}, count}.",
+        ].join(" "),
+        options: { codemode: false, permission: "verifier_tool_result" },
+        input: {
+          type: "object",
+          properties: {
+            index: { type: "number", description: "Position dans la liste des tool calls récents (0 = le plus récent)." },
+            tool: { type: "string", description: "Nom du tool cherché (shell, read, criteria_add...) ; avec query, premier call correspondant." },
+            query: { type: "string", description: "Texte que l'entrée du tool call doit contenir." },
+            since: { type: "number", description: "Epoch ms, optionnel." },
+          },
+          additionalProperties: false,
+        },
+        async execute(input, context) { return call("verifier_tool_result", input, context); },
+      });
+
+      editor.add({
+        name: "verifier_artifact",
+        description: [
+          "Lit un artefact référencé par une preuve : extrait de code (avec start_line/line_count), fichier texte ou document, borné au dossier du projet du parent (chemin relatif, sans sortie ni lien symbolique).",
+          "Une image n'en donne pas le rendu visuel (le tool le dit) : si le visuel porte le critère, exige une preuve textuelle complémentaire (sortie de test, texte).",
+          ...LIMITS,
+          "Entrée : {path, start_line?, line_count?}.",
+        ].join(" "),
+        options: { codemode: false, permission: "verifier_artifact" },
+        input: {
+          type: "object",
+          properties: {
+            path: { type: "string", description: "Chemin relatif au projet du parent (celui cité dans la preuve)." },
+            start_line: { type: "number", description: "Première ligne (extrait de code)." },
+            line_count: { type: "number", description: "Nombre de lignes (extrait de code)." },
+          },
+          required: ["path"],
+          additionalProperties: false,
+        },
+        async execute(input, context) { return call("verifier_artifact", input, context); },
+      });
+
+      editor.add({
         name: "verifier_search",
         description: [
-          "Cherche un texte dans la conversation de l'agent principal (insensible à la casse) et renvoie les extraits autour des matches.",
+          "Cherche un texte dans la conversation de l'agent principal (insensible à la casse) : dans les messages ET dans les entrées des tool calls.",
           ...LIMITS,
-          "Entrée : {query (500 caractères max), since?}. Chaque match : {id, type, at, excerpt}.",
+          "L'historique couvert est l'union des deux extrémités du listing (l'API ignore offset et curseurs) ; la recherche serveur d'OpenChamber est désactivée sur cette instance.",
+          "Entrée : {query (500 caractères max), since?}. Chaque match : {id, type, at, field (message|tool_input), tool?, excerpt}.",
         ].join(" "),
         options: { codemode: false, permission: "verifier_search" },
         input: {
