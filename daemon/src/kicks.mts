@@ -8,7 +8,8 @@
  * changer le dernier message d'une session passe par ici.
  */
 import { deliveryEventRelevant, invalidateDelivery } from './delivery.mts';
-import { invalidateTodos } from './todos.mts';
+import { invalidatePlan } from './plan.mts';
+import { verifierKick } from './verifier-kicks.mts';
 
 const kicks = new Map<string, { start: boolean; end: boolean }>();
 
@@ -35,9 +36,12 @@ export function ingestEvent(frame: EventFrame): void {
   // une lecture fraîche qu'une carte figée sur une ancienne réponse
   if (deliveryEventRelevant(type)) invalidateDelivery(sid || undefined);
   if (/^message\./.test(type) || /^session\.(text\.|step\.ended$|idle$)/.test(type)) {
-    invalidateTodos(sid || undefined);
+    invalidatePlan(sid || undefined);
   }
   if (!sid) return;
   if (type === 'session.inbox.enqueued') kick(sid, 'start');
-  else if (/^session\.execution\.(succeeded|failed|interrupted)$/.test(type) || type === 'session.idle') kick(sid, 'end');
+  else if (/^session\.execution\.(succeeded|failed|interrupted)$/.test(type) || type === 'session.idle') {
+    kick(sid, 'end');
+    verifierKick(sid, 'turn');   // le vérificateur juge les preuves déposées pendant le tour
+  }
 }

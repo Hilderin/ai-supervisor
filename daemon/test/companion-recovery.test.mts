@@ -25,8 +25,6 @@ test('recrée un compagnon supprimé même si la session parente est idle', asyn
   const verdict = JSON.stringify({
     summary: 'L’agent poursuit la vérification demandée.',
     state: 'working',
-    confidence: 0.8,
-    confidence_reason: 'Les échanges récents décrivent le travail.',
     human_request: { needs: false, source: 'none', ask: '' },
     next: 'Continuer la vérification.',
   });

@@ -12,7 +12,7 @@ import { basename, isAbsolute, relative, resolve, sep } from 'node:path';
 import { homedir } from 'node:os';
 import { currentFleet, openchamberUrl, pollOnce, type FleetRow } from './fleet.mts';
 import { getDelivery } from './delivery.mts';
-import { getTodoSnapshot, todoPlan } from './todos.mts';
+import { getPlanSnapshot, planStepsOf } from './plan.mts';
 import { globProjectFiles, grepProjectFiles, readProjectFile } from './investigation.mts';
 import { modeDenial } from './investigation-policy.mts';
 import {
@@ -226,7 +226,7 @@ function normTitle(s: string): string {
 }
 
 async function taskView(row: FleetRow) {
-  const snap = await getTodoSnapshot(row.id, row.lastUpdateAt);
+  const snap = await getPlanSnapshot(row.id, row.lastUpdateAt);
   const task = getTaskState(row.id) as { closed_at?: number } | null;
   const waiting = row.pendingForms?.[0]?.fields?.[0]?.title
     ?? row.pendingForms?.[0]?.title
@@ -244,6 +244,7 @@ async function taskView(row: FleetRow) {
     directory: row.dir ?? '',
     ageMin: row.lastUpdateAt ? Math.max(0, Math.round((Date.now() - row.lastUpdateAt) / 60000)) : null,
     progress: snap.total ? { done: snap.done, total: snap.total } : null,
+    criteria: row.criteria ?? null,
     closed: !!task?.closed_at,
   };
 }
@@ -283,9 +284,11 @@ function composePrompt(p: {
   if (p.context) lines.push('', 'Contexte :', p.context);
   lines.push(
     '',
-    'Plan : tiens ta todolist à jour en continu (pas de limite au nombre d\'éléments) : une liste séquentielle d\'étapes, découpées par petits incréments, posée et modifiée avec `todowrite`.',
-    'Marque chaque étape `in_progress` quand tu la commences et `completed` quand elle est finie, en mettant à jour l\'élément par son numéro avec `todoupdate` plutôt qu\'en réécrivant toute la liste.',
-    'Utilise `todoread` après une compaction.',
+    'Plan : tiens ton plan à jour en continu (pas de limite au nombre d\'éléments) : une liste séquentielle d\'étapes, découpées par petits incréments, posée et modifiée avec `planwrite`.',
+    'Marque chaque étape `in_progress` quand tu la commences et `completed` quand elle est finie, en mettant à jour l\'élément par son numéro avec `planupdate` plutôt qu\'en réécrivant toute la liste.',
+    'Utilise `planread` après une compaction.',
+    'Critères : ta tâche est jugée sur des critères d\'acceptation (AC-01, AC-02, ...) : crée-les avec `criteria_add` (titre, détail, au moins une méthode de validation), soumets tes preuves avec `criteria_to_validate` et relis la liste avec `criteria_list`.',
+    'Le vérificateur du Superviseur valide ou refuse tes preuves ; ses rejets t\'arrivent en notification avec leur raison : corrige puis resoumets une preuve. N\'invente pas de validation toi-même.',
     'Réponse au propriétaire : dès qu\'une information attendue par le propriétaire est prête (réponse à la consigne, point à valider, résultat demandé), envoie-la avec le tool `answer` : elle s\'affiche dans le Superviseur, rendue en markdown (titres, listes, gras quand la réponse le justifie, sans forcer la longueur) ; si la réponse rattache à une question posée, passe cette question dans le champ `question`.',
     'Le propriétaire ne lit PAS la conversation de la tâche (ni le rendu `openchamber_render`, ni un tableau laissé dans la session) : la réponse doit tenir debout seule, et tout tableau ou classement utile est reproduit en markdown dans le texte de `answer`, jamais renvoyé au chat.',
     'Pose les questions avec le tool `question` : le formulaire s\'affiche dans le Superviseur ; une question posée en texte dans la conversation n\'arrive jamais au propriétaire.',
@@ -341,7 +344,7 @@ export async function getTask(args: { task?: string } = {}): Promise<ToolResult>
   const view = await taskView(row);
   const brief = getTaskBrief(row.id);
   // get_task est une lecture à la demande : ne pas servir un plan vieux de 5 s
-  const snap = await getTodoSnapshot(row.id, row.lastUpdateAt, true);
+  const snap = await getPlanSnapshot(row.id, row.lastUpdateAt, true);
   const delivery = await getDelivery(row.id).catch(() => null);
   return {
     ok: true,
@@ -350,9 +353,7 @@ export async function getTask(args: { task?: string } = {}): Promise<ToolResult>
       goal: brief?.goal ?? null,
       doneCriteria: parseList(brief?.done_criteria),
       constraints: parseList(brief?.constraints),
-      todos: todoPlan(snap),
-      confidence: row.sup?.confiance ?? null,
-      confidenceReason: row.sup?.note ?? '',
+      todos: planStepsOf(snap),
       delivery: delivery?.markdown ? delivery.markdown.slice(0, 2000) : '',
     },
   };
@@ -609,7 +610,7 @@ async function runInvestigationTool(name: string, args: Record<string, unknown>)
 
 /** Dispatch unique pour la route /api/tools/:name. */
 export async function runTool(name: string, callerSessionId: string, args: Record<string, unknown>): Promise<ToolResult> {
-  if (!isSupervisorSession(callerSessionId)) {
+  if (!(await isSupervisorSession(callerSessionId))) {
     return { ok: false, error: 'not_supervisor', message: 'outil réservé à la session de supervision' };
   }
   const mode = getSupervisorMode().mode;

@@ -75,7 +75,7 @@ describe('frontière de permission appliquée par le daemon', () => {
     }
     for (const name of [
       'list_projects', 'list_tasks', 'get_task', 'start_task', 'send_task', 'cancel_question', 'close_task',
-      'answer', 'bash', 'edit', 'write', 'read', 'glob', 'grep', 'webfetch', 'todowrite', 'task', 'execute',
+      'answer', 'bash', 'edit', 'write', 'read', 'glob', 'grep', 'webfetch', 'planwrite', 'planupdate', 'planread', 'task', 'execute',
       'openchamber_secret', 'unknown_future_tool',
     ]) {
       expect(isToolAllowedInMode(name, 'investigation')).toBe(false);

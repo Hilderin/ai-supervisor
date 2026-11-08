@@ -32,10 +32,6 @@ export interface RawVerdict {
   next?: unknown;
   plan?: unknown;
   progress?: unknown;
-  confidence?: unknown;
-  confiance?: unknown;
-  confidence_reason?: unknown;
-  note?: unknown;
   human_request?: unknown;
   pending_human?: unknown;
   attend?: unknown;
@@ -60,8 +56,8 @@ export interface NormalizeContext {
   agentAsk?: string | null;
   objectiveChanged: boolean;
   objective: string;
-  /** Plan de la session de travail (`todowrite`) : seule source de progression. */
-  todoPlan?: PlanStep[];
+  /** Plan de la session de travail (`planwrite`) : seule source de progression. */
+  workPlan?: PlanStep[];
   previous?: PreviousVerdict | null;
 }
 
@@ -71,8 +67,6 @@ export interface NormalizedVerdict {
   next: string;
   plan: PlanStep[];
   progress: number | null;
-  confidence: number | null;
-  note: string;
   attend: string;
   humanSource: HumanSource;
   done: boolean;
@@ -111,10 +105,6 @@ export function emptyWait(): WaitInfo {
 function pickString(...vals: unknown[]): string {
   for (const v of vals) if (typeof v === 'string' && v.trim()) return v.trim();
   return '';
-}
-
-function clamp01(n: number): number {
-  return Math.max(0, Math.min(1, n));
 }
 
 function normalizeState(v: unknown): VerdictState | undefined {
@@ -342,8 +332,8 @@ export function normalizeVerdict(raw: RawVerdict, ctx: NormalizeContext): Normal
   const attend = waiting ? ask.slice(0, 180) : '';
 
   // La progression ne vient jamais du texte du compagnon : uniquement du
-  // `todowrite` de la session de travail. Un plan vide signifie pas de barre.
-  const plan = (ctx.todoPlan ?? []).map(s => ({ ...s }));
+  // `planwrite` de la session de travail. Un plan vide signifie pas de barre.
+  const plan = (ctx.workPlan ?? []).map(s => ({ ...s }));
   let progress: number | null = plan.length ? planProgress(plan, done) : (done ? 100 : null);
   if (!done && plan.length && progress != null && ctx.previous?.progress != null) {
     const samePlan = JSON.stringify(plan) === JSON.stringify(ctx.previous.plan ?? []);
@@ -358,19 +348,12 @@ export function normalizeVerdict(raw: RawVerdict, ctx: NormalizeContext): Normal
     summary = prev || `L'agent travaille sur : ${ctx.objective.slice(0, 140)}`;
   }
 
-  const confRaw = raw.confidence ?? raw.confiance;
-  const confidence = confRaw == null ? null : clamp01(Number(confRaw));
-  const note = scrubSummary(pickString(raw.confidence_reason, raw.note)).slice(0, 180)
-    || (confidence != null ? "Raison non fournie par l'analyste." : '');
-
   return {
     state,
     summary: summary.slice(0, 300),
     next: scrubSummary(pickString(raw.next)).slice(0, 200),
     plan,
     progress: done ? 100 : progress,
-    confidence,
-    note,
     attend,
     humanSource,
     done,

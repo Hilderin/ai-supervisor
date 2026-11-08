@@ -13,7 +13,7 @@ import {
   ensureAgentDefinition, getAgentVersion, getCompanion, getTaskState, getVerdict, logEvent,
   putCompanion, setTaskObjective, setTaskPlan, upsertVerdict,
 } from './state.mts';
-import { getTodoSnapshot, todoPlan as todoStepsOf } from './todos.mts';
+import { getPlanSnapshot, planStepsOf } from './plan.mts';
 import { takeKick, kick as pushKick } from './kicks.mts';
 import { messageText } from './messages.mts';
 import {
@@ -309,10 +309,10 @@ async function analyseOnce(
     const objective = resolveObjective({ prev: prevTask, lastUser: digest.lastUser, firstUser });
     const prevPlan = parsePlanFromDb(prevTask?.plan);
     // Le plan est la propriété de la session de travail : on le relit depuis
-    // son `todowrite`. Un nouvel objectif repart sans plan tant que la tâche
+    // son `planwrite`. Un nouvel objectif repart sans plan tant que la tâche
     // n'a pas reposé sa liste.
-    const todoSnap = await getTodoSnapshot(sid);
-    const todoSteps = objective.changed ? [] : todoStepsOf(todoSnap);
+    const planSnap = await getPlanSnapshot(sid);
+    const planSteps = objective.changed ? [] : planStepsOf(planSnap);
 
     // même digest, même statut, pas de nouvel objectif → aucun appel au modèle
     if (!force && !objective.changed && digest.hash === s.lastDigestHash && s.lastStatus === status) {
@@ -332,12 +332,12 @@ async function analyseOnce(
     }
 
     const previousVerdict = getVerdict(sid) as {
-      resume?: string; confiance?: number | null; progress?: number | null;
-      termine?: number; attend?: string; note?: string; state?: string;
+      resume?: string; progress?: number | null;
+      termine?: number; attend?: string; state?: string;
     } | null;
 
     const compId = await ensureCompanion(sid, s);
-    const planForInjection = todoSteps;
+    const planForInjection = planSteps;
     const waitText = wait.waiting
       ? `${wait.source}: ${wait.ask}`
       : (digest.agentAsk ? `agent_ask: ${digest.agentAsk}` : 'aucun');
@@ -348,13 +348,13 @@ async function analyseOnce(
     const inject = [
       `Tâche : ${title}`,
       `Objectif actuel (version ${objective.version}) : ${objective.objective || 'inconnu'}`,
-      `Plan de la tâche (todowrite, source de vérité) :\n${planText(planForInjection)}`,
-      'Le plan appartient à la session de travail. Ne crée pas de plan, ne le modifie pas, et ne produis pas de champ plan : la progression est calculée par le daemon depuis ce todowrite.',
+      `Plan de la tâche (planwrite, source de vérité) :\n${planText(planForInjection)}`,
+      'Le plan appartient à la session de travail. Ne crée pas de plan, ne le modifie pas, et ne produis pas de champ plan : la progression est calculée par le daemon depuis ce planwrite.',
       `Signal d’attente humaine : ${waitText}`,
       prevText,
       'Message(s) récent(s) :',
       digest.text,
-      'Consignes : ton lecteur est le propriétaire humain ; l’agent supervisé n’est pas ton interlocuteur. Raconte le travail à la troisième personne. Si une information te manque, baisse confidence et dis-le dans confidence_reason : ne demande jamais au lecteur de relancer, vérifier ou opérer l’agent. Le JSON doit contenir TOUTES les clés, en français pour les textes.',
+      'Consignes : ton lecteur est le propriétaire humain ; l’agent supervisé n’est pas ton interlocuteur. Raconte le travail à la troisième personne. Si une information te manque, dis-le dans summary ou next : ne demande jamais au lecteur de relancer, vérifier ou opérer l’agent. Le JSON doit contenir TOUTES les clés, en français pour les textes.',
     ].filter(Boolean).join('\n\n').slice(0, MAX_INJECT_CHARS);
 
     const agent = ensureAgentDefinition(getAgentVersion());
@@ -379,7 +379,7 @@ async function analyseOnce(
       agentAsk: busy ? null : digest.agentAsk,
       objectiveChanged: objective.changed,
       objective: objective.objective,
-      todoPlan: todoSteps,
+      workPlan: planSteps,
       previous: {
         resume: previousVerdict?.resume ?? undefined,
         progress: previousVerdict?.progress ?? null,
@@ -401,8 +401,6 @@ async function analyseOnce(
     // reprise insuffisante : on garde un texte honnête, jamais de bruit à l'écran
     if (shouldRepair(norm.lintReasons)) {
       norm.summary = fallbackSummary(previousVerdict?.resume ?? null, objective.objective);
-      norm.note = norm.note || 'Résumé de l’analyste non conforme, ancien résumé conservé.';
-      if (norm.confidence != null) norm.confidence = Math.max(0, norm.confidence - 0.1);
     }
 
     if (norm.done) norm.plan = norm.plan.map(p => ({ ...p, done: true }));
@@ -410,10 +408,8 @@ async function analyseOnce(
     upsertVerdict(sid, {
       resume: norm.summary,
       termine: norm.done,
-      confiance: norm.confidence,
       progress: norm.progress,
       attend: norm.attend,
-      note: norm.note,
       state: norm.state,
       humanSource: norm.humanSource,
       next: norm.next,
@@ -424,7 +420,7 @@ async function analyseOnce(
     s.lastMsgID = digest.lastMsgID ?? s.lastMsgID;
     s.failures = 0;
     logEvent(sid, 'note', `analyste: ${norm.summary}`, {
-      confiance: norm.confidence, progress: norm.progress, termine: norm.done,
+      progress: norm.progress, termine: norm.done,
       state: norm.state, source: norm.humanSource, plan: norm.plan.length,
     });
   } catch (e) {

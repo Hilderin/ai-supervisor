@@ -1,11 +1,11 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { TodoStep } from '../types';
+import type { PlanStep } from '../types';
 import { PlanSteps } from './PlanSection';
 
 interface Props {
   label: string;
-  steps: TodoStep[];
+  steps: PlanStep[];
   done: number;
   total: number;
 }

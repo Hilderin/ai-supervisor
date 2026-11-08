@@ -125,13 +125,13 @@ export function composeResumePrompt(p: {
   if (p.summary) lines.push(`Dernier bilan connu : ${p.summary}`);
   if (p.progressDone != null) lines.push(`Étapes déjà terminées : ${p.progressDone}`);
   if (p.plan?.length) {
-    lines.push('', 'Plan connu (rétablis-le avec `todowrite` avant de continuer) :');
+    lines.push('', 'Plan connu (rétablis-le avec `planwrite` avant de continuer) :');
     for (const step of p.plan) lines.push(`- ${step.done ? '(fait) ' : '(à refaire si besoin) '}${step.step ?? ''}`.trim());
   }
   if (p.next) lines.push('', `Prochaine étape suggérée : ${p.next}`);
   lines.push(
     '',
-    'Plan : utilise `todowrite` pour poser un plan de 3 à 6 étapes. Remplace la liste complète à chaque changement, marque `in_progress` quand tu commences une étape et `completed` quand elle est finie. Utilise `todoread` après une compaction.',
+    'Plan : utilise `planwrite` pour poser un plan de 3 à 6 étapes. Remplace la liste complète à chaque changement, marque `in_progress` quand tu commences une étape et `completed` quand elle est finie. Utilise `planread` après une compaction.',
     'Bilan : à la fin, écris un court bilan (fait, reste, décisions) dans ton dernier message.',
   );
   return lines.join('\n');

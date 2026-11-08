@@ -1,32 +1,37 @@
 /**
- * Plan de tâche : le `todowrite` (et son complément `todoupdate`, mise à jour
+ * Plan de tâche : le `planwrite` (et son complément `planupdate`, mise à jour
  * unitaire par numéro) de la session de travail est la seule source de la
  * progression. On lit le tool part dans les messages OpenChamber, jamais la
  * base OpenCode : la clé `kv` du plugin est interne et le tool part est la
  * surface stable déjà exposée par l'API.
+ *
+ * Renommage du 2026-11-07 (todo* → plan-*) : les sessions créées avant la
+ * bascule portent des tool parts `todowrite`/`todoupdate`, le lecteur accepte
+ * donc les deux générations de noms, et les deux clés de metadata
+ * (`todos`, historique) et (`items`, nouvelle).
  *
  * Le cache évite de relire 60 messages à chaque tick de flotte. Il est indexé
  * par session et invalidé par les événements `message.*` / fin de tour.
  */
 import type { PlanStep } from './verdict.mts';
 
-export type TodoStatus = 'pending' | 'in_progress' | 'completed';
-export type TodoPriority = 'high' | 'medium' | 'low';
+export type PlanItemStatus = 'pending' | 'in_progress' | 'completed';
+export type PlanItemPriority = 'high' | 'medium' | 'low';
 
-export interface TodoItem {
+export interface PlanItem {
   content: string;
-  status: TodoStatus;
-  priority: TodoPriority;
+  status: PlanItemStatus;
+  priority: PlanItemPriority;
 }
 
-export interface TodoSnapshot {
+export interface PlanSnapshot {
   at: number;
-  items: TodoItem[];
+  items: PlanItem[];
   done: number;
   total: number;
   /** 0..99 tant que le job n'est pas done ; 100 seulement si done. */
   progress: number | null;
-  source: 'todowrite' | 'none';
+  source: 'planwrite' | 'todowrite' | 'none';
 }
 
 interface WirePart {
@@ -48,8 +53,8 @@ interface WireMessage {
   content?: WirePart[];
 }
 
-const STATUSES = new Set<TodoStatus>(['pending', 'in_progress', 'completed']);
-const PRIORITIES = new Set<TodoPriority>(['high', 'medium', 'low']);
+const STATUSES = new Set<PlanItemStatus>(['pending', 'in_progress', 'completed']);
+const PRIORITIES = new Set<PlanItemPriority>(['high', 'medium', 'low']);
 const CACHE_TTL_MS = 5_000;
 const MAX_MESSAGES = 80;
 
@@ -58,13 +63,16 @@ export function setBase(b: string) {
   base = b.replace(/\/$/, '');
 }
 
-const cache = new Map<string, { at: number; lastUpdateAt: number; value: TodoSnapshot }>();
-const inFlight = new Map<string, Promise<TodoSnapshot>>();
+const cache = new Map<string, { at: number; lastUpdateAt: number; value: PlanSnapshot }>();
+const inFlight = new Map<string, Promise<PlanSnapshot>>();
 
-const TODO_TOOLS = new Set(['todowrite', 'todoupdate']);
+const PLAN_TOOLS = new Set(['planwrite', 'planupdate']);
+/** sessions créées avant le renommage todo* → plan-* : tool parts anciens */
+const LEGACY_PLAN_TOOLS = new Set(['todowrite', 'todoupdate']);
 
-function isTodoTool(name: unknown): boolean {
-  return TODO_TOOLS.has(String(name ?? '').trim().toLowerCase().replace(/:\d+$/, ''));
+function isPlanTool(name: unknown): boolean {
+  const n = String(name ?? '').trim().toLowerCase().replace(/:\d+$/, '');
+  return PLAN_TOOLS.has(n) || LEGACY_PLAN_TOOLS.has(n);
 }
 
 function asArray(raw: unknown): unknown[] {
@@ -79,15 +87,15 @@ function asArray(raw: unknown): unknown[] {
 }
 
 /** Normalise la liste brute du plugin (content/status/priority). */
-export function normalizeTodos(raw: unknown): TodoItem[] {
-  const out: TodoItem[] = [];
+export function normalizePlanItems(raw: unknown): PlanItem[] {
+  const out: PlanItem[] = [];
   for (const item of asArray(raw)) {
     if (!item || typeof item !== 'object') continue;
     const obj = item as Record<string, unknown>;
     const content = String(obj.content ?? '').trim();
     if (!content) continue;
-    const status = String(obj.status ?? '').trim().toLowerCase() as TodoStatus;
-    const priority = String(obj.priority ?? '').trim().toLowerCase() as TodoPriority;
+    const status = String(obj.status ?? '').trim().toLowerCase() as PlanItemStatus;
+    const priority = String(obj.priority ?? '').trim().toLowerCase() as PlanItemPriority;
     out.push({
       content: content.slice(0, 240),
       status: STATUSES.has(status) ? status : 'pending',
@@ -97,48 +105,52 @@ export function normalizeTodos(raw: unknown): TodoItem[] {
   return out;
 }
 
-function todosOfPart(part: WirePart): TodoItem[] {
-  if (part?.type !== 'tool' || !isTodoTool(part.tool ?? part.name)) return [];
+function itemsOfPart(part: WirePart): PlanItem[] {
+  if (part?.type !== 'tool' || !isPlanTool(part.tool ?? part.name)) return [];
   const state = part.state ?? {};
   const meta = state.metadata ?? {};
-  let raw = (meta as Record<string, unknown>).todos;
+  // `items` (plugin superviseur-plan) ou `todos` (plugin superviseur-todolist,
+  // sessions d'avant le renommage)
+  let raw = (meta as Record<string, unknown>).items;
+  if (raw == null) raw = (meta as Record<string, unknown>).todos;
+  if (raw == null) raw = state.input?.items;
   if (raw == null) raw = state.input?.todos;
   if (raw == null) raw = state.output;
-  return normalizeTodos(raw);
+  return normalizePlanItems(raw);
 }
 
-interface TodoExtraction {
+interface PlanExtraction {
   found: boolean;
-  items: TodoItem[];
+  items: PlanItem[];
 }
 
-/** Dernier `todowrite` d'une fenêtre de messages, quel que soit l'ordre d'entrée. */
-function findTodos(messages: WireMessage[]): TodoExtraction {
+/** Dernier `planwrite` d'une fenêtre de messages, quel que soit l'ordre d'entrée. */
+function findPlanItems(messages: WireMessage[]): PlanExtraction {
   const ordered = messages
     .map((message, index) => ({ message, index, at: message.time?.created ?? index }))
     .sort((a, b) => a.at - b.at);
   let found = false;
-  let last: TodoItem[] = [];
+  let last: PlanItem[] = [];
   for (const { message } of ordered) {
     const parts = Array.isArray(message.content) ? message.content : [];
     for (const part of parts) {
-      if (part?.type !== 'tool' || !isTodoTool(part.tool ?? part.name)) continue;
+      if (part?.type !== 'tool' || !isPlanTool(part.tool ?? part.name)) continue;
       found = true;
-      last = todosOfPart(part);
+      last = itemsOfPart(part);
     }
   }
   return { found, items: last };
 }
 
-export function extractTodos(messages: WireMessage[]): TodoItem[] {
-  return findTodos(messages).items;
+export function extractPlanItems(messages: WireMessage[]): PlanItem[] {
+  return findPlanItems(messages).items;
 }
 
-export function emptySnapshot(): TodoSnapshot {
+export function emptySnapshot(): PlanSnapshot {
   return { at: Date.now(), items: [], done: 0, total: 0, progress: null, source: 'none' };
 }
 
-export function snapshotOf(items: TodoItem[], at = Date.now()): TodoSnapshot {
+export function snapshotOf(items: PlanItem[], at = Date.now()): PlanSnapshot {
   const done = items.filter(i => i.status === 'completed').length;
   const total = items.length;
   return {
@@ -147,21 +159,21 @@ export function snapshotOf(items: TodoItem[], at = Date.now()): TodoSnapshot {
     done,
     total,
     progress: total ? Math.min(99, Math.round((done / total) * 100)) : null,
-    source: total ? 'todowrite' : 'none',
+    source: total ? 'planwrite' : 'none',
   };
 }
 
-export function todoPlan(snapshot: TodoSnapshot | null | undefined): PlanStep[] {
+export function planStepsOf(snapshot: PlanSnapshot | null | undefined): PlanStep[] {
   if (!snapshot?.items.length) return [];
   return snapshot.items.map(i => ({ step: i.content, done: i.status === 'completed' }));
 }
 
-export function invalidateTodos(sessionId?: string) {
+export function invalidatePlan(sessionId?: string) {
   if (sessionId) cache.delete(sessionId);
   else cache.clear();
 }
 
-async function fetchSnapshot(sessionId: string): Promise<TodoSnapshot> {
+async function fetchSnapshot(sessionId: string): Promise<PlanSnapshot> {
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), 8000);
   try {
@@ -170,8 +182,8 @@ async function fetchSnapshot(sessionId: string): Promise<TodoSnapshot> {
     });
     if (!res.ok) throw new Error(`message → ${res.status}`);
     const body = await res.json() as { data?: WireMessage[] };
-    const extracted = findTodos(body.data ?? []);
-    // Dernier todowrite sorti de la fenêtre de 80 messages : garder le dernier
+    const extracted = findPlanItems(body.data ?? []);
+    // Dernier planwrite sorti de la fenêtre de 80 messages : garder le dernier
     // plan connu plutôt que de faire clignoter la carte à zéro.
     if (!extracted.found) {
       const previous = cache.get(sessionId)?.value;
@@ -187,7 +199,7 @@ async function fetchSnapshot(sessionId: string): Promise<TodoSnapshot> {
  * Lecture du plan avec cache. `lastUpdateAt` vient de la flotte : tant qu'il ne
  * bouge pas, on garde le snapshot ; sinon on relit après le TTL.
  */
-export function getTodoSnapshot(sessionId: string, lastUpdateAt?: number, force = false): Promise<TodoSnapshot> {
+export function getPlanSnapshot(sessionId: string, lastUpdateAt?: number, force = false): Promise<PlanSnapshot> {
   const hit = cache.get(sessionId);
   const now = Date.now();
   if (!force && hit && lastUpdateAt != null && hit.lastUpdateAt === lastUpdateAt && now - hit.at < 30_000) {
@@ -210,7 +222,7 @@ export function getTodoSnapshot(sessionId: string, lastUpdateAt?: number, force 
 }
 
 /** Pour les tests : vide le cache et les requêtes en vol. */
-export function resetTodoCache() {
+export function resetPlanCache() {
   cache.clear();
   inFlight.clear();
 }

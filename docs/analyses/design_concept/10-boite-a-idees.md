@@ -22,6 +22,8 @@ Les idées à faire sont triées par priorité. Les idées complétées ou close
 | 13 | Chemins de fichiers et URL cliquables dans les résultats | Aller du résultat au fichier sans copier-coller ; s'appuie sur le rendu existant de la livraison et sur `/api/fleet/asset` | faible à moyen | À faire |
 | 15 | Always on top + une UI qui tient dans un coin | Définit le mode d'usage (patch d'écran) ; à faire une fois les signaux essentiels arrêtés | moyen | À faire |
 | 18 | Markdown dans l'affichage (hors livraison) | Lisibilité de ce qu'écrivent les agents partout (brief, questions, tooltips), pour un coût faible ; c'est du confort, pas du pilotage | faible | Partiel : chat seulement |
+| 22 | Rendre les blocs `openui-lang` des agents (étapes, tableaux, graphiques) | OpenChamber sait dessiner ces blocs nativement ; le Superviseur les laisse en texte brut, alors que Steps, Table ou Callout disent mieux qu'un paragraphe ce qu'un agent a fait | moyen | À faire |
+| 23 | Le chat gère le tool `question` (et le préfère aux blocs openui-lang) | Une question de l'orchestrateur est aujourd'hui du texte à recopier ; le tool `question` donne une carte répondable, et l'instruction évite des blocs openui-lang inertes dans le Superviseur | faible à moyen | À faire |
 | 19 | Un petit bouton config dans la conversation | Confort (modèle et agent à chaud), le plus simple ; n'a d'intérêt qu'une fois le pilotage en place | faible | À faire |
 | 20 | Choisir le modèle du chat, des tâches et du compagnon | Le modèle est un levier de coût et de qualité invisible aujourd'hui ; il manque un geste simple pour régler chaque type de conversation | faible à moyen | À faire |
 | 21 | Coller des images dans le chat et les cartes | Le presse-papiers est le chemin le plus court pour montrer une maquette, une erreur ou un rendu cassé ; confort réel, mais secondaire face au pilotage | faible à moyen | À faire |
@@ -468,3 +470,52 @@ Constat sur le code actuel :
 - **brouillon** : la pièce jointe doit survivre à un changement de section de carte, comme le texte (le brouillon vit déjà dans le store).
 
 Lien : leçons « Images locales de la livraison » et « Rendu openchamber_render » dans `AGENTS.md`, idée « chemins de fichiers et URL cliquables » (même route asset), doc [mvp1/chat-superviseur.md](../mvp1/chat-superviseur.md) pour le composer du chat.
+
+### Rendre les blocs `openui-lang` des agents (étapes, tableaux, graphiques)
+
+Discussion du 7 nov : OpenChamber sait dessiner des blocs d'interface écrits en `openui-lang`, son petit langage de composants (Stack, Steps, Callout, Table, Badge, Progress, graphiques) : un agent qui écrit un tel bloc dans une conversation OpenChamber obtient un rendu natif, par exemple un parcours d'étapes avec flèches et un encadré d'avertissement. Le Superviseur, lui, n'a pas ce rendu.
+
+Demande : un petit moteur de rendu `openui-lang` dans le Superviseur, appliqué là où le markdown est déjà rendu (livraison, panneau de détails) : un agent pourrait livrer un parcours d'étapes, un tableau comparatif ou un graphique sans que le Superviseur ait à construire une page HTML complète via `openchamber_render`.
+
+Constat sur le code actuel :
+
+- la livraison rend le markdown (`DeliveryMarkdown` : GFM, `skipHtml`, sans `rehype-raw`) et les pages `openchamber_render` via iframe sandboxée (`SandboxedRender`) ; entre les deux, rien : un `Steps` ou un `Callout` reste du texte brut ;
+- le langage est un DSL simple, une instruction par ligne (`root = Stack([...])`, composants et arguments), parseable côté UI sans dépendance lourde ;
+- les blocs servent déjà ailleurs : le chat OpenChamber les rend nativement, et le prompt de l'orchestrateur les interdit explicitement aujourd'hui (« pas de bloc `openui-lang`, pas de tableau décoratif ») : l'instruction devra évoluer en même temps que le moteur.
+
+À creuser avant d'implémenter :
+
+- **périmètre du moteur** : commencer par les composants utiles à une livraison (Steps, Callout, Table, Badge, Progress, graphiques simples) et refuser le reste explicitement, plutôt que tout supporter d'emblée ;
+- **sécurité** : le DSL ne doit pas pouvoir produire du HTML arbitraire : rendu par composants React typés, jamais d'interpolation dans le DOM ; le markdown reste `skipHtml` ;
+- **où** : livraison d'abord, panneau de détails ensuite ; le chat peut attendre (un bloc y serait surtout décoratif) ;
+- **repli** : un bloc non reconnu ou non supporté s'affiche en code (monospace) plutôt qu'en vide, comme une image refusée affiche un placeholder ;
+- **flicker et perf** : un bloc rendu coûte plus cher qu'un paragraphe ; même cache par contenu que le markdown (le sig de la carte) ;
+- **usage** : une règle pour les agents dans `composePrompt` et les prompts : bloc = structure (étapes, tableau, graphique), jamais décoratif ; sinon le canal se remplit d'encadrés inutiles.
+
+Lien : idée « markdown dans l'affichage » (même terrain, un cran au-dessus), idée « coller des images » (le même canal d'affichage riche), `ui/src/components/DeliveryMarkdown.tsx` et `SandboxedRender.tsx`, leçon « Rendu openchamber_render » dans `AGENTS.md`.
+
+### Le chat gère le tool `question` (et le préfère aux blocs openui-lang)
+
+Discussion du 7 nov : quand l'orchestrateur a besoin d'une réponse (« tu veux que je lance ? », un choix entre deux approches), il la pose en texte : le propriétaire doit recopier sa réponse dans le composer, et rien ne marque la question comme en attente ni comme répondue. Le tool `question`, qui existe déjà pour les tâches, donnerait une carte de formulaire dans le chat : choix multiples, champs, réponse en un clic.
+
+Demande, deux volets :
+
+- **le chat gère le tool `question`** : activer le tool pour l'orchestrateur et rendre la question en attente comme une carte de formulaire dans le fil du chat (réutilisant le chemin des tâches : `replyForm` / `cancelQuestion`, déjà en place) ;
+- **une instruction générale** : dans `composePrompt` et les prompts d'agents, toute question attendue du lecteur passe par le tool `question`, jamais par un bloc openui-lang (`Choice`, `Input`) ; ces blocs ne sont pas rendus par le Superviseur (idée 22) et resteraient un texte mort, alors qu'une question du tool est traçable, annulable et affichée.
+
+Constat sur le code actuel :
+
+- l'orchestrateur a `question: false` (`daemon/agent/superviseur-orchestrateur.md`) : ses questions sont du texte, sans état en attente ;
+- le chemin des formulaires est déjà câblé pour les tâches : `QuestionBox` dans le panneau de détails, réponse par `/api/fleet/reply`, annulation par `/api/fleet/cancel-question` ;
+- la leçon « Les questions passent par le tool `question` » de `AGENTS.md` dit déjà pourquoi : seule une question en formulaire s'affiche avec ses boutons ; le même principe s'applique au chat du superviseur.
+
+À creuser avant d'implémenter :
+
+- **UI du chat** : réutiliser `QuestionBox` dans le fil (la question du chat vit dans la même session que le fil, donc pas de séparation carte/détail) ; le composer du chat doit rester utilisable pour répondre en texte libre, comme OpenChamber le permet ;
+- **annulation** : une question du chat doit pouvoir être annulée (l'agent reprend sans réponse), même geste que pour les tâches ; un « Nettoyer » ou une consigne suivante ne doit pas laisser une question orpheline en attente ;
+- **session bloquée** : le tool `question` met le tour en attente ; acceptable dans le chat (c'est le but), mais l'état « attend une réponse » doit être visible sur le chat lui-même, pas seulement dans OpenChamber ;
+- **abus du canal** : une seule question en attente à la fois, annulable, et l'instruction interdit les questions rhétoriques déguisées en formulaire ; sinon le chat devient une suite de pop-ups ;
+- **portée de l'instruction** : la règle « question = tool `question`, jamais openui-lang » s'écrit dans `composePrompt` (les tâches naissent hors de ce repo) et dans les prompts des agents du Superviseur ; le plugin `superviseur-task` peut porter le même garde-fou dans la description du tool ;
+- **articulation avec l'idée 22** : openui-lang reste pour la structure (étapes, tableaux, graphiques), `question` pour ce qui attend une réponse ; les deux instructions se rédigent ensemble.
+
+Lien : idée « rendre les blocs `openui-lang` » (la complémentarité des deux canaux), leçon « Les questions passent par le tool `question` » dans `AGENTS.md`, `ui/src/components/QuestionBox.tsx`, `ui/src/lib/api.ts` (`replyForm`, `cancelQuestion`), doc [mvp1/chat-superviseur.md](../mvp1/chat-superviseur.md).

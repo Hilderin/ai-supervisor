@@ -1,14 +1,14 @@
 import { useEffect, useState } from 'react';
 import type { CardState } from '../lib/cardState';
 import { cx } from '../lib/cx';
-import type { TodoStep } from '../types';
+import type { PlanStep } from '../types';
 import { ChevronIcon } from './Icons';
 
 interface Props {
   /** la préférence manuelle vit par carte ; session id = clé */
   sessionId: string;
   state: CardState;
-  steps: TodoStep[];
+  steps: PlanStep[];
   done: number;
   total: number;
 }
@@ -25,7 +25,7 @@ export function planDefaultOpen(state: CardState): boolean {
 const manualPref = new Map<string, boolean>();
 
 /** Étapes numérotées avec leur état ; partagées par la bulle (carte) et cette section (détail). */
-export function PlanSteps({ steps }: { steps: TodoStep[] }) {
+export function PlanSteps({ steps }: { steps: PlanStep[] }) {
   return (
     <ol className="flex flex-col gap-[5px]">
       {steps.map((step, i) => (

@@ -1,4 +1,4 @@
-import type { Delivery, Fleet, SupervisorProject, SupervisorState, TaskAnswer } from '../types';
+import type { Criterion, CriteriaCounts, Delivery, Fleet, SupervisorProject, SupervisorState, TaskAnswer } from '../types';
 
 async function post(path: string, body: unknown): Promise<void> {
   const res = await fetch(path, {
@@ -136,4 +136,15 @@ export async function ackAnswers(sessionId: string, ids?: number[]): Promise<voi
 /** Annule un formulaire en attente : l'agent reprend sans réponse. */
 export async function cancelQuestion(sessionId: string, formId: string, message?: string): Promise<void> {
   await post('/api/fleet/cancel-question', { sessionId, formId, message });
+}
+
+/** Liste détaillée des critères de la tâche, à la demande (la flotte ne transporte que les comptes). */
+export async function fetchCriteria(sessionId: string, signal?: AbortSignal): Promise<{ criteria: Criterion[]; counts: CriteriaCounts }> {
+  const res = await fetch(`/api/fleet/criteria?sessionId=${encodeURIComponent(sessionId)}`, {
+    cache: 'no-store',
+    signal,
+  });
+  if (!res.ok) throw new Error(String(res.status));
+  const body = (await res.json()) as { criteria?: Criterion[]; counts?: CriteriaCounts };
+  return { criteria: body.criteria ?? [], counts: body.counts ?? { total: 0, todo: 0, toValidate: 0, toFix: 0, validated: 0 } };
 }

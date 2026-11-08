@@ -1,0 +1,8 @@
+{
+  "name": "superviseur-criteria",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "SuperviseurCriteria : criteria_add / criteria_remove / criteria_update / criteria_to_validate / criteria_list, machine à états côté daemon",
+  "exports": "./index.js"
+}

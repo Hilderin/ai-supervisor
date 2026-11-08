@@ -10,8 +10,8 @@ import { useFleetStore } from '../store/fleetStore';
 import type { FleetRow } from '../types';
 import { CardStateIcon } from './CardStateIcon';
 import { Composer } from './Composer';
-import { ConfidenceDots } from './ConfidenceDots';
 import { AnswersSection } from './AnswersSection';
+import { CriteriaSection } from './CriteriaSection';
 import { DeliveryBlock } from './DeliveryBlock';
 import { OpenChamberIcon } from './Icons';
 import { PlanSection } from './PlanSection';
@@ -50,10 +50,8 @@ export function TaskInspector({ row, state, now, onClose, onOpenChamber }: Props
     : '';
   const dir = dirName(row.dir);
 
-  const todoSteps = row.todo?.steps ?? [];
+  const planSteps = row.plan?.steps ?? [];
   const progress = row.sup?.progress != null ? Math.max(0, Math.min(100, Number(row.sup.progress))) : null;
-  const rawConf = row.sup?.confiance;
-  const conf = rawConf == null ? null : Math.max(0, Math.min(1, rawConf));
 
   useEffect(() => {
     previousFocus.current = document.activeElement as HTMLElement | null;
@@ -127,7 +125,6 @@ export function TaskInspector({ row, state, now, onClose, onOpenChamber }: Props
           </span>
           {dir ? <span className="min-w-0 truncate text-muted" title={row.dir}>{dir}</span> : null}
           <span className="flex-1" />
-          <ConfidenceDots conf={conf} note={row.sup?.note} />
         </div>
       </div>
 
@@ -158,19 +155,28 @@ export function TaskInspector({ row, state, now, onClose, onOpenChamber }: Props
         </div>
         {attend ? <div className="mt-[4px] text-[13px] text-attend">✋ {attend}</div> : null}
 
-        {todoSteps.length ? (
+        {planSteps.length ? (
           <PlanSection
             sessionId={row.id}
             state={state}
-            steps={todoSteps}
-            done={row.todo?.done ?? 0}
-            total={row.todo?.total ?? 0}
+            steps={planSteps}
+            done={row.plan?.done ?? 0}
+            total={row.plan?.total ?? 0}
           />
         ) : (
           <div className="mt-[12px] text-[11.5px] text-muted">
             {progress != null ? `${Math.round(progress)} %` : 'pas de plan'}
           </div>
         )}
+
+        {row.criteria?.total ? (
+          <CriteriaSection
+            sessionId={row.id}
+            state={state}
+            refreshKey={`${row.lastUpdateAt ?? 0}:${row.turnStartedAt ?? 0}`}
+            counts={row.criteria}
+          />
+        ) : null}
 
         <AnswersSection
           sessionId={row.id}

@@ -8,7 +8,9 @@ tools:
   glob: false
   grep: false
   webfetch: false
-  todowrite: false
+  planwrite: false
+  planupdate: false
+  planread: false
   question: false
   task: false
   execute: false
@@ -43,7 +45,7 @@ Tu es le superviseur de la flotte. Tu parles au propriétaire humain. Le préamb
 
 - `list_projects` : retrouver un projet et son dossier.
 - `list_tasks` : voir la flotte, les résumés du compagnon et les questions en attente.
-- `get_task` : lire le détail borné d'une tâche.
+- `get_task` : lire le détail borné d'une tâche (plan, comptes de critères, livraison).
 - `start_task` : créer une session de travail top-level, avec son goal et son brief.
 - `send_task` : envoyer un texte à une tâche existante, sur ordre explicite. Si une question attend, l'outil l'annule d'abord.
 - `cancel_question` : annuler explicitement la question en attente d'une tâche.

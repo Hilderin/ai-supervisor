@@ -8,19 +8,19 @@ import { useNow } from '../hooks/useNow';
 import { cardState } from '../lib/cardState';
 import { useFleetStore } from '../store/fleetStore';
 import type { CardState } from '../lib/cardState';
-import type { Fleet, FleetRow, TodoStep } from '../types';
+import type { Fleet, FleetRow, PlanStep } from '../types';
 
 /**
  * Repro deterministe du flicker (mode debug, hors app) :
  * bun run dev puis http://localhost:5173/repro-flicker.html?fen=500&cycle=3000
  *
  * Rejoue le cycle reel du daemon (daemon/src/fleet.mts, runPoll) :
- * 1. a chaque `cycle` ms : un snapshot ENRICHE (todo + sup.progress du plan),
+ * 1. a chaque `cycle` ms : un snapshot ENRICHE (plan + sup.progress du plan),
  * 2. pendant `fen` ms ensuite : le snapshot PAS ENCORE ENRICHE observe en
  *    production (capture SSE du 2026-11-07, t+84 s / t+155 s / t+175 s) :
- *    todo absent, sup.progress = la valeur du verdict du compagnon (pas celle
+ *    plan absent, sup.progress = la valeur du verdict du compagnon (pas celle
  *    du plan), voire sup strippé. La fenêtre = la durée du fetch
- *    /api/session/:id/message capté à chaque cache-miss de todos.mts.
+ *    /api/session/:id/message capté à chaque cache-miss de plan.mts.
  *
  * Sans le fix, l'UI échantillonne la fenêtre (SSE 500 ms + poll 3 s) :
  * la section « Plan » du détail est démontée/remontée, la barre de la carte
@@ -33,7 +33,7 @@ function useQueryInt(name: string, fallback: number): number {
   return Number.isFinite(v) && v > 0 ? v : fallback;
 }
 
-const STEPS: TodoStep[] = [
+const STEPS: PlanStep[] = [
   { text: 'Lire les docs de conception', status: 'completed' },
   { text: 'Analyser le flux SSE vs GET', status: 'completed' },
   { text: 'Écrire la page de repro', status: 'completed' },
@@ -44,13 +44,13 @@ const STEPS: TodoStep[] = [
   { text: 'Nettoyer le mode debug', status: 'pending' },
 ];
 
-const IDEAS_STEPS: TodoStep[] = [
+const IDEAS_STEPS: PlanStep[] = [
   { text: 'Collecter les demandes', status: 'completed' },
   { text: 'Découper les chantiers', status: 'completed' },
   { text: 'Rédiger la note', status: 'completed' },
 ];
 
-const AUTO_STEPS: TodoStep[] = [
+const AUTO_STEPS: PlanStep[] = [
   { text: 'Armé par le registre', status: 'completed' },
   { text: 'Session relancée', status: 'completed' },
   { text: 'Vérifier le verdict', status: 'completed' },
@@ -60,7 +60,7 @@ const AUTO_STEPS: TodoStep[] = [
 
 function row(id: string, title: string, kind: 'enriched' | 'window'): FleetRow {
   if (id === 'ses_repro_diag') {
-    // fenêtre : todo absent et progress 0 (le verdict du compagnon, PAS 38 du plan)
+    // fenêtre : plan absent et progress 0 (le verdict du compagnon, PAS 38 du plan)
     return {
       id,
       title,
@@ -71,9 +71,9 @@ function row(id: string, title: string, kind: 'enriched' | 'window'): FleetRow {
       pendingForms: [],
       pendingPermissions: [],
       sup: kind === 'window'
-        ? { resume: 'Réflexion en cours...', confiance: 0.4, progress: 0, termine: false, at: 1 }
-        : { resume: 'Le diagnostic est posé : publication avant enrichissement.', confiance: 0.7, progress: 38, termine: false, at: 1 },
-      todo: kind === 'window' ? undefined : { done: 3, total: 8, steps: STEPS },
+        ? { resume: 'Réflexion en cours...', progress: 0, termine: false, at: 1 }
+        : { resume: 'Le diagnostic est posé : publication avant enrichissement.', progress: 38, termine: false, at: 1 },
+      plan: kind === 'window' ? undefined : { done: 3, total: 8, steps: STEPS },
     } as FleetRow;
   }
   if (id === 'ses_repro_auto') {
@@ -86,8 +86,8 @@ function row(id: string, title: string, kind: 'enriched' | 'window'): FleetRow {
       lastUpdateAt: Date.now(),
       pendingForms: [],
       pendingPermissions: [],
-      sup: { resume: 'Consultation en cours...', confiance: 0.5, progress: 99, termine: false, at: 1 },
-      todo: kind === 'window' ? undefined : { done: 5, total: 5, steps: AUTO_STEPS },
+      sup: { resume: 'Consultation en cours...', progress: 99, termine: false, at: 1 },
+      plan: kind === 'window' ? undefined : { done: 5, total: 5, steps: AUTO_STEPS },
     } as FleetRow;
   }
   return {
@@ -100,8 +100,8 @@ function row(id: string, title: string, kind: 'enriched' | 'window'): FleetRow {
     pendingForms: [],
     pendingPermissions: [],
     // fenêtre : sup strippé (conforme à la capture : progress absent, resume absent)
-    sup: kind === 'window' ? { at: 1 } : { resume: 'En attente de validation.', confiance: 0.6, progress: 99, termine: false, at: 1 },
-    todo: kind === 'window' ? undefined : { done: 3, total: 3, steps: IDEAS_STEPS },
+    sup: kind === 'window' ? { at: 1 } : { resume: 'En attente de validation.', progress: 99, termine: false, at: 1 },
+    plan: kind === 'window' ? undefined : { done: 3, total: 3, steps: IDEAS_STEPS },
   } as FleetRow;
 }
 

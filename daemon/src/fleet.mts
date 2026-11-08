@@ -16,10 +16,12 @@ export interface OpenchamberSession {
   metadata?: { openchamber?: { work?: { state?: string }, turn?: { durationMs?: number } } };
 }
 import { companionTick, verdictOf } from './companion.mts';
+import { verifierTick } from './verifier.mts';
 import { setBase as setResumeBase, resumeTick } from './resume.mts';
 import { getSupervisorSession } from './state.mts';
 import { SUPERVISOR_DIR } from './supervisor.mts';
-import { getTodoSnapshot } from './todos.mts';
+import { getPlanSnapshot } from './plan.mts';
+import { criteriaCounts, listCriteria, type CriteriaCounts } from './criteria.mts';
 import { SessionIssueTracker, type SessionIssue } from './session-issues.mts';
 import type { WaitInfo } from './verdict.mts';
 
@@ -27,17 +29,15 @@ const sessionIssues = new SessionIssueTracker();
 
 function supOf(id: string): Verdict | undefined {
   const v = verdictOf(id) as {
-    resume?: string; confiance?: number | null; progress?: number | null; termine?: number;
-    attend?: string; note?: string; at?: number; state?: string; human_source?: string; next?: string;
+    resume?: string; progress?: number | null; termine?: number;
+    attend?: string; at?: number; state?: string; human_source?: string; next?: string;
   } | null;
   if (!v) return undefined;
   return {
     resume: v.resume ?? undefined,
-    confiance: v.confiance ?? undefined,
     progress: v.progress ?? undefined,
     termine: !!v.termine,
     attend: v.attend ?? undefined,
-    note: v.note ?? undefined,
     at: v.at ?? undefined,
     state: (v.state as Verdict['state']) ?? undefined,
     humanSource: (v.human_source as Verdict['humanSource']) ?? undefined,
@@ -57,12 +57,14 @@ export interface FleetRow {
   turnStartedAt?: number; lastUpdateAt?: number;
   busy?: number | null; idle?: number | null;
   pendingForms: PendingForm[]; pendingPermissions: unknown[];
-  /** plan de la session de travail (`todowrite`) */
-  todo?: { done: number; total: number; steps: Array<{ text: string; status: string }> };
+  /** plan de la session de travail (`planwrite`) */
+  plan?: { done: number; total: number; steps: Array<{ text: string; status: string }> };
+  /** critères d'acceptation : comptes par état (la liste détaillée se charge à la demande) */
+  criteria?: CriteriaCounts;
 }
 export interface Verdict {
-  resume?: string; confiance?: number | null; progress?: number | null; termine?: boolean;
-  attend?: string; note?: string; at?: number;
+  resume?: string; progress?: number | null; termine?: boolean;
+  attend?: string; at?: number;
   state?: 'working' | 'waiting_human' | 'done' | 'blocked';
   humanSource?: 'question_tool' | 'permission' | 'agent_ask' | 'none';
   next?: string;
@@ -116,12 +118,12 @@ function buildFleet(status: StatusPayload): Fleet {
     const pendingForms = (status.pending?.[id]?.forms ?? []).filter(f => f?.metadata?.kind === 'question');
     const pendingPermissions = status.pending?.[id]?.permissions ?? [];
     // le verdict appartient au tour précédent ? (prompt renvoyé depuis la dernière analyse)
-    // → strip résumé/confiance/attend : la carte repasse en « Réflexion en cours »
+    // → strip résumé/attend : la carte repasse en « Réflexion en cours »
     const supRaw = supOf(id);
     const staleBusy = !!(supRaw && s.status === 'busy' && supRaw.at && s.turnStartedAt && supRaw.at < s.turnStartedAt);
     // verdict écrit avant la dernière activité du tour : ne pas afficher un
     // résumé périmé (souvent « rien n'a encore été produit ») à côté d'une
-    // livraison fraîche. On garde la progression des todos, on attend le bilan.
+    // livraison fraîche. On garde la progression du plan, on attend le bilan.
     const staleIdle = !!(supRaw && !supRaw.termine && s.status !== 'busy' && (supRaw.at ?? 0) < (s.lastUpdateAt ?? 0));
     const sup = staleBusy
       ? { at: supRaw!.at }
@@ -172,14 +174,14 @@ function buildFleet(status: StatusPayload): Fleet {
   return { at: Date.now(), rows, concern };
 }
 
-/** Progression : uniquement le plan `todowrite` de la session de travail. */
-async function enrichTodoProgress(fleet: Fleet): Promise<void> {
+/** Progression : uniquement le plan `planwrite` de la session de travail. */
+async function enrichPlanProgress(fleet: Fleet): Promise<void> {
   // Séquentiel : un premier poll ne doit pas lancer 15 lectures de 80 messages
   // en parallèle sur OpenChamber (réponses vides / timeouts observés).
   for (const row of fleet.rows) {
-    const snap = await getTodoSnapshot(row.id, row.lastUpdateAt);
+    const snap = await getPlanSnapshot(row.id, row.lastUpdateAt);
     if (snap.total > 0) {
-      row.todo = {
+      row.plan = {
         done: snap.done,
         total: snap.total,
         steps: snap.items.map(i => ({ text: i.content, status: i.status })),
@@ -193,6 +195,15 @@ async function enrichTodoProgress(fleet: Fleet): Promise<void> {
       // terminé reste à 100 même sans plan (règle done ⇒ 100)
       row.sup = { ...row.sup, progress: row.sup.termine ? 100 : null };
     }
+  }
+}
+
+/** Comptes critères par carte : enrichis avec le plan, jamais dans une frame
+ *  intermédiaire (même garde anti-flicker que enrichPlanProgress). */
+function enrichCriteriaCounts(fleet: Fleet): void {
+  for (const row of fleet.rows) {
+    const counts = criteriaCounts(listCriteria(row.id));
+    if (counts.total > 0) row.criteria = counts;
   }
 }
 
@@ -215,12 +226,13 @@ async function runPoll(): Promise<void> {
       } catch { /* garde l'ancien annuaire */ }
     }
     // Publier UNIQUEMENT des snapshots entièrement enrichis : entre buildFleet
-    // et enrichTodoProgress, la flotte exposait des frames sans `todo` (progress
+    // et enrichPlanProgress, la flotte exposait des frames sans `plan` (progress
     // du verdict au lieu du plan). Cette fenêtre (~500 ms du fetch /message) était
     // échantillonnée par le SSE 500 ms et le poll 3 s de l'UI : barres qui se
     // relancent (38 % → 0 → 38 %) et section Plan du détail démontée/remontée.
     const fleet = buildFleet(status);
-    await enrichTodoProgress(fleet);
+    await enrichPlanProgress(fleet);
+    enrichCriteriaCounts(fleet);
     cachedFleet = fleet;
     lastGood = Date.now();
     // l'attente humaine est décidée par les formulaires/permissions réels, pas par le LLM
@@ -249,6 +261,10 @@ async function runPoll(): Promise<void> {
     );
     void companionTick(tickSessions, status.sessions ?? {}, waitingMap)
       .catch(() => { /* l'analyse compagnon réessaie au prochain tick */ });
+    // vérificateur des critères : déclenché par les tool criteria, les preuves
+    // en attente et les fins de tour (verifier-kicks)
+    void verifierTick(tickSessions, status.sessions ?? {})
+      .catch(() => { /* une phase ratée réessaie au prochain tick */ });
     // auto-restart : une tâche armée dont la session a été détruite repart sur
     // une session neuve (modèle default courant), registre task_resume.
     // Les archivées ne comptent pas comme vivantes : être dans l'annuaire avec

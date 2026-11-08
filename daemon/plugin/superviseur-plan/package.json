@@ -1,0 +1,8 @@
+{
+  "name": "superviseur-plan",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "SuperviseurPlan : planwrite / planupdate / planread, plan par session, survit à la compaction",
+  "exports": "./index.js"
+}

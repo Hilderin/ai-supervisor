@@ -5,11 +5,9 @@ export type HumanSource = 'question_tool' | 'permission' | 'agent_ask' | 'none';
 
 export interface Verdict {
   resume?: string;
-  confiance?: number | null;
   progress?: number | null;
   termine?: boolean;
   attend?: string;
-  note?: string;
   at?: number;
   state?: VerdictState;
   humanSource?: HumanSource;
@@ -44,11 +42,48 @@ export interface PendingPermission {
   [key: string]: unknown;
 }
 
-export type TodoStatus = 'pending' | 'in_progress' | 'completed';
+export type PlanStepStatus = 'pending' | 'in_progress' | 'completed';
 
-export interface TodoStep {
+export interface PlanStep {
   text: string;
-  status: TodoStatus;
+  status: PlanStepStatus;
+}
+
+/* --- Critères d'acceptation (docs/analyses/mvp1/criteres-acceptation.md) --- */
+
+export type CriterionStatus = 'todo' | 'to_validate' | 'to_fix' | 'validated';
+
+/** Preuve soumise avec `criteria_to_validate`. */
+export interface EvidenceItem {
+  kind: string;
+  text: string;
+  path?: string;
+  start_line?: number;
+  line_count?: number;
+  at: number;
+}
+
+export interface Criterion {
+  id: number;
+  task_id: string;
+  ref: string;
+  title: string;
+  detail: string | null;
+  methods: string[];
+  status: CriterionStatus;
+  evidence: EvidenceItem[];
+  review: string | null;
+  review_at: number | null;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface CriteriaCounts {
+  total: number;
+  todo: number;
+  toValidate: number;
+  toFix: number;
+  validated: number;
 }
 
 export interface FleetRow {
@@ -74,8 +109,10 @@ export interface FleetRow {
   pendingPermissions: PendingPermission[];
   /** ajouté par GET /api/fleet (pas par le SSE) */
   task?: { closed_at?: number } | null;
-  /** plan de la session de travail (`todowrite`) */
-  todo?: { done: number; total: number; steps: TodoStep[] };
+  /** plan de la session de travail (`planwrite`) */
+  plan?: { done: number; total: number; steps: PlanStep[] };
+  /** critères d'acceptation : comptes par état (la liste détaillée se charge à la demande) */
+  criteria?: CriteriaCounts;
   /** réponses au propriétaire (tool `answer`) pas encore lues (« Got it ») */
   unreadAnswers?: number;
 }

@@ -1,0 +1,8 @@
+{
+  "name": "superviseur-verifier",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "SuperviseurVerifier : lectures bornées de la conversation de l'agent principal, pour le sous-agent vérificateur",
+  "exports": "./index.js"
+}

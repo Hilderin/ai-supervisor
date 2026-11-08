@@ -1,8 +1,0 @@
-{
-  "name": "superviseur-todolist",
-  "version": "0.1.0",
-  "private": true,
-  "type": "module",
-  "description": "SuperviseurTodoList : todowrite / todoupdate / todoread, liste par session, survit à la compaction",
-  "exports": "./index.js"
-}

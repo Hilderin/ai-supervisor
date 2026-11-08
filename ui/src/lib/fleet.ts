@@ -5,7 +5,7 @@ export const BUSY_BRIEF = 'Réflexion en cours...';
 
 /**
  * Le verdict appartient au tour précédent (un prompt a été renvoyé depuis l'analyse) :
- * le daemon a déjà retiré resume/confiance/attend, la carte repasse en « Réflexion en cours... ».
+ * le daemon a déjà retiré resume/attend, la carte repasse en « Réflexion en cours... ».
  */
 export function isStaleTurn(row: FleetRow): boolean {
   return (
@@ -57,14 +57,14 @@ export function briefRow(row: FleetRow, waiting: boolean, now: number): string {
  * commencé, on annonce alors la taille du plan. Un plan terminé affiche 100 %.
  */
 export function planLabel(
-  todo: FleetRow['todo'],
+  plan: FleetRow['plan'],
   shownDone: boolean,
   progress: number,
 ): string {
-  if (!todo || shownDone) return `${Math.round(progress)} %`;
-  const steps = todo.steps ?? [];
-  const started = todo.done > 0 || steps.some((step) => step.status === 'in_progress');
-  return started ? `${todo.done}/${todo.total}` : `${todo.total} étapes`;
+  if (!plan || shownDone) return `${Math.round(progress)} %`;
+  const steps = plan.steps ?? [];
+  const started = plan.done > 0 || steps.some((step) => step.status === 'in_progress');
+  return started ? `${plan.done}/${plan.total}` : `${plan.total} étapes`;
 }
 
 /**
@@ -87,14 +87,4 @@ export function taskTitleOf(
 export function dirName(dir?: string): string {
   if (!dir) return '';
   return dir.split('/').pop() ?? dir;
-}
-
-export function confidenceLevel(conf: number | null): number {
-  if (conf == null) return 0;
-  return conf < 0.35 ? 1 : conf < 0.7 ? 2 : 3;
-}
-
-export function confidenceColor(conf: number | null): string | null {
-  if (conf == null) return null;
-  return conf < 0.35 ? '#d95f5f' : conf < 0.7 ? '#d19a2f' : '#2b9f6a';
 }

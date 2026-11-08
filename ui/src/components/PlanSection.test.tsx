@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
-import type { TodoStep } from '../types';
+import type { PlanStep } from '../types';
 import { PlanSection, PlanSteps, planDefaultOpen } from './PlanSection';
 
-const steps: TodoStep[] = [
+const steps: PlanStep[] = [
   { text: 'Explorer le code', status: 'completed' },
   { text: 'Écrire le composant', status: 'in_progress' },
   { text: 'Tester', status: 'pending' },

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { isClosedRow } from '../store/fleetStore';
 import type { Fleet, FleetRow } from '../types';
-import { briefRow, fmtAge, isDone, isStaleTurn, confidenceColor, confidenceLevel, planLabel, taskTitleOf } from './fleet';
+import { briefRow, fmtAge, isDone, isStaleTurn, planLabel, taskTitleOf } from './fleet';
 
 const row = (over: Partial<FleetRow>): FleetRow => ({
   id: 'ses_test',
@@ -49,28 +49,28 @@ describe('isDone / isStaleTurn', () => {
 });
 
 describe('planLabel', () => {
-  const todo = (done: number, statuses: Array<'pending' | 'in_progress' | 'completed'>) => ({
+  const plan = (done: number, statuses: Array<'pending' | 'in_progress' | 'completed'>) => ({
     done,
     total: statuses.length,
     steps: statuses.map((status) => ({ text: 'étape', status })),
   });
 
   test('plan non commencé → taille du plan, jamais 0/N', () => {
-    expect(planLabel(todo(0, ['pending', 'pending', 'pending', 'pending', 'pending']), false, 0)).toBe(
+    expect(planLabel(plan(0, ['pending', 'pending', 'pending', 'pending', 'pending']), false, 0)).toBe(
       '5 étapes',
     );
   });
 
   test('une étape en cours → 0/N est honnête', () => {
-    expect(planLabel(todo(0, ['in_progress', 'pending']), false, 0)).toBe('0/2');
+    expect(planLabel(plan(0, ['in_progress', 'pending']), false, 0)).toBe('0/2');
   });
 
   test('plan commencé → étapes faites / total', () => {
-    expect(planLabel(todo(2, ['completed', 'completed', 'pending']), false, 66)).toBe('2/3');
+    expect(planLabel(plan(2, ['completed', 'completed', 'pending']), false, 66)).toBe('2/3');
   });
 
   test('tâche terminée → pourcentage', () => {
-    expect(planLabel(todo(2, ['completed', 'completed', 'pending']), true, 100)).toBe('100 %');
+    expect(planLabel(plan(2, ['completed', 'completed', 'pending']), true, 100)).toBe('100 %');
   });
 
   test('sans plan → pourcentage du verdict', () => {
@@ -127,20 +127,6 @@ describe('briefRow / fmtAge', () => {
   });
 });
 
-describe('confiance (three dots)', () => {
-  test('conf null : non disponible → niveau 0, pas de couleur (pastilles grises)', () => {
-    expect(confidenceLevel(null)).toBe(0);
-    expect(confidenceColor(null)).toBe(null);
-  });
-
-  test('paliers : faible / moyenne / haute', () => {
-    expect(confidenceLevel(0.2)).toBe(1);
-    expect(confidenceLevel(0.5)).toBe(2);
-    expect(confidenceLevel(0.9)).toBe(3);
-    expect(confidenceColor(0.2)).toBe('#d95f5f');
-    expect(confidenceColor(0.9)).toBe('#2b9f6a');
-  });
-});
 
 describe('isClosedRow', () => {
   test('fermée sans activité postérieure → cachée', () => {

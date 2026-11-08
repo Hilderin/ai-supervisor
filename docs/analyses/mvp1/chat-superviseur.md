@@ -136,7 +136,11 @@ L'orchestrateur **consomme** les verdicts du compagnon via `list_tasks`. Il ne r
 
 L'agent est canonique dans `daemon/agent/superviseur-orchestrateur.md`, comme le compagnon, puis lié dans le projet `~/.superviseur` (ou global si le projet-local ne charge pas). Son format exact dépend de la version embarquée par OpenChamber : le spike tranche entre le frontmatter V1 et la configuration V2.
 
-Le prompt d'un agent est mis en cache **par nom**, pas par contenu. Changer le fichier ne suffit donc pas : une session créée avec le même nom peut garder l'ancien prompt. Comme pour le compagnon, le daemon doit versionner le nom (`superviseur-orchestrateur-<hash>`) et fixer l'agent **dès la création** de la session de chat. Si l'agent attendu ne correspond pas, ne pas réutiliser silencieusement la session : créer une nouvelle conversation avec le nom versionné, ou prévenir l'utilisateur. Le `send` ne l'impose pas toujours.
+Le prompt d'un agent est mis en cache **par nom**, pas par contenu. Changer le fichier ne suffit donc pas : une session créée avec le même nom peut garder l'ancien prompt. Comme pour le compagnon, le daemon versionne le nom (`superviseur-orchestrateur-<hash>`) et fixe l'agent **dès la création** de la session de chat. Le `send` ne l'impose pas toujours.
+
+Quand l'agent attendu ne correspond plus (le prompt a changé), la conversation est **conservée** : le daemon bascule son agent en place (`POST /api/session/:id/agent`, qui garde l'historique et charge le prompt du nouveau nom). Il ne crée une session que si la conversation est absente ou archivée. Remplacer la session en pleine conversation faisait disparaître le chat (2026-11-07) : le message partait dans l'ancienne session devenue orpheline et l'écran affichait une session vide.
+
+L'autorisation des outils se juge par **dossier** : toute conversation vivante de `~/.superviseur` est une conversation de supervision, pas seulement l'id stocké. Une ancienne conversation rouverte dans OpenChamber (après « Nettoyer » ou une bascule d'agent) garde donc ses outils.
 
 Allowlist :
 

@@ -105,16 +105,45 @@ CREATE TABLE IF NOT EXISTS task_answer (
   read_at INTEGER                    -- epoch ms de lecture (« Got it »), NULL = non lue
 );
 CREATE INDEX IF NOT EXISTS idx_task_answer_session ON task_answer(session_id, at);
+-- Critères d'acceptation d'une tâche (spec : docs/analyses/mvp1/criteres-acceptation.md).
+-- Le statut n'est jamais écrit directement : uniquement via les transitions de
+-- daemon/src/criteria.mts (tools criteria pour l'agent, JSON du vérificateur
+-- pour le daemon).
+CREATE TABLE IF NOT EXISTS criteria (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id TEXT NOT NULL,             -- suit la tâche migrée (migrateTaskSession)
+  ref TEXT NOT NULL,                 -- 'AC-01', stable, jamais réattribué
+  title TEXT NOT NULL,
+  detail TEXT,
+  methods TEXT NOT NULL,             -- JSON array
+  status TEXT NOT NULL DEFAULT 'todo',
+  evidence TEXT,                     -- JSON array {kind, text, path, start_line, line_count, at}
+  review TEXT,                       -- dernier commentaire du vérificateur
+  review_at INTEGER,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  UNIQUE(task_id, ref)
+);
+CREATE INDEX IF NOT EXISTS idx_criteria_task ON criteria(task_id);
+-- Session du vérificateur (sous-conversation enfant, une seule par tâche,
+-- réutilisée pour toutes les vérifications) ; comme companion_map.
+CREATE TABLE IF NOT EXISTS verifier_map (
+  parent_session_id TEXT PRIMARY KEY,
+  verifier_session_id TEXT NOT NULL,
+  agent TEXT,
+  created_at INTEGER NOT NULL
+);
 `);
 try { db.exec('ALTER TABLE task_verdict ADD COLUMN note TEXT'); } catch { /* colonne déjà présente */ }
 try { db.exec('ALTER TABLE companion_map ADD COLUMN version INTEGER'); } catch { /* colonne déjà présente */ }
 // nom exact de l'agent versionné utilisé par le compagnon (le prompt est mis en cache par nom)
-try { db.exec('ALTER TABLE companion_map ADD COLUMN agent TEXT'); } catch { /* colonne déjà présente */ }
-// objectif courant + plan : une nouvelle consigne change l'objectif, pas seulement le tour
+try { db.exec('ALTER TABLE companion_map ADD COLUMN agent TEXT'); } catch { /* colonne déjà présente */ }// objectif courant + plan : une nouvelle consigne change l'objectif, pas seulement le tour
 try { db.exec('ALTER TABLE task_state ADD COLUMN objective TEXT'); } catch { /* colonne déjà présente */ }
 try { db.exec('ALTER TABLE task_state ADD COLUMN objective_version INTEGER'); } catch { /* colonne déjà présente */ }
 try { db.exec('ALTER TABLE task_state ADD COLUMN last_user_id TEXT'); } catch { /* colonne déjà présente */ }
 try { db.exec('ALTER TABLE task_state ADD COLUMN plan TEXT'); } catch { /* colonne déjà présente */ }
+// compteur des refs de critères (AC-01, AC-02, ...) : un retrait ne libère pas son numéro
+try { db.exec('ALTER TABLE task_state ADD COLUMN criteria_seq INTEGER'); } catch { /* colonne déjà présente */ }
 // état sémantique du verdict (working/waiting_human/done/blocked) et provenance de l'attente
 try { db.exec('ALTER TABLE task_verdict ADD COLUMN state TEXT'); } catch { /* colonne déjà présente */ }
 try { db.exec('ALTER TABLE task_verdict ADD COLUMN human_source TEXT'); } catch { /* colonne déjà présente */ }
@@ -171,6 +200,18 @@ export function ensureAgentDefinition(version: number): string {
 
 export function getOrchestratorVersion(): number { return versionOf(orchestratorMD); }
 
+/**
+ * Vérificateur : agent global à nom FIXE (pas de hash, choix du propriétaire),
+ * une seule session par tâche, réutilisée pour toutes les vérifications.
+ * Conséquence documentée : modifier le prompt exige un redémarrage d'OpenCode
+ * (prompt mis en cache par nom).
+ */
+const verifierMD = join(dirname(fileURLToPath(import.meta.url)), '..', 'agent', 'superviseur-verificateur.md');
+export const VERIFIER_AGENT = 'superviseur-verificateur';
+export function ensureVerifierDefinition(): string {
+  return ensureDefinition(verifierMD, VERIFIER_AGENT);
+}
+
 export function orchestratorNameFor(version: number): string {
   return `superviseur-orchestrateur-${version.toString(16)}`;
 }
@@ -182,17 +223,22 @@ export function ensureOrchestratorDefinition(version: number): string {
 export function getVerdict(sessionId: string) {
   return db.query('SELECT * FROM task_verdict WHERE session_id = ?').get(sessionId) ?? null;
 }
+/**
+ * Concept de confiance retiré (2026-11-07) : les colonnes `confiance` et
+ * `note` restent dans le schéma (aucune migration destructive) mais ne sont
+ * plus écrites ; le signal de fiabilité est la liste des critères.
+ */
 export function upsertVerdict(sessionId: string, v: {
-  resume?: string; termine?: boolean; confiance?: number | null; progress?: number | null;
-  attend?: string; note?: string; state?: string; humanSource?: string; next?: string; objectiveVersion?: number;
+  resume?: string; termine?: boolean; progress?: number | null;
+  attend?: string; state?: string; humanSource?: string; next?: string; objectiveVersion?: number;
 }) {
   db.query(`INSERT INTO task_verdict (session_id, resume, confiance, progress, termine, attend, note, at, state, human_source, next, objective_version)
             VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
-            ON CONFLICT(session_id) DO UPDATE SET resume=excluded.resume, confiance=excluded.confiance,
-              progress=excluded.progress, termine=excluded.termine, attend=excluded.attend, note=excluded.note, at=excluded.at,
+            ON CONFLICT(session_id) DO UPDATE SET resume=excluded.resume,
+              progress=excluded.progress, termine=excluded.termine, attend=excluded.attend, at=excluded.at,
               state=excluded.state, human_source=excluded.human_source, next=excluded.next, objective_version=excluded.objective_version`)
-    .run(sessionId, v.resume ?? null, v.confiance ?? null, v.progress ?? null, v.termine ? 1 : 0,
-      v.attend ?? null, v.note ?? null, Date.now(), v.state ?? null, v.humanSource ?? null, v.next ?? null, v.objectiveVersion ?? null);
+    .run(sessionId, v.resume ?? null, null, v.progress ?? null, v.termine ? 1 : 0,
+      v.attend ?? null, null, Date.now(), v.state ?? null, v.humanSource ?? null, v.next ?? null, v.objectiveVersion ?? null);
 }
 
 /**
@@ -249,6 +295,23 @@ export function reopenTaskState(sid: string) {
 }
 
 export function getCompanionOut(parentSid: string): string | null { return getCompanion(parentSid); }
+
+/** Session du vérificateur d'une tâche (mapping parent → enfant). */
+export function getVerifier(parentSid: string): { verifierId: string; agent: string | null } | null {
+  const r = db.query('SELECT verifier_session_id v, agent a FROM verifier_map WHERE parent_session_id = ?')
+    .get(parentSid) as { v: string; a: string | null } | undefined;
+  return r ? { verifierId: r.v, agent: r.a } : null;
+}
+export function putVerifier(parentSid: string, verifierId: string, agent: string) {
+  db.query(`INSERT INTO verifier_map (parent_session_id, verifier_session_id, agent, created_at)
+            VALUES (?,?,?,?)
+            ON CONFLICT(parent_session_id) DO UPDATE SET verifier_session_id=excluded.verifier_session_id,
+              agent=excluded.agent, created_at=excluded.created_at`)
+    .run(parentSid, verifierId, agent, Date.now());
+}
+export function deleteVerifier(parentSid: string) {
+  db.query('DELETE FROM verifier_map WHERE parent_session_id = ?').run(parentSid);
+}
 
 export function logEvent(sessionId: string, kind: string, text: string, meta?: object) {
   db.query('INSERT INTO task_log (session_id, at, kind, text, meta) VALUES (?,?,?,?,?)')
@@ -459,10 +522,15 @@ export function migrateTaskSession(oldId: string, newId: string) {
     // les réponses au propriétaire suivent la tâche : elles restent visibles
     // dans le détail (rien ne dit qu'elles ont déjà été lues)
     db.query('UPDATE task_answer SET session_id = ? WHERE session_id = ?').run(newId, oldId);
+    // les critères suivent la tâche (refs et états conservés)
+    db.query('UPDATE criteria SET task_id = ? WHERE task_id = ?').run(newId, oldId);
     db.query('DELETE FROM task_verdict WHERE session_id = ?').run(oldId);
     // Le compagnon enfant est détruit avec son parent : la mapping ne doit pas
     // ressusciter une session morte, le nouveau parent refabrique le sien.
     db.query('DELETE FROM companion_map WHERE parent_session_id = ?').run(oldId);
+    // Le vérificateur aussi : une nouvelle session de travail repart avec un
+    // nouveau vérificateur (la liste des critères, elle, suit la tâche).
+    db.query('DELETE FROM verifier_map WHERE parent_session_id = ?').run(oldId);
     // le registre suit la tâche : la session de reprise devient la nouvelle
     db.query('UPDATE task_resume SET session_id = ?, session_since = NULL, last_seen_at = NULL WHERE session_id = ?')
       .run(newId, oldId);

@@ -15,6 +15,9 @@ import { openChamberMiniChatUrl } from './openchamber-link.mts';
 import { getSupervisorSession, logEvent, upsertTaskState, getTaskState, reopenTaskState } from './state.mts';
 import { abortSupervisor, cancelQueuedSupervisor, getSupervisorState, newSupervisorConversation, queueSupervisor, revertSupervisor, sendSupervisor, SUPERVISOR_DIR, wrapOwnerPrompt } from './supervisor.mts';
 import { cancelPendingForms, configureSupervisorMode, pendingFor, runTool, supervisorProjects } from './tools.mts';
+import { runCriteriaTool } from './criteria-tools.mts';
+import { runVerifierTool } from './verifier-tools.mts';
+import { criteriaCounts, listCriteria } from './criteria.mts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 // le build Vite (bun run build:ui) ; le daemon ne sert que des fichiers produits
@@ -217,6 +220,33 @@ async function handleApi(req: http.IncomingMessage, res: http.ServerResponse, ur
     }
     return;
   }
+  if (path.startsWith('/api/criteria/') && req.method === 'POST') {
+    // tools criteria de l'agent principal (plugin superviseur-criteria) : hors
+    // /api/tools (réservée au chat) ; la machine à états est dans criteria.mts
+    const name = path.slice('/api/criteria/'.length);
+    const body = await readBody(req);
+    const result = await runCriteriaTool(name, String(body.sessionId ?? ''), (body.args ?? {}) as Record<string, unknown>);
+    json(res, 200, result);
+    return;
+  }
+  if (path.startsWith('/api/verifier/') && req.method === 'POST') {
+    // lectures bornées du vérificateur (plugin superviseur-verifier) : l'appelant
+    // doit être le vérificateur mappé de la tâche
+    const name = path.slice('/api/verifier/'.length);
+    const body = await readBody(req);
+    const result = await runVerifierTool(name, String(body.sessionId ?? ''), (body.args ?? {}) as Record<string, unknown>);
+    json(res, 200, result);
+    return;
+  }
+  if (path === '/api/fleet/criteria' && req.method === 'GET') {
+    // liste détaillée des critères d'une tâche, à la demande (la flotte ne
+    // transporte que les comptes) ; rechargée quand lastUpdateAt change
+    const sessionId = (url.searchParams.get('sessionId') ?? '').trim();
+    if (!sessionId) { json(res, 400, { error: 'sessionId requis' }); return; }
+    const rows = listCriteria(sessionId);
+    json(res, 200, { sessionId, criteria: rows, counts: criteriaCounts(rows) });
+    return;
+  }
   if (path === '/api/fleet/answers' && req.method === 'GET') {
     // panel de détails : toutes les réponses de la tâche, lues et non lues.
     const sessionId = (url.searchParams.get('sessionId') ?? '').trim();
@@ -323,7 +353,7 @@ async function handleApi(req: http.IncomingMessage, res: http.ServerResponse, ur
       }
       logEvent(sessionId, 'note', '→ prompt : ' + text.slice(0, 120));
       // même encadrement que le chat : l'instruction du propriétaire demande
-      // la mise à jour de la todolist, et le texte brut reste dans le journal
+      // la mise à jour du plan, et le texte brut reste dans le journal
       const out = await relay(`/api/session/${sessionId}/prompt`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: wrapOwnerPrompt(text), delivery: body.delivery ?? 'steer' }),

@@ -49,7 +49,7 @@ describe('TaskInspector', () => {
       { text: 'a', status: 'completed' as const },
       { text: 'b', status: 'pending' as const },
     ];
-    const html = renderInspector(row({ sup: { resume: 'r', at: 1 }, todo: { done: 1, total: 2, steps } }));
+    const html = renderInspector(row({ sup: { resume: 'r', at: 1 }, plan: { done: 1, total: 2, steps } }));
     expect(html).toContain('Plan');
     expect(html).toContain('1/2'); // badge du plan
     expect(html).not.toContain('bg-track'); // la barre a disparu du détail

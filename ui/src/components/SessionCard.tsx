@@ -8,7 +8,6 @@ import { BUSY_BRIEF, briefRow, isStaleTurn, planLabel } from '../lib/fleet';
 import { useFleetStore } from '../store/fleetStore';
 import type { FleetRow } from '../types';
 import { CardStateIcon } from './CardStateIcon';
-import { ConfidenceDots } from './ConfidenceDots';
 import { DeliveryBlock } from './DeliveryBlock';
 import { CloseConversationIcon, OpenChamberIcon } from './Icons';
 import { PlanPopover } from './PlanPopover';
@@ -50,19 +49,22 @@ export function SessionCard({ row, state, selected, flash, now, onOpen, onOpenCh
   const brief = issue?.message || (issue ? cardStateLabel(state, waitingKind) : stale ? BUSY_BRIEF : row.sup?.resume || briefRow(row, waiting, now));
   const stateLabel = cardStateLabel(state, waitingKind);
 
-  const hasProgress = row.sup?.progress != null || !!row.todo;
+  const hasProgress = row.sup?.progress != null || !!row.plan;
   const progress = row.sup?.progress != null ? Math.max(0, Math.min(100, Number(row.sup.progress))) : 0;
-  const todoSteps = row.todo?.steps ?? [];
-  const progressLabel = planLabel(row.todo, done, progress);
-  const rawConf = row.sup?.confiance;
-  const conf = rawConf == null ? null : Math.max(0, Math.min(1, rawConf));
+  const planSteps = row.plan?.steps ?? [];
+  const progressLabel = planLabel(row.plan, done, progress);
   const attend = row.sup?.attend && (waiting || row.sup.humanSource === 'agent_ask') ? row.sup.attend : '';
+  // critères : deuxième barre au même format que celle du plan, à sa droite ;
+  // masquée sans critère (même règle que la barre du plan sans plan)
+  const crit = row.criteria;
+  const critTotal = crit?.total ?? 0;
+  const critValidated = crit?.validated ?? 0;
   // réponses au propriétaire (tool answer) pas encore lues : le badge vit dans
   // en-tête, il ne change ni l'état ni la section de la carte
   const unreadAnswers = row.unreadAnswers ?? 0;
   const currentStep =
-    row.todo?.steps?.find((step) => step.status === 'in_progress') ??
-    row.todo?.steps?.find((step) => step.status === 'pending');
+    row.plan?.steps?.find((step) => step.status === 'in_progress') ??
+    row.plan?.steps?.find((step) => step.status === 'pending');
   const questionText = form
     ? (form.fields?.[0]?.description ?? form.fields?.[0]?.title ?? form.title ?? 'question en attente')
     : perm
@@ -256,12 +258,12 @@ export function SessionCard({ row, state, selected, flash, now, onOpen, onOpenCh
           ) : null}
         </span>
         {hasProgress ? (
-          todoSteps.length ? (
+          planSteps.length ? (
             <PlanPopover
               label={progressLabel}
-              steps={todoSteps}
-              done={row.todo?.done ?? 0}
-              total={row.todo?.total ?? 0}
+              steps={planSteps}
+              done={row.plan?.done ?? 0}
+              total={row.plan?.total ?? 0}
             />
           ) : (
             <span className="w-[34px] shrink-0 text-right text-[11.5px] font-[650] tabular-nums">
@@ -271,8 +273,29 @@ export function SessionCard({ row, state, selected, flash, now, onOpen, onOpenCh
         ) : (
           <span className="w-[34px] shrink-0" />
         )}
+        {critTotal > 0 ? (
+          <>
+            <span
+              className="h-[5px] w-[80px] shrink-0 overflow-hidden rounded-[3px] bg-track"
+              aria-label={`Critères : ${critValidated} validés sur ${critTotal}`}
+            >
+              <span
+                className={cx(
+                  'block h-full transition-[width] duration-500',
+                  critValidated >= critTotal ? 'bg-green' : 'bg-amber',
+                )}
+                style={{ width: `${Math.round((critValidated / critTotal) * 100)}%` }}
+              />
+            </span>
+            <span
+              title={`Critères : ${critValidated} validés sur ${critTotal}`}
+              className="w-[34px] shrink-0 text-right text-[11.5px] font-[650] tabular-nums"
+            >
+              {critValidated}/{critTotal}
+            </span>
+          </>
+        ) : null}
         <span className="flex-1" />
-        <ConfidenceDots conf={conf} note={row.sup?.note} />
         <button
           type="button"
           title={

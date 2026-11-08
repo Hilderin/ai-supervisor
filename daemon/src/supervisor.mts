@@ -187,14 +187,45 @@ export function ensureSupervisorWorkspace(): string {
   return SUPERVISOR_DIR;
 }
 
-async function sessionExists(id: string): Promise<boolean> {
+/**
+ * Session vivante, lue par id : ni supprimée ni archivée. Une lecture directe
+ * évite le listing paginé, où la session de supervision peut manquer (et une
+ * absence passagère suffisait à créer une nouvelle conversation).
+ */
+async function liveSessionMeta(id: string): Promise<SessionMeta | null> {
+  const meta = await sessionMeta(id);
+  if (!meta?.id || meta.time?.archived) return null;
+  return meta;
+}
+
+/**
+ * Que faire de la conversation de supervision ?
+ * Un changement de version du prompt ne doit JAMAIS la remplacer : la
+ * conversation est conservée et son agent bascule en place sur le nom versionné
+ * (`POST /api/session/:id/agent`), qui charge le nouveau prompt.
+ */
+export function supervisorSessionAction(p: {
+  exists: boolean;
+  sessionAgent: string | null;
+  agent: string;
+}): 'create' | 'switch' | 'reuse' {
+  if (!p.exists) return 'create';
+  return p.sessionAgent === p.agent ? 'reuse' : 'switch';
+}
+
+/** Bascule l'agent d'une session vivante : l'historique et les messages restent. */
+async function switchSessionAgent(id: string, agent: string): Promise<boolean> {
   try {
-    const list = await jget('/api/session?limit=200') as { data?: Array<{ id?: string; time?: { archived?: number } }> };
-    const found = (list.data ?? []).find(s => s.id === id);
-    return !!found && !found.time?.archived;
+    const out = await jpost(`/api/session/${encodeURIComponent(id)}/agent`, { agent });
+    return out.ok;
   } catch {
     return false;
   }
+}
+
+function sameDirectory(a: string | null | undefined, b: string | null | undefined): boolean {
+  if (!a || !b) return false;
+  return a.replace(/\/+$/, '') === b.replace(/\/+$/, '');
 }
 
 /**
@@ -230,21 +261,67 @@ async function createSupervisorSession(agent: string): Promise<string> {
   return id;
 }
 
-export async function ensureSupervisorSession(): Promise<{ id: string; agent: string }> {
+/**
+ * Les polls du chat et un envoi peuvent demander la session en même temps :
+ * sans ce verrou, deux appels concurrents pouvaient créer deux conversations.
+ */
+let supervisorQueue: Promise<unknown> = Promise.resolve();
+function serializedSupervisor<T>(task: () => Promise<T>): Promise<T> {
+  const run = supervisorQueue.then(task, task);
+  supervisorQueue = run.then(() => undefined, () => undefined);
+  return run;
+}
+
+/** Échec de bascule déjà journalisé : éviter un log par poll. */
+let lastSwitchFailure = '';
+
+async function ensureSupervisorSessionOnce(): Promise<{ id: string; agent: string }> {
   const version = getOrchestratorVersion();
   const agent = ensureOrchestratorDefinition(version);
   await trustWorkspace();
   void quietSupervisorSessions();
   const known = getSupervisorSession();
-  if (known?.oc_session_id && known.agent === agent && known.version === version && await sessionExists(known.oc_session_id)) {
-    // conversation existante : la sortir du home une fois par processus
-    await quietWorkOnce(known.oc_session_id);
-    return { id: known.oc_session_id, agent };
+  const knownId = known?.oc_session_id ?? '';
+  const meta = knownId ? await liveSessionMeta(knownId) : null;
+  const action = supervisorSessionAction({
+    exists: !!meta?.id,
+    sessionAgent: meta?.agent ?? null,
+    agent,
+  });
+  if (action === 'create' || !knownId) {
+    const id = await createSupervisorSession(agent);
+    setSupervisorSession({ ocSessionId: id, agent, version, title: 'Superviseur' });
+    logEvent('supervisor', 'note', `session de supervision #${id.slice(-6)} (${agent})`);
+    return { id, agent };
   }
-  const id = await createSupervisorSession(agent);
-  setSupervisorSession({ ocSessionId: id, agent, version, title: 'Superviseur' });
-  logEvent('supervisor', 'note', `session de supervision #${id.slice(-6)} (${agent})`);
-  return { id, agent };
+  // conversation existante : la sortir du home une fois par processus
+  await quietWorkOnce(knownId);
+  let effectiveAgent = agent;
+  if (action === 'switch') {
+    const switched = await switchSessionAgent(knownId, agent);
+    if (switched) {
+      lastSwitchFailure = '';
+      logEvent('supervisor', 'note', `conversation #${knownId.slice(-6)} basculée sur ${agent}`);
+    } else {
+      // ne jamais remplacer la conversation : elle garde son agent courant
+      effectiveAgent = meta?.agent ?? agent;
+      const key = `${knownId}:${agent}`;
+      if (lastSwitchFailure !== key) {
+        lastSwitchFailure = key;
+        logEvent('supervisor', 'note', `bascule d’agent impossible sur #${knownId.slice(-6)}, conversation conservée`);
+      }
+    }
+  }
+  if (!known || known.agent !== effectiveAgent || known.version !== version) {
+    setSupervisorSession({
+      ocSessionId: knownId, agent: effectiveAgent, version, title: known?.title ?? 'Superviseur',
+    });
+  }
+  return { id: knownId, agent: effectiveAgent };
+}
+
+export function ensureSupervisorSession(): Promise<{ id: string; agent: string }> {
+  return serializedSupervisor(ensureSupervisorSessionOnce);
 }
 
 function toolLabel(part: WirePart): {
@@ -329,6 +406,8 @@ interface SessionMeta {
   id?: string;
   agent?: string;
   model?: { id?: string; providerID?: string; variant?: string };
+  location?: { directory?: string };
+  time?: { archived?: number };
 }
 
 async function sessionMeta(id: string): Promise<SessionMeta | null> {
@@ -434,16 +513,16 @@ export async function getSupervisorState(): Promise<SupervisorState> {
  * les messages du daemon lui-même (ordres système, annulations vers les tâches)
  * ne passent pas par là.
  *
- * Préfixe UNIQUE combiné : remise à jour de la todolist + instructions du tool
+ * Préfixe UNIQUE combiné : remise à jour du plan + instructions du tool
  * `answer`. Il est appliqué à toutes les unités d'écriture du propriétaire
  * (chat de supervision ET panel d'une tâche existante), là où l'encadrement
- * existe déjà ; SuperviseurTodoList n'y touche pas.
+ * existe déjà ; SuperviseurPlan n'y touche pas.
  *
  * Le texte encadré part tel quel à OpenChamber, donc la bulle du chat le
  * porte aussi : `stripOwnerWrap` ne fait le retirer que pour l'affichage.
  */
 export const OWNER_WRAP =
-  "Nouvelle instruction de l\u2019utilisateur : mets ta todolist à jour au besoin ; "
+  "Nouvelle instruction de l\u2019utilisateur : mets ton plan à jour au besoin ; "
   + "les réponses pour le propriétaire partent avec le tool `answer` (elles s\u2019affichent dans le Superviseur) :";
 
 export function wrapOwnerPrompt(text: string): string {
@@ -546,18 +625,20 @@ export async function revertSupervisor(messageId: string): Promise<SupervisorSta
   return getSupervisorState();
 }
 
-export async function newSupervisorConversation(): Promise<SupervisorState> {
-  const version = getOrchestratorVersion();
-  const agent = ensureOrchestratorDefinition(version);
-  const id = await createSupervisorSession(agent);
-  setSupervisorSession({ ocSessionId: id, agent, version, title: 'Superviseur' });
-  logEvent('supervisor', 'note', `nouvelle conversation #${id.slice(-6)}`);
-  // session neuve : pas besoin de relire 80 messages ni le statut, elle est vide
-  const mode = getSupervisorMode();
-  return {
-    sessionId: id, status: 'idle', agent, directory: SUPERVISOR_DIR,
-    mode: mode.mode, projectDirectory: mode.projectDir, messages: [], queued: [],
-  };
+export function newSupervisorConversation(): Promise<SupervisorState> {
+  return serializedSupervisor(async () => {
+    const version = getOrchestratorVersion();
+    const agent = ensureOrchestratorDefinition(version);
+    const id = await createSupervisorSession(agent);
+    setSupervisorSession({ ocSessionId: id, agent, version, title: 'Superviseur' });
+    logEvent('supervisor', 'note', `nouvelle conversation #${id.slice(-6)}`);
+    // session neuve : pas besoin de relire 80 messages ni le statut, elle est vide
+    const mode = getSupervisorMode();
+    return {
+      sessionId: id, status: 'idle' as const, agent, directory: SUPERVISOR_DIR,
+      mode: mode.mode, projectDirectory: mode.projectDir, messages: [], queued: [],
+    };
+  });
 }
 
 export async function abortSupervisor(): Promise<void> {
@@ -589,6 +670,15 @@ export async function isSupervisorBusy(): Promise<boolean> {
   }
 }
 
-export function isSupervisorSession(sessionId: string): boolean {
-  return !!sessionId && getSupervisorSession()?.oc_session_id === sessionId;
+/**
+ * Une conversation de supervision = la session courante, ou n'importe quelle
+ * conversation vivante du dossier `~/.superviseur`. Les conversations passées
+ * (Nettoyer, ancienne version) restent utilisables dans OpenChamber : leurs
+ * outils ne doivent pas être refusés parce que le pointeur a bougé.
+ */
+export async function isSupervisorSession(sessionId: string): Promise<boolean> {
+  if (!sessionId) return false;
+  if (getSupervisorSession()?.oc_session_id === sessionId) return true;
+  const meta = await liveSessionMeta(sessionId);
+  return sameDirectory(meta?.location?.directory, SUPERVISOR_DIR);
 }

@@ -1,19 +1,21 @@
 /**
- * SuperviseurTodoList
+ * SuperviseurPlan
  * -----------------------------------------------------------------------------
  * Plugin OpenCode v2 migrated from OpenCodeTodoList (the source repository is
- * no longer referenced) and extended with a dedicated per-number update tool.
+ * no longer referenced), renamed plan-* (the plan of a task is a sequence of
+ * steps, distinct from its objectives) and extended with a dedicated
+ * per-number update tool.
  *
- * Todo list for a session, in three tools:
+ * Plan for a session, in three tools:
  *
- *   - `todowrite`  create or replace the whole list (numbered items),
- *   - `todoupdate` update items BY NUMBER (one or several at once, transactional):
+ *   - `planwrite`  create or replace the whole list (numbered items),
+ *   - `planupdate` update items BY NUMBER (one or several at once, transactional):
  *                  status change or retitle without rewriting the whole list,
- *   - `todoread`   read the current list back.
+ *   - `planread`   read the current list back.
  *
  * Plus, like the source plugin:
  *   - per-session persistence through `ctx.storage` (durable plugin KV store),
- *   - re-injection of the open todos before every model request via
+ *   - re-injection of the open plan items before every model request via
  *     `ctx.session.hook("context")`, so the list survives compaction.
  *
  * Dependency-free ESM on purpose: OpenCode loads the file as-is, with no build
@@ -29,7 +31,7 @@
 /** Storage keys are namespaced per session inside the plugin's own store. */
 const STORAGE_PREFIX = "session/"
 
-/** Upper bound on the todos rendered into the model context, to bound tokens. */
+/** Upper bound on the plan items rendered into the model context, to bound tokens. */
 const MAX_INJECTED = 50
 
 const STATUSES = ["pending", "in_progress", "completed"]
@@ -38,19 +40,19 @@ const PRIORITIES = ["high", "medium", "low"]
 const STATUS_SET = new Set(STATUSES)
 const PRIORITY_SET = new Set(PRIORITIES)
 
-/** Checkbox used when rendering a todo list as text. */
+/** Checkbox used when rendering the plan as text. */
 const box = (status) => (status === "completed" ? "x" : status === "in_progress" ? "~" : " ")
 
-/** Render a todo list as compact markdown-ish text, items numbered from 1. */
+/** Render the plan as compact markdown-ish text, items numbered from 1. */
 const render = (todos) => {
-  if (todos.length === 0) return "(no todos)"
+  if (todos.length === 0) return "(no plan)"
   return todos
     .map((todo, i) => `${i + 1}. [${box(todo.status)}] (${todo.priority}) ${todo.content}`)
     .join("\n")
 }
 
 /**
- * Coerce whatever the model sent into a clean, complete todo list. Unknown
+ * Coerce whatever the model sent into a clean, complete plan list. Unknown
  * statuses/priorities fall back to safe defaults instead of rejecting the call,
  * because a partially valid list is more useful than a tool error.
  */
@@ -65,7 +67,7 @@ const normalize = (raw) => {
     }))
 }
 
-const TODO_ITEM_SCHEMA = {
+const PLAN_ITEM_SCHEMA = {
   type: "object",
   properties: {
     num: {
@@ -92,26 +94,26 @@ const TODO_ITEM_SCHEMA = {
   additionalProperties: false,
 }
 
-const TODOWRITE_DESCRIPTION = [
-  "Create or replace the session todo list. Items are numbered (1, 2, ...) and the numbering is what `todoupdate` relies on.",
+const PLANWRITE_DESCRIPTION = [
+  "Create or replace the session plan. Items are numbered (1, 2, ...) and the numbering is what `planupdate` relies on.",
   "Use it to plan multi-step work and to keep the list current: call it again with the full list whenever the plan changes.",
   "Prefer several small, concrete items; there is no limit on the number of items.",
-  "On every change you may replace the whole list with `todowrite`, or update single items by number with `todoupdate`.",
+  "On every change you may replace the whole list with `planwrite`, or update single items by number with `planupdate`.",
 ].join(" ")
 
-const TODOUPDATE_DESCRIPTION = [
-  "Update one or several todo items BY NUMBER, without rewriting the whole list.",
+const PLANUPDATE_DESCRIPTION = [
+  "Update one or several plan items BY NUMBER, without rewriting the whole list.",
   "Each update is `{ num, status?, content?, priority? }`: num is the 1-based position shown on the numbered list.",
   "The status is validated strictly (pending, in_progress, completed) and every num must exist; if one update is invalid, nothing is applied.",
-  "Use it to mark an item in_progress or completed, ideally right when you start or finish it. Use `todowrite` only when the plan itself changes.",
+  "Use it to mark an item in_progress or completed, ideally right when you start or finish it. Use `planwrite` only when the plan itself changes.",
 ].join(" ")
 
-const TODOREAD_DESCRIPTION =
-  "Read the current session todo list (numbered). Call it when you are unsure what remains, especially after a long gap or a compaction."
+const PLANREAD_DESCRIPTION =
+  "Read the current session plan (numbered). Call it when you are unsure what remains, especially after a long gap or a compaction."
 
 /** The plugin entrypoint. A plain { id, setup } is enough. */
 export default {
-  id: "superviseur-todolist",
+  id: "superviseur-plan",
 
   async setup(ctx) {
     const key = (sessionID) => STORAGE_PREFIX + sessionID
@@ -188,18 +190,18 @@ export default {
 
     await ctx.tool.transform((editor) => {
       editor.add({
-        name: "todowrite",
-        description: TODOWRITE_DESCRIPTION,
+        name: "planwrite",
+        description: PLANWRITE_DESCRIPTION,
         // codemode:false keeps this a direct tool rather than one hidden behind
         // the Code Mode `execute` tool. `permission` gives a stable action name
         // so it can be allowed/denied from configuration.
-        options: { codemode: false, permission: "todowrite" },
+        options: { codemode: false, permission: "planwrite" },
         input: {
           type: "object",
           properties: {
-            todos: {
+            items: {
               type: "array",
-              description: "The complete todo list for this session.",
+              description: "The complete plan for this session.",
               items: {
                 type: "object",
                 properties: {
@@ -212,11 +214,11 @@ export default {
               },
             },
           },
-          required: ["todos"],
+          required: ["items"],
           additionalProperties: false,
         },
         async execute(input, context) {
-          const todos = normalize(input && input.todos)
+          const todos = normalize(input && input.items)
           await write(context.sessionID, todos)
           // `metadata` travels with the tool result, so a client can render the
           // list structurally instead of parsing the text content.
@@ -225,16 +227,16 @@ export default {
       })
 
       editor.add({
-        name: "todoupdate",
-        description: TODOUPDATE_DESCRIPTION,
-        options: { codemode: false, permission: "todoupdate" },
+        name: "planupdate",
+        description: PLANUPDATE_DESCRIPTION,
+        options: { codemode: false, permission: "planupdate" },
         input: {
           type: "object",
           properties: {
             updates: {
               type: "array",
               description: "The updates to apply, each by number (num) in the current list. Pass several to avoid N calls.",
-              items: TODO_ITEM_SCHEMA,
+              items: PLAN_ITEM_SCHEMA,
             },
           },
           required: ["updates"],
@@ -244,7 +246,7 @@ export default {
           const todos = await read(context.sessionID)
           if (todos.length === 0) {
             return {
-              content: "no todo list in this session: create it first with `todowrite`.",
+              content: "no plan in this session: create it first with `planwrite`.",
               metadata: { todos, ok: false },
             }
           }
@@ -262,9 +264,9 @@ export default {
       })
 
       editor.add({
-        name: "todoread",
-        description: TODOREAD_DESCRIPTION,
-        options: { codemode: false, permission: "todoread" },
+        name: "planread",
+        description: PLANREAD_DESCRIPTION,
+        options: { codemode: false, permission: "planread" },
         input: {
           type: "object",
           properties: {},
@@ -291,12 +293,12 @@ export default {
       event.system.push({
         type: "text",
         text: [
-          "<todo_list>",
-          `${done}/${todos.length} completed. Keep this list current: plan with a sequential list of small steps via \`todowrite\`, ` +
-            `mark items in_progress or completed by number via \`todoupdate\` (no limit on the number of items).`,
+          "<plan_list>",
+          `${done}/${todos.length} done. Keep this plan current: plan with a sequential list of small steps via \`planwrite\`, ` +
+            `mark items in_progress or completed by number via \`planupdate\` (no limit on the number of items).`,
           render(shown),
           remaining > 0 ? `... and ${remaining} more` : "",
-          "</todo_list>",
+          "</plan_list>",
         ]
           .filter(Boolean)
           .join("\n"),
