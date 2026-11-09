@@ -20,6 +20,8 @@ Les idées à faire sont triées par priorité. Les idées complétées ou close
 | 12 | Notifications desktop + badge d'attention sur l'icône | Le Superviseur doit venir vers l'utilisateur quand il n'est pas devant ; sans ça, tout le reste suppose l'œil sur la fenêtre | moyen | À faire |
 | 13 | Chemins de fichiers et URL cliquables dans les résultats | Aller du résultat au fichier sans copier-coller ; s'appuie sur le rendu existant de la livraison et sur `/api/fleet/asset` | faible à moyen | À faire |
 | 15 | Always on top + une UI qui tient dans un coin | Définit le mode d'usage (patch d'écran) ; à faire une fois les signaux essentiels arrêtés | moyen | À faire |
+| 26 | Saisir des commandes dans le chat du superviseur | Des gestes déterministes déjà implémentés côté daemon passent par un tour de LLM : latence et risque d'interprétation pour ce qui devrait être immédiat et prévisible | faible à moyen | À faire |
+| 27 | Démarrer des conversations sans supervision | Les sessions jetables ou de fond sont enveloppées par le même dispositif (carte, compagnon, analyse) que les vraies tâches : du bruit dans la flotte, un coût pour rien | faible à moyen | À faire |
 
 > Ordre révisé le 2026-11-08 : le markdown du chat, les blocs `openui-lang`, le tool `question` du chat puis les deux réglages de modèle passent en tête ; le reste garde son ordre d'origine. Les raisons de rang sont celles d'origine, ajustées seulement là où elles contredisaient la nouvelle position. Les idées 18, 19, 20, 21, 22 et 23 sont faites le 2026-11-08 et passent dans les complétées.
 
@@ -43,6 +45,7 @@ Les idées à faire sont triées par priorité. Les idées complétées ou close
 | 19 | Un petit bouton config dans la conversation | Le modèle et l'agent se changeaient seulement en sortant du Superviseur ; un geste direct dans l'en-tête évite de rouvrir OpenChamber pour un réglage de confort | faible | Fait : engrenage dans l'en-tête du chat |
 | 20 | Choisir le modèle du chat, des tâches et du compagnon | Le modèle est un levier de coût et de qualité invisible ; il manquait un geste simple pour régler chaque type de conversation | faible à moyen | Fait : trois modèles séparés, persistés, appliqués ; modèle propre par tâche |
 | 21 | Coller des images dans le chat et les cartes | Le presse-papiers est le chemin le plus court pour montrer une maquette, une erreur ou un rendu cassé ; un collage évite l'aller-retour par un fichier à nommer | faible à moyen | Fait : collage, dépôt et citation dans le chat et le détail |
+| 25 | Démarrer une tâche en spécifiant un agent | La capacité existe déjà côté outil : vérifié dans le code, le paramètre est porté du chat jusqu'au brief et à la reprise ; l'entrée documente plutôt qu'elle n'ajoute du travail | aucun | Déjà couvert : `start_task` accepte `agent` |
 
 ## Idées
 
@@ -585,3 +588,55 @@ Constat sur le code actuel :
 - **portée** : une session archivée ou supprimée dans OpenChamber n'est pas une conversation close ; le geste ne doit pas la ressusciter silencieusement.
 
 Lien : idée « un chat permanent » (la liste des gestes du MCP mentionne « réouvrir des sessions marquées terminées », sans entrée dédiée), idée « numéroter les tâches » (désigner une carte absente de l'écran), leçon « Fermer le détail n'est pas fermer la tâche » dans `AGENTS.md`, `reopenTaskState` (`daemon/src/state.mts`).
+
+### Démarrer une tâche en spécifiant un agent
+
+Idée du 9 nov : le Superviseur devrait pouvoir démarrer des tâches en spécifiant un agent (le profil OpenCode de la session de travail, optionnel), plutôt que de toujours partir sur le défaut du projet.
+
+Constat sur le code actuel (vérifié le jour même) :
+
+- `start_task` accepte déjà un paramètre `agent` : la signature de `startTask` (`daemon/src/tools.mts`) porte `agent?: string` aux côtés de `model` et `context` ; à défaut, le défaut `build` s'applique (`String(args.agent ?? '').trim() || 'build'`) ;
+- l'agent choisi est passé à la création de la session (champ `agent` de `POST /api/openchamber/sessions`) et persisté dans `task_brief` et `task_resume` : une reprise automatique repart sur le même agent ;
+- le contrat documenté ([mvp1/chat-superviseur.md](../mvp1/chat-superviseur.md), § 5.1) porte le champ, avec sa règle d'usage : `agent` est le profil OpenCode de la session, pas un sous-agent, et l'orchestrateur ne le demande que si l'utilisateur y tient.
+
+> Déjà couvert le 2026-11-09 : la capacité existe côté outil et est documentée ; en pratique, l'utilisateur peut déjà l'obtenir en la demandant dans le chat (« lance cette tâche avec l'agent plan »). Ce qui manque est un choix d'ergonomie, pas de capacité : rien dans l'UI ne propose l'agent à la création d'une tâche, même situation que le modèle avant l'idée 20. Si ce choix devient fréquent, s'inspirer du chemin déjà suivi pour le modèle (préférence globale pour les nouvelles tâches, et réglage par tâche dans le détail).
+
+### Saisir des commandes dans le chat du superviseur
+
+Idée du 9 nov : le chat du superviseur ne sait qu'envoyer du texte, et tout message part dans un tour de LLM, même pour déclencher un geste déterministe déjà implémenté côté daemon (stopper, revenir en arrière, lancer une tâche, rouvrir une carte close). Demande : pouvoir saisir des commandes directes dans le composer, exécutées sans tour d'agent.
+
+Constat sur le code actuel :
+
+- les gestes existent côté daemon : `abortSupervisor` et `revertSupervisor` (`daemon/src/supervisor.mts`), la file d'attente, `start_task`, `close_task` et `reopenTaskState` (les commandes candidates de l'idée 24) ; ils ne sont atteints aujourd'hui que par le jugement de l'agent, avec une latence et un risque d'interprétation ;
+- le bouton « Nettoyer » est le précédent d'un geste du chat sans tour LLM : il vide l'écran et recrée une session sans appeler le modèle ;
+- les gardes des tools (`start_task`, `send_task`, `close_task`) protègent déjà ces gestes : une commande emprunterait les mêmes chemins, pas un mécanisme nouveau.
+
+À creuser avant d'implémenter :
+
+- **syntaxe** : une commande slash (`/stop`, `/lance`, `/remets`) reconnue par l'UI avant l'envoi ; une commande inconnue affiche la liste disponible au lieu de partir dans le LLM ;
+- **cible** : désigner la tâche par son titre (ou son numéro, idée 11) ; premiers candidats : les gestes de l'idée 24 (stop, retrait de file, revert) et la remise dans le board ;
+- **visibilité** : la commande et son résultat s'affichent dans le fil (comme un tool call), sinon la conversation devient incompréhensible ; un aperçu du geste qui va partir avant l'envoi ;
+- **limites** : une commande appelle le daemon, elle n'écrit pas librement dans une session : mêmes gardes que les tools (pas de contournement des refus de `close_task`, pas de `send_task` déguisé) ;
+- **repli** : la même demande en texte libre reste possible : les commandes accélèrent, elles ne remplacent pas le dialogue avec l'orchestrateur.
+
+Lien : idée 24 (stop et revert, les gestes à exposer), idée « remettre dans le board la carte d'une conversation terminée » (la commande candidate), le bouton « Nettoyer » (le précédent sans tour LLM), `daemon/src/supervisor.mts` (`abortSupervisor`, `revertSupervisor`).
+
+### Démarrer des conversations sans supervision
+
+Idée du 9 nov : tout ce que le Superviseur voit devient supervisé : carte dans la flotte, compagnon d'analyse, critères d'acceptation, reprise automatique. Demande : pouvoir démarrer des conversations **sans supervision**, délibérément : pas de carte, pas de compagnon, pas de critères ; pour des sessions jetables ou de fond (une recherche rapide, un travail d'appoint) où le dispositif de supervision est du bruit.
+
+Constat sur le code actuel :
+
+- la flotte liste toutes les sessions vivantes hors enfant (filtre `parentID`, `daemon/src/fleet.mts`) et le compagnon est créé pour toutes les sessions de ce même périmètre (`daemon/src/companion.mts`, `candidates = sessions.filter(s => !s.parentID && !s.time?.archived && ...)`) : il n'existe pas d'exclusion volontaire ;
+- l'exclusion par dossier existe : tout le contenu de `~/.superviseur` est écarté de la flotte et du compagnon (`SUPERVISOR_DIR`, `daemon/src/supervisor.mts`) ; c'est le mécanisme à généraliser à une exclusion par session ;
+- une session lancée hors du Superviseur échappe déjà à la reprise automatique et aux critères (pas de `task_brief`, pas de `task_resume`), mais elle reçoit quand même sa carte et son compagnon sans les avoir demandés.
+
+À creuser avant d'implémenter :
+
+- **point d'entrée** : un geste dans le chat (« lance sans supervision »), une option de `start_task`, ou un filtre par projet ; le choix doit être explicite au lancement, pas déduit ;
+- **ce qui est coupé exactement** : carte, compagnon, critères, reprise automatique ; ce qui reste : l'historique dans OpenChamber, et l'entrée dans la flotte plus tard si la session reçoit une activité (comportement actuel des cartes fermées) ;
+- **le risque inverse** : une session non supervisée peut déraper sans signal ; prévoir le geste de la mettre sous supervision après coup (l'inscrire dans la flotte, créer son compagnon) ;
+- **stabilité de la flotte** : une exclusion ne doit pas faire flicker les cartes ni les déplacer à chaque poll (même discipline que le reste du board) ;
+- **le chat lui-même** : la session de supervision vit déjà hors de la flotte ; l'idée donne un statut à d'autres conversations, pas une seconde zone grise confuse à maintenir.
+
+Lien : l'exclusion de `~/.superviseur` (le mécanisme à généraliser), idée « remettre dans le board la carte d'une conversation terminée » (le geste inverse), le compagnon et ses déclencheurs (`daemon/src/companion.mts`), la reprise automatique ([mvp1/auto-restart.md](../mvp1/auto-restart.md)).
