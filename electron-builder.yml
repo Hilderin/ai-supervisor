@@ -1,0 +1,33 @@
+# Empaquetage Electron du Superviseur (.exe Windows, cible portable).
+# Le code applicatif (daemon + UI buildée) part en extraResources/app : le main
+# process Electron ne fait qu'encapsuler (spawn bun + watchdog), il ne porte rien.
+appId: com.skytech.superviseur
+productName: Superviseur
+directories:
+  output: release
+# asar désactivé : le packer asar n'embarquait pas package.json (sanity check en
+# échec) ; l'app n'a pas de node_modules en production, le layout réel suffit.
+asar: false
+files:
+  - electron/main.cjs
+  - package.json
+extraResources:
+  - from: electron/resources/bun.exe
+    to: bun.exe
+  - from: electron/watchdog.mts
+    to: app/electron/watchdog.mts
+  - from: daemon
+    to: app/daemon
+  - from: ui/dist
+    to: app/ui/dist
+  - from: package.json
+    to: app/package.json
+  - from: README.md
+    to: app/README.md
+win:
+  icon: build/icon.png
+  target:
+    - target: portable
+      arch:
+        - x64
+  artifactName: Superviseur-${version}.exe

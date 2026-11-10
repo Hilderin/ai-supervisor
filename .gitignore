@@ -7,3 +7,5 @@ dist/
 *.db-shm
 *.db-wal
 .playwright-mcp/
+release/
+electron/resources/

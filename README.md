@@ -19,6 +19,50 @@ du PATH) : passer le port explicitement, par exemple
 `OpenChamber.exe` se lit avec `Get-NetTCPConnection -OwningProcess <pid>` ; il
 est auto-alloué, à revérifier à chaque redémarrage d'OpenChamber).
 
+## App Electron (.exe Windows)
+
+Le Superviseur s'empaquette en une app Electron Windows : le .exe démarre le
+daemon (via un `bun.exe` embarqué) et ouvre une fenêtre sur l'UI ; fermer la
+fenêtre (ou tuer l'app, crash inclus) arrête daemon et UI, sans process
+résiduel. Le daemon n'est pas modifié : il est encapsulé.
+
+```bash
+bun run build:exe      # build UI + copie de bun.exe + electron-builder (cible portable)
+```
+
+Le résultat est `release/Superviseur-<version>.exe` (cible `portable` : un
+seul fichier, pas d'installation). En dev, `bun run app` lance la même
+encapsulation sans empaquetage (le daemon utilise alors le repo et son
+dossier `data/`).
+
+Comportement au lancement et à la fermeture :
+
+- **Instance unique** : un second lancement du .exe quitte immédiatement et
+  met la fenêtre existante au premier plan (verrou `requestSingleInstanceLock`).
+- **Daemon déjà en marche** sur le port (lancé à la main, ou daemon d'un
+  lancement précédent) : le .exe l'adopte au lieu d'en démarrer un second ;
+  à la fermeture de l'app, un daemon adopté n'est pas tué (il n'appartient
+  pas à l'app).
+- **Port OpenChamber** : `OPENCHAMBER_PORT` fait foi ; sinon le main process
+  détecte le port du process OpenChamber.exe principal (PowerShell ;
+  `ss` n'existe pas sous Windows). Port introuvable : le daemon ne démarre
+  pas, un dialog l'explique (lancer OpenChamber, ou définir
+  `OPENCHAMBER_PORT`).
+- **Surveillance (watchdog)** : l'app spawn un watchdog (bun) qui possède le
+  process daemon. Mort du parent (fermeture, crash, kill forcé) : le watchdog
+  tue l'arbre du daemon. Fermeture propre : l'app tue l'arbre
+  watchdog + daemon via `taskkill /T /F`.
+- **Données** : en app empaquetée, la base SQLite vit dans
+  `%APPDATA%\Superviseur` (stable d'un lancement à l'autre, même en cible
+  portable) ; le journal (daemon + watchdog + app) est
+  `%APPDATA%\Superviseur\superviseur.log`.
+- **Port de l'UI** : `SUPERVISEUR_PORT` (5180 par défaut) est lu par l'app
+  comme par le daemon, pour tester les deux sur un autre port.
+
+Ne pas modifier le comportement du daemon pour l'empaquetage : la détection
+du port et le cycle de vie vivent côté Electron (`electron/main.cjs`,
+`electron/watchdog.mts`) ; la config de build est `electron-builder.yml`.
+
 ## Installer les plugins OpenCode
 
 Les outils du Superviseur vivent dans des plugins OpenCode chargés globalement
