@@ -18,6 +18,10 @@ if (!dbPath.includes('companion-recovery-data-')) {
   throw new Error(`companion-recovery.test : base SQLite inattendue (${dbPath})`);
 }
 
+// le harnais exerce la mécanique compagnon : la session parente est
+// explicitement supervisée (supervision opt-in : défaut = non supervisée)
+state.setSupervision('parent-idle', true);
+
 test('recrée un compagnon supprimé même si la session parente est idle', async () => {
   const { db, getAgentVersion, ensureAgentDefinition, putCompanion, getCompanion } = state;
   const originalFetch = globalThis.fetch;

@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { replyPermission } from '../lib/api';
+import { fetchFleet, replyPermission, setSupervision } from '../lib/api';
 import type { CardState } from '../lib/cardState';
 import { cardStateLabel } from '../lib/cardState';
 import { closeQuestionOf, closeTask } from '../lib/closeTask';
 import { cx } from '../lib/cx';
 import { briefRow, dirName } from '../lib/fleet';
+import { isUnsupervised, supervisionActionLabel } from '../lib/supervision';
 import { BTN_GHOST, BTN_PRIMARY } from '../lib/ui';
 import { useFleetStore } from '../store/fleetStore';
 import { useTaskModel } from '../hooks/useTaskModel';
@@ -15,7 +16,7 @@ import { Composer } from './Composer';
 import { AnswersSection } from './AnswersSection';
 import { CriteriaSection } from './CriteriaSection';
 import { DeliveryBlock } from './DeliveryBlock';
-import { OpenChamberIcon, QuestionIcon } from './Icons';
+import { OpenChamberIcon, QuestionIcon, SupervisionIcon, SupervisionOffIcon } from './Icons';
 import { PlanSection } from './PlanSection';
 import { QuestionBox } from './QuestionBox';
 import { TaskModelPopover, taskModelLabel } from './TaskModelPopover';
@@ -54,6 +55,20 @@ export function TaskInspector({ row, state, now, onClose, onOpenChamber }: Props
     ? row.sup.attend
     : '';
   const dir = dirName(row.dir);
+
+  // supervision opt-in : badge dans la ligne d'état et bascule dans l'en-tête,
+  // même endpoint que la carte ; le frame SSE suivant porte le nouvel état
+  const unsupervised = isUnsupervised(row);
+  const supervisionLabel = supervisionActionLabel(row);
+  const toggleSupervision = async () => {
+    setActionError(null);
+    try {
+      await setSupervision(row.id, unsupervised);
+      void fetchFleet().catch(() => undefined);
+    } catch (e) {
+      setActionError(String((e as Error)?.message ?? e));
+    }
+  };
 
   const planSteps = row.plan?.steps ?? [];
   const progress = row.sup?.progress != null ? Math.max(0, Math.min(100, Number(row.sup.progress))) : null;
@@ -117,6 +132,21 @@ export function TaskInspector({ row, state, now, onClose, onOpenChamber }: Props
         />
         <button
           type="button"
+          data-testid="inspector-supervision-toggle"
+          aria-label={supervisionLabel}
+          title={unsupervised
+            ? 'Activer la supervision (compagnon + vérificateur sur cette conversation)'
+            : 'Désactiver la supervision (les sous-agents sont détachés)'}
+          onClick={() => void toggleSupervision()}
+          className={cx(
+            'flex h-[24px] w-[24px] shrink-0 cursor-pointer items-center justify-center rounded-[6px] bg-transparent',
+            unsupervised ? 'text-muted hover:bg-hover hover:text-text' : 'text-green hover:bg-green-soft',
+          )}
+        >
+          <SupervisionIcon />
+        </button>
+        <button
+          type="button"
           title="Ouvrir dans le mini chat OpenChamber"
           onClick={() => onOpenChamber(row.id)}
           className="flex h-[24px] w-[24px] shrink-0 cursor-pointer items-center justify-center rounded-[6px] bg-transparent text-muted hover:bg-green-soft hover:text-green"
@@ -139,6 +169,16 @@ export function TaskInspector({ row, state, now, onClose, onOpenChamber }: Props
           <span className={cx('shrink-0 font-semibold', waiting ? 'text-attend' : 'text-muted')}>
             {stateLabel}
           </span>
+          {unsupervised ? (
+            <span
+              data-testid="inspector-unsupervised"
+              title="Conversation non supervisée : ni compagnon ni vérificateur ; les messages partent sans habillage du superviseur."
+              className="flex shrink-0 items-center gap-[4px] rounded-full border border-border px-[7px] py-[1px] text-[10px] font-semibold text-muted"
+            >
+              <SupervisionOffIcon />
+              Non supervisée
+            </span>
+          ) : null}
           {dir ? <span className="min-w-0 truncate text-muted" title={row.dir}>{dir}</span> : null}
           <span className="flex-1" />
           <span

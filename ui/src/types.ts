@@ -151,6 +151,12 @@ export interface FleetRow {
   activity?: FleetActivity;
   /** réponses au propriétaire (tool `answer`) pas encore lues (« Got it ») */
   unreadAnswers?: number;
+  /**
+   * Supervision opt-in : false = conversation démarrée directement dans
+   * OpenChamber, sans compagnon ni vérificateur (aucun enfant installé).
+   * undefined : daemon ancien, on considère la carte supervisée.
+   */
+  supervised?: boolean;
 }
 
 /** Réponse d'une tâche au propriétaire, `GET /api/fleet/answers?sessionId=…`. */

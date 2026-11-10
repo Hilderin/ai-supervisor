@@ -4,7 +4,6 @@ import type { FleetRow } from '../types';
 import type { Section } from '../lib/placement';
 import { cardState } from '../lib/cardState';
 import { SessionCard } from './SessionCard';
-
 function row(patch: Partial<FleetRow> = {}): FleetRow {
   return {
     id: 'ses_card',
@@ -236,5 +235,20 @@ describe('allègement de la carte', () => {
     expect(html).not.toContain('text-amber');
     expect(html).toContain('M5 0.2 6.59 2.82 9.57 3.52 7.57 5.83 7.82 8.88 5 7.7 2.18 8.88 2.43 5.83 0.43 3.52 3.41 2.82Z');
     expect(html.indexOf('text-review')).toBeLessThan(html.indexOf('truncate font-[650]'));
+  });
+});
+
+describe('supervision opt-in (badge de carte)', () => {
+  test("une conversation non supervisée porte le badge, une supervisée n'en porte pas", () => {
+    const badge = renderCard(row({ supervised: false }));
+    expect(badge).toContain('data-testid="card-unsupervised"');
+    expect(badge).toContain('Non supervisée');
+    // icône œil barré distinctive (AC-10) : slash sur l'œil
+    expect(badge).toContain('M4 4l16 16');
+    const supervised = renderCard(row({ supervised: true }));
+    expect(supervised).not.toContain('data-testid="card-unsupervised"');
+    expect(supervised).not.toContain('M4 4l16 16');
+    const legacy = renderCard(row());
+    expect(legacy).not.toContain('data-testid="card-unsupervised"');
   });
 });

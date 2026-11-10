@@ -28,6 +28,11 @@ import { describe, expect, test } from 'bun:test';
 const { addCriterion, criteriaCounts, criteriaPushMessage, listCriteria } = criteria;
 const { normalizeVerdict } = verdict;
 
+// ces tests exercent la mécanique du vérificateur : les sessions du harnais
+// sont explicitement supervisées (supervision opt-in : défaut = non supervisée)
+state.setSupervision('ses_test_push', true);
+state.setSupervision('ses_test_restart', true);
+
 const TASK = 'ses_test_push';
 
 describe('criteriaPushMessage', () => {

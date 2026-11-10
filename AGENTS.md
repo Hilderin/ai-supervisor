@@ -32,6 +32,7 @@ Directives pour tout agent travaillant dans ce repo.
 - Session enfant avec `parentID` = masquée automatiquement de la flotte (filtre `parentID`) → utilisé pour les sessions compagnon.
 - `/api/sessions/status` (OpenChamber) contient des **ids fantômes** (sessions supprimées) → joindre à l'annuaire `/api/session` et filtrer les absents ; les archivées (`time.archived`) sortent de la flotte.
 - Le port local d'OpenChamber n'est **pas fixe** (auto-alloué) : discovery par `ss -tlnp` sur le process `openchamber`, ou `OPENCHAMBER_PORT`.
+- **Sur Windows, `discover.mts` plante au démarrage du daemon** (`Executable not found in $PATH: "ss"`) : `ss` n'existe pas, passer impérativement `OPENCHAMBER_PORT` (port du process principal `OpenChamber.exe`, trouvé par `Get-NetTCPConnection -OwningProcess <pid>` ; les autres `OpenChamber.exe` qui écoutent sont des services d'extensions).
 - OpenCode server direct = Basic auth détenue par OpenChamber : **toujours passer par OpenChamber**.
 - **Une session entre dans « In work » du home dès qu'un message lui est envoyé**, quel que soit son dossier (`metadata.openchamber.work.state = open`, module `session-work`). Le chat superviseur vit dans `~/.superviseur` et y apparaît quand même : retirer le marqueur avec `POST /api/openchamber/sessions/:id/metadata` `{patch:{openchamber:{work:null}}}` après création et après chaque send. Changer le dossier ne règle pas ce point.
 - **Suppression de session via proxy** : `DELETE /api/session/:id` renvoie 204 (session totalement détruite, enfants compagnon inclus). Pour une fermeture douce qui garde l'historique, archiver plutôt (`POST /api/openchamber/sessions/archive` `{ids:[]}`).
@@ -62,6 +63,8 @@ Directives pour tout agent travaillant dans ce repo.
 - **Un modèle de tâche se change sans recréer la session** : `POST /api/session/:id/model` répond 204 sur la session vivante ; le test `task-model.test.mts` vérifie qu'aucun `POST /api/openchamber/sessions` ne part. Un refus de la session (`apply_failed`) laisse le brief et le registre intacts, donc la reprise ne part pas sur un modèle que la session n'a jamais accepté.
 
 ### UI (patterns de la page flotte)
+
+- **Favicon : l'URL du head est versionnée, et il faut bumper `?v=` quand `ui/public/favicon.svg` change** : OpenChamber a déjà servi sur le port 5180 (auto-alloué) et la base Favicons de Chromium garde le bitmap d'une URL d'icône déjà vue, sans re-télécharger : l'onglet affichait l'hexagone OpenChamber sur `/fleet` alors que le serveur répondait 200 avec le bon SVG sous la MÊME URL `127.0.0.1:5180/favicon.svg` (constaté le 2026-11-09, diagnostiqué dans la base Favicons de Vivaldi). Le lien du head porte `?v=AAAAMMJJ` ; un curl ne reproduit jamais le symptôme (il contourne la base Favicons et le cache HTTP).
 
 - `replaceChildren` **déplace même les nœuds identiques → blur** : ne mettre à jour le DOM que si l'ordre change (`setChildrenIfChanged`), et ne reconstruire une carte que si son « sig » change.
 - Variables d'état dans les templates : ne pas composer un préfixe « : » à deux endroits (double `: :` réel). La variable porte déjà sa ponctuation, le template s'abstient.
@@ -111,6 +114,8 @@ Directives pour tout agent travaillant dans ce repo.
 - **Dépendances ajoutées** : `@openuidev/lang-core` et `zod`, celles d'OpenChamber. Elles pèsent sur le bundle (~690 kB brut, 210 kB gzip) ; c'est le prix du parseur natif, pas une dépendance décorative.
 
 ### Compagnon (analyste)
+
+- **Supervision opt-in (2026-11-09)** : une conversation sans `task_brief` (démarrée directement dans OpenChamber) est NON supervisée par défaut (table `supervision`, règle de défaut lue dans `isSupervised` de `state.mts`) : ni compagnon ni vérificateur. Le filtre vit en trois endroits (`fleet.mts` tickSessions, `runCompanionTick`, `verifierTick`) : les tests de harnais qui exercent le compagnon ou le vérificateur doivent marquer leurs sessions `setSupervision(sid, true)`, sinon elles sont silencieusement filtrées. Bascule : `POST /api/fleet/supervision` (logique dans `daemon/src/supervision.mts` : désactiver archive les enfants, activer pousse un kick) ; la flotte transporte `supervised` par carte (badge « Non supervisée » et menu ⋯). Détail : `docs/analyses/mvp1/supervision-bascule.md`.
 
 - Session compagnon = enfant de la session supervisée ; agent global sans-tool, **canonical dans `daemon/agent/`** + symlink dans `~/.config/opencode/agent/`.
 - **Concept de confiance RETIRÉ le 2026-11-07, ne pas réintroduire** : plus de pastilles, de bulle ni de valeur numérique (`ConfidenceDots` supprimé, colonnes `confiance`/`note` de `task_verdict` non écrites, contrat analyste réduit). Les anciens pièges du paragraphe ci-dessous restent historiques : `confidence: null` n'est plus une valeur qui traverse le système.

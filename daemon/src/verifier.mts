@@ -12,7 +12,7 @@
  * de refroidissement après une phase qui a modifié la liste (anti-boucle).
  */
 import {
-  VERIFIER_AGENT, ensureVerifierDefinition, getTaskState, getVerifier, logEvent, putVerifier,
+  VERIFIER_AGENT, ensureVerifierDefinition, getTaskState, getVerifier, isSupervised, logEvent, putVerifier,
   setVerifierSignature,
 } from './state.mts';
 import {
@@ -635,6 +635,9 @@ export async function verifierTick(
     if (sess.parentID) continue;                  // jamais une sous-session
     if (sess.time?.archived) continue;
     const taskId = sess.id;
+    // supervision opt-in : une conversation non supervisée n'installe jamais
+    // de vérificateur, même si son agent pose des critères
+    if (!isSupervised(taskId)) continue;
     // comme le compagnon : la sous-conversation vérificateur existe pour toute
     // tâche, même sans critère encore (créée au premier tick, réutilisée ensuite)
     if (!getVerifier(taskId)) {
@@ -673,4 +676,24 @@ export async function verifierTick(
 export function resetVerifierState() {
   st.clear();
   active = 0;
+}
+
+/**
+ * Détache le vérificateur d'une conversation (supervision désactivée depuis la
+ * carte) : la session enfant est archivée (historique conservé dans
+ * OpenChamber), l'état mémoire du tick est oublié. Le mapping reste : une
+ * supervision réactivée recrée un vérificateur neuf au prochain tick. Idempotent.
+ */
+export async function detachVerifier(taskId: string): Promise<void> {
+  const known = getVerifier(taskId);
+  if (known) {
+    try {
+      await fetch(`${base}/api/openchamber/sessions/archive`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: [known.verifierId] }),
+      });
+      logEvent(taskId, 'note', 'vérificateur archivé (supervision désactivée)');
+    } catch { /* l'archive ratée ne bloque pas la bascule */ }
+  }
+  st.delete(taskId);
 }

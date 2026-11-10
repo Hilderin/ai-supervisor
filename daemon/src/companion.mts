@@ -10,7 +10,7 @@
  */
 import { createHash } from 'node:crypto';
 import {
-  ensureAgentDefinition, getAgentVersion, getCompanion, getTaskState, getVerdict, listCompanions, logEvent,
+  ensureAgentDefinition, getAgentVersion, getCompanion, getTaskState, getVerdict, isSupervised, listCompanions, logEvent,
   putCompanion, setTaskObjective, setTaskPlan, upsertVerdict,
 } from './state.mts';
 import { getPlanSnapshot, planStepsOf } from './plan.mts';
@@ -534,7 +534,9 @@ async function runCompanionTick(
 
   // Priorité aux compagnons à migrer : sinon deux sessions busy peuvent prendre
   // tous les créneaux et affamer la migration des sessions au repos.
-  const candidates = sessions.filter(s => !s.parentID && !s.time?.archived && !!statusMap[s.id]);
+  // Supervision opt-in : une conversation non supervisée (démarrée directement
+  // dans OpenChamber, sans choix du propriétaire) n'installe jamais de compagnon.
+  const candidates = sessions.filter(s => !s.parentID && !s.time?.archived && !!statusMap[s.id] && isSupervised(s.id));
   const staleIds = new Set<string>();
   const missingIds = new Set<string>();
   const stale: TickSession[] = [];
@@ -617,3 +619,20 @@ async function runCompanionTick(
 
 export function verdictOf(sid: string) { return getVerdict(sid); }
 export function companionSessionOf(sid: string) { return get(sid).compSession ?? null; }
+
+/**
+ * Détache le compagnon d'une conversation (supervision désactivée depuis la
+ * carte) : la session enfant est archivée (historique conservé dans
+ * OpenChamber), l'état mémoire du tick est oublié. Le mapping reste : une
+ * supervision réactivée recrée un compagnon neuf au prochain tick. Idempotent.
+ */
+export async function detachCompanion(sid: string): Promise<void> {
+  const known = getCompanion(sid);
+  if (known) {
+    try {
+      await jpost('/api/openchamber/sessions/archive', { ids: [known.compId] });
+      logEvent(sid, 'note', 'compagnon archivé (supervision désactivée)');
+    } catch { /* l'archive ratée ne bloque pas la bascule */ }
+  }
+  st.delete(sid);
+}

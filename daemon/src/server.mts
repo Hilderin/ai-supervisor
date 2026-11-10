@@ -10,10 +10,11 @@ import { currentFleet, openchamberUrl, pollOnce, type Fleet } from './fleet.mts'
 import { ackAnswers, AnswerError, listAnswers, recordAnswer, unreadAnswerCounts } from './answers.mts';
 import { getDelivery } from './delivery.mts';
 import { readSessionAsset } from './assets.mts';
-import { companionSessionOf } from './companion.mts';
+import { companionSessionOf, detachCompanion } from './companion.mts';
 import { openChamberMiniChatUrl } from './openchamber-link.mts';
 import { getSupervisorSession, logEvent, upsertTaskState, getTaskState, reopenTaskState } from './state.mts';
-import { abortSupervisor, applySupervisorChatConfig, cancelQueuedSupervisor, getSupervisorState, newSupervisorConversation, queueSupervisor, revertSupervisor, sendSupervisor, SUPERVISOR_DIR, wrapOwnerPrompt } from './supervisor.mts';
+import { applySupervisionToggle, ownerPromptFor } from './supervision.mts';
+import { abortSupervisor, applySupervisorChatConfig, cancelQueuedSupervisor, getSupervisorState, newSupervisorConversation, queueSupervisor, revertSupervisor, sendSupervisor, SUPERVISOR_DIR } from './supervisor.mts';
 import { getSupervisorConfig, saveSupervisorConfig } from './prefs.mts';
 import { applyCompanionModelPref } from './companion.mts';
 import { getTaskModelInfo, setTaskModel } from './task-model.mts';
@@ -302,6 +303,26 @@ async function handleApi(req: http.IncomingMessage, res: http.ServerResponse, ur
     json(res, result.ok ? 200 : 400, result);
     return;
   }
+  if (path === '/api/fleet/supervision' && req.method === 'POST') {
+    // bascule de supervision d'une conversation existante (supervision opt-in,
+    // docs/analyses/mvp1/supervision-bascule.md) : le choix est persisté en BD,
+    // la flotte le relit à la prochaine frame ; aucun redémarrage de session.
+    const body = await readBody(req);
+    const sessionId = String(body.sessionId ?? '').trim();
+    const supervised = body.supervised === true;
+    if (!sessionId) { json(res, 400, { error: 'sessionId requis' }); return; }
+    const supervisorId = getSupervisorSession()?.oc_session_id;
+    const row = currentFleet().rows.find(r => r.id === sessionId);
+    if (sessionId === supervisorId || row?.dir === SUPERVISOR_DIR) {
+      json(res, 400, { error: 'not_task' });
+      return;
+    }
+    if (!row) { json(res, 404, { error: 'session inconnue' }); return; }
+    const out = await applySupervisionToggle(sessionId, supervised);
+    void pollOnce();   // la prochaine flotte porte le nouvel état (SSE en 500 ms)
+    json(res, 200, out);
+    return;
+  }
   if (path === '/api/fleet/criteria' && req.method === 'GET') {
     // liste détaillée des critères d'une tâche, à la demande (la flotte ne
     // transporte que les comptes) ; rechargée quand lastUpdateAt change
@@ -419,12 +440,13 @@ async function handleApi(req: http.IncomingMessage, res: http.ServerResponse, ur
       const promptText = text || 'Voir la pièce jointe.';
       logEvent(sessionId, 'note', '→ prompt : ' + promptText.slice(0, 120)
         + (files.length ? ` (+${files.length} fichier${files.length > 1 ? 's' : ''})` : ''));
-      // même encadrement que le chat : l'instruction du propriétaire demande
-      // la mise à jour du plan, et le texte brut reste dans le journal
+      // encadrement du propriétaire SEULEMENT si la conversation est supervisée
+      // (supervision opt-in) : une conversation non supervisée reçoit le texte
+      // TEL QUEL ; le texte brut reste dans le journal au-dessus
       const out = await relay(`/api/session/${sessionId}/prompt`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          text: wrapOwnerPrompt(promptText),
+          text: ownerPromptFor(sessionId, promptText),
           delivery: body.delivery ?? 'steer',
           ...(files.length ? { files } : {}),
         }),

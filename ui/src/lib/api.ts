@@ -149,6 +149,16 @@ export async function closeConversation(sessionId: string, force = false): Promi
   await post('/api/fleet/done', { sessionId, force });
 }
 
+/**
+ * Bascule la supervision d'une conversation existante (supervision opt-in) :
+ * le choix est persisté en BD côté daemon, le frame SSE suivant porte le
+ * nouvel état ; activer pousse un kick de cadrage, désactiver archive les
+ * enfants (compagnon, vérificateur) sans toucher à la conversation.
+ */
+export async function setSupervision(sessionId: string, supervised: boolean): Promise<void> {
+  await post('/api/fleet/supervision', { sessionId, supervised });
+}
+
 /** Réponses au propriétaire de cette tâche (lues et non lues), les plus anciennes d'abord. */
 export async function fetchAnswers(sessionId: string, signal?: AbortSignal): Promise<TaskAnswer[]> {
   const res = await fetch(`/api/fleet/answers?sessionId=${encodeURIComponent(sessionId)}`, {

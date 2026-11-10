@@ -95,3 +95,23 @@ describe('TaskInspector', () => {
     expect(html).not.toContain('✋');
   });
 });
+
+describe('supervision opt-in dans le détail', () => {
+  test('badge non supervisée dans la ligne d état + bouton de bascule dans l en-tête', () => {
+    const html = renderInspector(row({ supervised: false }));
+    expect(html).toContain('data-testid="inspector-unsupervised"');
+    expect(html).toContain('Non supervisée');
+    // icône œil barré distinctive du badge
+    expect(html).toContain('M4 4l16 16');
+    expect(html).toContain('data-testid="inspector-supervision-toggle"');
+    expect(html).toContain('aria-label="Activer la supervision"');
+    expect(html).toContain('Activer la supervision (compagnon + vérificateur sur cette conversation)');
+  });
+
+  test('tâche supervisée : pas de badge, bouton présent pour désactiver', () => {
+    const html = renderInspector(row({ supervised: true }));
+    expect(html).not.toContain('data-testid="inspector-unsupervised"');
+    expect(html).toContain('data-testid="inspector-supervision-toggle"');
+    expect(html).toContain('aria-label="Désactiver la supervision"');
+  });
+});

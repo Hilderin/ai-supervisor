@@ -18,7 +18,7 @@ export interface OpenchamberSession {
 import { companionTick, verdictOf } from './companion.mts';
 import { verifierTick } from './verifier.mts';
 import { setBase as setResumeBase, resumeTick } from './resume.mts';
-import { getSupervisorSession } from './state.mts';
+import { getSupervisorSession, isSupervised } from './state.mts';
 import { SUPERVISOR_DIR } from './supervisor.mts';
 import { getPlanSnapshot } from './plan.mts';
 import { criteriaCounts, listCriteria, type CriteriaCounts } from './criteria.mts';
@@ -64,6 +64,8 @@ export interface FleetRow {
   criteria?: CriteriaCounts;
   /** ce que l'agent fait à l'instant (uniquement pendant un tour busy) */
   activity?: LiveActivity;
+  /** supervision opt-in : false = conversation OpenChamber sans compagnon ni vérificateur */
+  supervised: boolean;
 }
 export interface Verdict {
   resume?: string; progress?: number | null; termine?: boolean;
@@ -145,6 +147,8 @@ function buildFleet(status: StatusPayload): Fleet {
       busy: meta?.time?.busy ?? null,
       idle: meta?.time?.idle ?? null,
       pendingForms, pendingPermissions,
+      // relu de la BD à chaque frame : la bascule est effective sans redémarrage
+      supervised: isSupervised(id),
     };
     if (pendingForms.length || pendingPermissions.length) {
       if (!concern) {
@@ -272,9 +276,11 @@ async function runPoll(): Promise<void> {
       }
     }
     // le compagnon juge les sessions nouvelles (idle) ou périodiquement (busy)
+    // supervision opt-in : les ticks ne voient que les sessions supervisées
+    // (les ticks refiltrent eux-mêmes : les tests les appellent sans la flotte)
     const supervisorId = getSupervisorSession()?.oc_session_id;
     const tickSessions = [...sessionsIndex.values()].filter(
-      s => s.id !== supervisorId && s.location?.directory !== SUPERVISOR_DIR,
+      s => s.id !== supervisorId && s.location?.directory !== SUPERVISOR_DIR && isSupervised(s.id),
     );
     void companionTick(tickSessions, status.sessions ?? {}, waitingMap)
       .catch(() => { /* l'analyse compagnon réessaie au prochain tick */ });

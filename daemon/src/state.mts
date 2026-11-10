@@ -184,6 +184,16 @@ CREATE TABLE IF NOT EXISTS message_index (
   indexed_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS message_index_session ON message_index(session_id, at);
+
+-- Supervision opt-in : une conversation démarrée directement dans OpenChamber
+-- reste visible dans la flotte mais n installe PAS ses sous-agents (compagnon,
+-- vérificateur) par défaut. Ligne explicite seulement : le défaut (tâche du
+-- Superviseur = supervisée, autre = non) est lu, jamais migré.
+CREATE TABLE IF NOT EXISTS supervision (
+  session_id TEXT PRIMARY KEY,
+  supervised INTEGER NOT NULL,       -- 1 = supervisée, 0 = non supervisée
+  updated_at INTEGER NOT NULL
+);
 `);
 try { db.exec('ALTER TABLE task_verdict ADD COLUMN note TEXT'); } catch { /* colonne déjà présente */ }
 try { db.exec('ALTER TABLE companion_map ADD COLUMN version INTEGER'); } catch { /* colonne déjà présente */ }
@@ -455,6 +465,33 @@ export function getTaskState(sessionId: string) {
   return db.query('SELECT * FROM task_state WHERE session_id = ?').get(sessionId) ?? null;
 }
 
+/* --- Supervision opt-in (docs/analyses/mvp1/supervision-bascule.md) --- */
+
+/** Ligne explicite de la table supervision, null = aucun choix du propriétaire. */
+export function getSupervision(sessionId: string): boolean | null {
+  const row = db.query('SELECT supervised FROM supervision WHERE session_id = ?').get(sessionId) as
+    { supervised?: number } | undefined;
+  return row ? row.supervised === 1 : null;
+}
+
+export function setSupervision(sessionId: string, supervised: boolean) {
+  db.query(`INSERT INTO supervision (session_id, supervised, updated_at) VALUES (?,?,?)
+            ON CONFLICT(session_id) DO UPDATE SET supervised = excluded.supervised,
+              updated_at = excluded.updated_at`)
+    .run(sessionId, supervised ? 1 : 0, Date.now());
+}
+
+/**
+ * Règle de défaut (lue, jamais migrée) : le choix explicite fait foi, sinon
+ * une session avec un task_brief (démarrée via le Superviseur) est supervisée,
+ * toute autre conversation OpenChamber est non supervisée par défaut.
+ */
+export function isSupervised(sessionId: string): boolean {
+  const explicit = getSupervision(sessionId);
+  if (explicit !== null) return explicit;
+  return !!db.query('SELECT session_id FROM task_brief WHERE session_id = ?').get(sessionId);
+}
+
 export interface SupervisorSessionRow {
   oc_session_id: string;
   agent: string | null;
@@ -714,6 +751,8 @@ export function migrateTaskSession(oldId: string, newId: string) {
     db.query('UPDATE task_answer SET session_id = ? WHERE session_id = ?').run(newId, oldId);
     // les critères suivent la tâche (refs et états conservés)
     db.query('UPDATE criteria SET task_id = ? WHERE task_id = ?').run(newId, oldId);
+    // le choix de supervision (s'il a été tranché explicitement) suit la tâche
+    db.query('UPDATE supervision SET session_id = ? WHERE session_id = ?').run(newId, oldId);
     db.query('DELETE FROM task_verdict WHERE session_id = ?').run(oldId);
     // Le compagnon enfant est détruit avec son parent : la mapping ne doit pas
     // ressusciter une session morte, le nouveau parent refabrique le sien.

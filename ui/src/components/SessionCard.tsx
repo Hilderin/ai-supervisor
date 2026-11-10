@@ -2,15 +2,17 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import type { CardState } from '../lib/cardState';
 import { cardStateLabel } from '../lib/cardState';
+import { fetchFleet, setSupervision } from '../lib/api';
 import { closeQuestionOf, closeTask } from '../lib/closeTask';
 import { cx } from '../lib/cx';
 import { BUSY_BRIEF, briefRow, isStaleTurn, planLabel } from '../lib/fleet';
+import { isUnsupervised, supervisionActionLabel } from '../lib/supervision';
 import { useFleetStore } from '../store/fleetStore';
 import type { FleetRow } from '../types';
 import { ActivityLine } from './ActivityLine';
 import { CardStateIcon } from './CardStateIcon';
 import { CriteriaPopover } from './CriteriaPopover';
-import { CloseConversationIcon, OpenChamberIcon, QuestionIcon } from './Icons';
+import { CloseConversationIcon, OpenChamberIcon, QuestionIcon, SupervisionIcon, SupervisionOffIcon } from './Icons';
 import { PlanPopover } from './PlanPopover';
 
 interface Props {
@@ -42,6 +44,10 @@ export function SessionCard({ row, state, selected, flash, now, onOpen, onOpenCh
   const waiting = state === 'waiting';
   const done = state === 'done';
   const busy = state === 'busy';
+  // supervision opt-in : false = conversation démarrée directement dans
+  // OpenChamber, sans compagnon ni vérificateur ; undefined (daemon ancien) = supervisée
+  const unsupervised = isUnsupervised(row);
+  const supervisionLabel = supervisionActionLabel(row);
   // au repos, jamais de ligne résiduelle : le daemon ne publie activity que
   // pour une session busy, l'UI s'abstient aussi par sécurité
   const activity = busy ? row.activity : undefined;
@@ -87,6 +93,19 @@ export function SessionCard({ row, state, selected, flash, now, onOpen, onOpenCh
     }
   };
 
+  // Bascule de supervision (opt-in) : le choix est persisté en BD côté daemon ;
+  // le frame SSE suivant porte le nouvel état, aucun rechargement n'est requis.
+  const toggleSupervision = async () => {
+    setMenuOpen(false);
+    setCloseError(null);
+    try {
+      await setSupervision(row.id, unsupervised);
+      void fetchFleet().catch(() => undefined);
+    } catch (e) {
+      setCloseError(String((e as Error)?.message ?? e));
+    }
+  };
+
   // Le menu vit en portail : la carte est en overflow:hidden et ne doit pas le rogner.
   useEffect(() => {
     if (!menuOpen) return;
@@ -96,7 +115,7 @@ export function SessionCard({ row, state, selected, flash, now, onOpen, onOpenCh
       const width = 230;
       const left = Math.min(Math.max(8, rect.right - width), window.innerWidth - width - 8);
       let top = rect.bottom + 4;
-      if (top + 60 > window.innerHeight - 8) top = Math.max(8, rect.top - 60);
+      if (top + 100 > window.innerHeight - 8) top = Math.max(8, rect.top - 100);
       setMenuPos({ top, left });
     };
     place();
@@ -205,6 +224,16 @@ export function SessionCard({ row, state, selected, flash, now, onOpen, onOpenCh
             className="shrink-0 rounded-full bg-orange-soft px-[6px] py-[1px] text-[10.5px] font-semibold tabular-nums text-attend"
           >
             {unreadAnswers > 1 ? `${unreadAnswers} réponses` : '1 réponse'}
+          </span>
+        ) : null}
+        {unsupervised ? (
+          <span
+            data-testid="card-unsupervised"
+            title="Conversation démarrée directement dans OpenChamber : ni compagnon ni vérificateur. Menu ⋯ pour l'activer."
+            className="flex shrink-0 items-center gap-[4px] rounded-full border border-border px-[7px] py-[1px] text-[10px] font-semibold text-muted"
+          >
+            <SupervisionOffIcon />
+            Non supervisée
           </span>
         ) : null}
         <button
@@ -361,6 +390,19 @@ export function SessionCard({ row, state, selected, flash, now, onOpen, onOpenCh
               onClick={(e) => e.stopPropagation()}
               className="z-[200] overflow-hidden rounded-[8px] border border-border bg-card shadow-[0_6px_18px_rgba(0,0,0,.12)]"
             >
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void toggleSupervision();
+                }}
+                className="flex w-full cursor-pointer items-center gap-[8px] bg-transparent px-[12px] py-[9px] text-left text-[13.5px] text-text hover:bg-hover"
+              >
+                <span className="shrink-0 opacity-[.65]">
+                  <SupervisionIcon />
+                </span>
+                {supervisionLabel}
+              </button>
               <button
                 type="button"
                 onClick={(e) => {

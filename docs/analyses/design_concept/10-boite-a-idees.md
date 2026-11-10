@@ -21,7 +21,7 @@ Les idées à faire sont triées par priorité. Les idées complétées ou close
 | 13 | Chemins de fichiers et URL cliquables dans les résultats | Aller du résultat au fichier sans copier-coller ; s'appuie sur le rendu existant de la livraison et sur `/api/fleet/asset` | faible à moyen | À faire |
 | 15 | Always on top + une UI qui tient dans un coin | Définit le mode d'usage (patch d'écran) ; à faire une fois les signaux essentiels arrêtés | moyen | À faire |
 | 26 | Saisir des commandes dans le chat du superviseur | Des gestes déterministes déjà implémentés côté daemon passent par un tour de LLM : latence et risque d'interprétation pour ce qui devrait être immédiat et prévisible | faible à moyen | À faire |
-| 27 | Démarrer des conversations sans supervision | Les sessions jetables ou de fond sont enveloppées par le même dispositif (carte, compagnon, analyse) que les vraies tâches : du bruit dans la flotte, un coût pour rien | faible à moyen | À faire |
+| 27 | Démarrer des conversations sans supervision | Les sessions jetables ou de fond sont enveloppées par le même dispositif (carte, compagnon, analyse) que les vraies tâches : du bruit dans la flotte, un coût pour rien | faible à moyen | Fait (2026-11-09, variante opt-in : [mvp1/supervision-bascule.md](../mvp1/supervision-bascule.md)) |
 
 > Ordre révisé le 2026-11-08 : le markdown du chat, les blocs `openui-lang`, le tool `question` du chat puis les deux réglages de modèle passent en tête ; le reste garde son ordre d'origine. Les raisons de rang sont celles d'origine, ajustées seulement là où elles contredisaient la nouvelle position. Les idées 18, 19, 20, 21, 22 et 23 sont faites le 2026-11-08 et passent dans les complétées.
 
@@ -640,3 +640,5 @@ Constat sur le code actuel :
 - **le chat lui-même** : la session de supervision vit déjà hors de la flotte ; l'idée donne un statut à d'autres conversations, pas une seconde zone grise confuse à maintenir.
 
 Lien : l'exclusion de `~/.superviseur` (le mécanisme à généraliser), idée « remettre dans le board la carte d'une conversation terminée » (le geste inverse), le compagnon et ses déclencheurs (`daemon/src/companion.mts`), la reprise automatique ([mvp1/auto-restart.md](../mvp1/auto-restart.md)).
+
+Implémenté le 9 nov 2026 en variante opt-in (décision du propriétaire) : la carte RESTE dans la flotte, seul le dispositif de supervision (compagnon, vérificateur) devient optionnel : conversations du Superviseur supervisées par défaut, conversations OpenChamber non supervisées par défaut, bascule par carte à tout moment. Détail et choix : [mvp1/supervision-bascule.md](../mvp1/supervision-bascule.md).
