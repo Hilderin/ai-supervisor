@@ -82,9 +82,7 @@ const verdict = JSON.stringify({
 /** harnais compagnon : création d'un enfant, présence, envoi, réponse verdict */
 function companionRoutes(compId: string) {
   return [
-    { match: (url: string, m: string) => url.endsWith('/api/openchamber/sessions') && m === 'POST', reply: () => Response.json({ sessionId: compId }) },
-    { match: (url: string, m: string) => url.includes(`/api/session/${compId}/agent`) && m === 'POST', reply: () => new Response(null, { status: 204 }) },
-    { match: (url: string, m: string) => url.includes(`/api/session/${compId}/model`) && m === 'POST', reply: () => new Response(null, { status: 204 }) },
+    { match: (url: string, m: string) => url.endsWith('/api/session') && m === 'POST', reply: () => Response.json({ data: { id: compId } }) },
     { match: (url: string) => url.includes(`/api/session/${compId}`) && url.includes('/message'), reply: () => Response.json({
       data: [{ id: 'r1', type: 'assistant', time: { created: Date.now() + 1000 }, content: [{ type: 'text', text: verdict }] }],
     }) },
@@ -128,7 +126,7 @@ test('companionTick : aucun compagnon sur une conversation non supervisée (kick
   await new Promise(resolve => setTimeout(resolve, 300));
   expect(getCompanion('ses_openchamber2')).toBeNull();
   // aucun enfant créé, aucun envoi à un enfant : la conversation reste intacte
-  expect(calls.some(c => c.url.endsWith('/api/openchamber/sessions') && c.method === 'POST')).toBe(false);
+  expect(calls.some(c => c.url.endsWith('/api/session') && c.method === 'POST')).toBe(false);
   expect(getTaskState('ses_openchamber2')).toBeNull();
 });
 
@@ -142,7 +140,7 @@ test('la même conversation activée (bascule) crée son compagnon au kick', asy
     { ses_openchamber2: { status: 'idle', lastUpdateAt: 20 } },
   );
   await waitFor(() => getCompanion('ses_openchamber2')?.compId === 'comp-actif');
-  expect(calls.some(c => c.url.endsWith('/api/openchamber/sessions') && c.method === 'POST')).toBe(true);
+  expect(calls.some(c => c.url.endsWith('/api/session') && c.method === 'POST')).toBe(true);
 });
 
 test('companionTick : la tâche du Superviseur (brief) garde son compagnon par défaut', async () => {
@@ -152,7 +150,7 @@ test('companionTick : la tâche du Superviseur (brief) garde son compagnon par d
     { ses_brief: { status: 'idle', lastUpdateAt: 20 } },
   );
   await waitFor(() => getCompanion('ses_brief')?.compId === 'comp-brief');
-  expect(calls.some(c => c.url.endsWith('/api/openchamber/sessions') && c.method === 'POST')).toBe(true);
+  expect(calls.some(c => c.url.endsWith('/api/session') && c.method === 'POST')).toBe(true);
 });
 
 test('verifierTick : aucun vérificateur sur une conversation non supervisée, même avec critères', async () => {
@@ -165,7 +163,7 @@ test('verifierTick : aucun vérificateur sur une conversation non supervisée, m
   );
   await new Promise(resolve => setTimeout(resolve, 300));
   expect(getVerifier('ses_unsup_crit')).toBeNull();
-  expect(calls.some(c => c.url.endsWith('/api/openchamber/sessions') && c.method === 'POST')).toBe(false);
+  expect(calls.some(c => c.url.endsWith('/api/session') && c.method === 'POST')).toBe(false);
 });
 
 test('verifierTick : la même conversation activée crée son vérificateur', async () => {
@@ -176,7 +174,7 @@ test('verifierTick : la même conversation activée crée son vérificateur', as
     { ses_unsup_crit: { status: 'idle', lastUpdateAt: 20 } },
   );
   await waitFor(() => getVerifier('ses_unsup_crit')?.verifierId === 'verif-actif');
-  expect(calls.some(c => c.url.endsWith('/api/openchamber/sessions') && c.method === 'POST')).toBe(true);
+  expect(calls.some(c => c.url.endsWith('/api/session') && c.method === 'POST')).toBe(true);
 });
 
 test('désactivation : sous-agents archivés (doux), choix persisté, conversation intacte', async () => {

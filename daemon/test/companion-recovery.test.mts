@@ -55,14 +55,8 @@ test('recrée un compagnon supprimé même si la session parente est idle', asyn
         content: [{ type: 'text', text: verdict }],
       }] });
     }
-    if (url.endsWith('/api/openchamber/sessions') && method === 'POST') {
-      return Response.json({ sessionId: 'fresh-companion' });
-    }
-    if (url.includes('/api/session/fresh-companion/agent') && method === 'POST') {
-      return new Response(null, { status: 204 });
-    }
-    if (url.includes('/api/session/fresh-companion/model') && method === 'POST') {
-      return new Response(null, { status: 204 });
+    if (url.endsWith('/api/session') && method === 'POST') {
+      return Response.json({ data: { id: 'fresh-companion' } });
     }
     if (url.includes('/api/openchamber/sessions/fresh-companion/send') && method === 'POST') {
       return Response.json({ ok: true });
@@ -86,7 +80,7 @@ test('recrée un compagnon supprimé même si la session parente est idle', asyn
 
     expect(getCompanion('parent-idle')?.compId).toBe('fresh-companion');
     expect(calls.some(call => call.url.includes('/api/session/companion-deleted'))).toBe(true);
-    expect(calls.some(call => call.url.endsWith('/api/openchamber/sessions') && call.method === 'POST')).toBe(true);
+    expect(calls.some(call => call.url.endsWith('/api/session') && call.method === 'POST')).toBe(true);
     expect(calls.some(call => call.url.includes('/api/openchamber/sessions/fresh-companion/send'))).toBe(true);
   } finally {
     globalThis.fetch = originalFetch;

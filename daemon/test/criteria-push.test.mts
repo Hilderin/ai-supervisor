@@ -94,11 +94,8 @@ describe('vérificateur : création proactive', () => {
       const path = url.replace(/^https?:\/\/[^/]+/, '');
       const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : {};
       calls.push({ path, body });
-      if (path === '/api/openchamber/sessions' && init?.method === 'POST') {
-        return new Response(JSON.stringify({ sessionId: 'ses_verif_new' }), { status: 200 });
-      }
-      if (path === '/api/session/ses_verif_new/agent' && init?.method === 'POST') {
-        return new Response(null, { status: 204 });
+      if (path.startsWith('/api/session') && init?.method === 'POST' && !path.includes('/send') && !path.includes('/prompt')) {
+        return new Response(JSON.stringify({ data: { id: 'ses_verif_new' } }), { status: 200 });
       }
       if (path.includes('/message')) return new Response(JSON.stringify({ data: [] }), { status: 200 });
       if (path.startsWith('/api/session/')) return new Response(JSON.stringify({ data: { id: path.split('/')[3], time: {} } }), { status: 200 });
@@ -116,10 +113,10 @@ describe('vérificateur : création proactive', () => {
       // aucun appel de phase (pas de criteria, pas de kick) : pas de send au vérificateur
       expect(calls.some(c => c.path.includes('/send'))).toBe(false);
       // un second tick ne recrée pas (mapping existant)
-      const createCalls = calls.filter(c => c.path === '/api/openchamber/sessions').length;
+      const createCalls = calls.filter(c => c.path === '/api/session' && (c.body as { parentID?: string }).parentID === TASK).length;
       await verifierTick(sessions, { [TASK]: { status: 'idle' } });
       await new Promise(r => setTimeout(r, 60));
-      expect(calls.filter(c => c.path === '/api/openchamber/sessions').length).toBe(createCalls);
+      expect(calls.filter(c => c.path === '/api/session' && (c.body as { parentID?: string }).parentID === TASK).length).toBe(createCalls);
     } finally {
       globalThis.fetch = originalFetch;
       resetVerifierState();
