@@ -14,6 +14,16 @@ const http = require('node:http');
 const SUPERVISEUR_PORT = Number(process.env.SUPERVISEUR_PORT ?? 5180);
 const UI_URL = `http://127.0.0.1:${SUPERVISEUR_PORT}/fleet`;
 
+// userData surchargeable (SUPERVISEUR_USER_DATA) : permet de faire tourner une
+// seconde instance sur un autre port avec ses propres données et SON PROPRE
+// verrou single-instance. Sans surcharge, dev et empaqueté partagent le même
+// dossier (%APPDATA%\superviseur, le nom du package.json ne diffère de
+// productName que par la casse, ignorée par Windows) : les deux instances se
+// bloquent l'une l'autre.
+if (process.env.SUPERVISEUR_USER_DATA) {
+  app.setPath('userData', process.env.SUPERVISEUR_USER_DATA);
+}
+
 // Racine du code applicatif : <resources>/app dans le .exe, le repo en dev.
 const appRoot = app.isPackaged
   ? path.join(process.resourcesPath, 'app')
