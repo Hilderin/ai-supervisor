@@ -406,8 +406,12 @@ async function handleApi(req: http.IncomingMessage, res: http.ServerResponse, ur
     const body = await readBody(req);
     const title = String(body.title ?? '').slice(0, 80) || 'Nouvelle tâche';
     const prompt = String(body.prompt ?? '');
+    // Sans projet choisi, la session ne doit pas tomber dans le dossier courant
+    // d'OpenChamber (home sous Windows) : défaut = dossier de supervision.
+    const requested = typeof body.directory === 'string' ? body.directory.trim() : '';
+    const directory = requested || SUPERVISOR_DIR;
     try {
-      const out = await relay('/api/openchamber/sessions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, prompt: prompt || title }) });
+      const out = await relay('/api/openchamber/sessions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, prompt: prompt || title, directory }) });
       logEvent('new', 'open', title);
       json(res, 200, out);
     } catch (e) {
