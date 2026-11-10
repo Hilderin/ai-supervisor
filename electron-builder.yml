@@ -18,6 +18,10 @@ extraResources:
     to: app/electron/watchdog.mts
   - from: daemon
     to: app/daemon
+    filter:
+      - '**/*'
+      - '!test/**'
+      - '!**/*.test.*'
   - from: ui/dist
     to: app/ui/dist
   - from: package.json

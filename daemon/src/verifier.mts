@@ -21,6 +21,7 @@ import {
 } from './criteria.mts';
 import { putNotification, setNotificationStatus } from './state.mts';
 import { takeVerifierKick } from './verifier-kicks.mts';
+import { SUPERVISOR_DIR } from './supervisor.mts';
 import { toolActionLine } from './verdict.mts';
 
 let base = '';
@@ -109,10 +110,21 @@ async function ensureVerifier(taskId: string, s: VerifierState): Promise<string>
   }
   const agent = ensureVerifierDefinition();
   // une seule session pour toutes les vérifications de la tâche : le fil
-  // (preuves jugées, rejets, ajouts) reste dans la conversation de l'enfant
-  const r = await jpost('/api/session', { parentID: taskId, title: 'verif. critères', agent });
-  const id = (r.data as { data?: { id?: string } })?.data?.id;
-  if (!id) throw new Error('session vérificateur non créée');
+  // (preuves jugées, rejets, ajouts) reste dans la conversation de l'enfant.
+  // Elle vit dans le dossier de supervision : OpenChamber impose le dossier du
+  // PARENT à un enfant (directory ignoré, testé le 2026-11-10) et seule la
+  // route openchamber accepte un directory ; la flotte et les ticks excluent
+  // déjà tout ce qui y vit.
+  const r = await jpost('/api/openchamber/sessions', {
+    title: 'verif. critères',
+    directory: SUPERVISOR_DIR,
+  });
+  const id = (r.data as { sessionId?: string })?.sessionId;
+  if (!r.ok || !id) throw new Error('session vérificateur non créée');
+  // la route de création ignore l'agent sans prompt : fixé après coup, avant
+  // le premier send
+  const agentOut = await jpost(`/api/session/${encodeURIComponent(id)}/agent`, { agent });
+  if (!agentOut.ok) throw new Error(`agent vérificateur non appliqué (${agentOut.status})`);
   s.verifierSession = id;
   putVerifier(taskId, id, agent);
   logEvent(taskId, 'note', `vérificateur #${id.slice(-6)} (${agent})`);

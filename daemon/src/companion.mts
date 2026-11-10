@@ -19,6 +19,7 @@ import { takeKick, kick as pushKick } from './kicks.mts';
 import { isDaemonNotice, messageText } from './messages.mts';
 import { companionModelRef } from './prefs.mts';
 import { modelPayload } from './models.mts';
+import { SUPERVISOR_DIR } from './supervisor.mts';
 import {
   detectHumanQuestion, emptyWait, lintSummary, normalizeVerdict, parsePlanFromDb,
   parseVerdictText, resolveObjective, scrubSummary, shouldRepair, toolActionLine,
@@ -225,16 +226,26 @@ async function ensureCompanion(sid: string, s: CompanionState) {
     s.compSession = undefined;
     logEvent(sid, 'note', `compagnon ${presence === 'gone' ? 'supprimé' : 'archivé'} : recréation`);
   }
-  // l'agent est fixé dès la création : l'API send ne l'impose pas toujours aux sessions enfants
+  // La conversation compagnon vit dans le dossier de supervision (pas dans
+  // celui de sa tâche) : la flotte et les ticks excluent déjà tout ce qui y
+  // vit. Sans parentID : OpenChamber impose le dossier du PARENT à un enfant
+  // (directory ignoré, testé le 2026-11-10) et seule la route openchamber
+  // accepte un directory.
   const model = modelPayload((await companionModelRef()) ?? '');
-  const r = await jpost('/api/session', {
-    parentID: sid,
+  const r = await jpost('/api/openchamber/sessions', {
     title: 'comp. supervision',
-    agent: currentAgent,
-    ...(model ? { model } : {}),
+    directory: SUPERVISOR_DIR,
   });
-  const id = (r.data as { data?: { id?: string } })?.data?.id;
-  if (!id) throw new Error('session compagnon non créée');
+  const id = (r.data as { sessionId?: string })?.sessionId;
+  if (!r.ok || !id) throw new Error('session compagnon non créée');
+  // la route de création ignore agent et modèle sans prompt : fixés après coup
+  // (l'agent est fixé AVANT le premier send : le send ne l'impose pas toujours)
+  const agentOut = await jpost(`/api/session/${encodeURIComponent(id)}/agent`, { agent: currentAgent });
+  if (!agentOut.ok) throw new Error(`agent compagnon non appliqué (${agentOut.status})`);
+  if (model) {
+    const modelOut = await jpost(`/api/session/${encodeURIComponent(id)}/model`, { model });
+    if (!modelOut.ok) logEvent(sid, 'note', 'modèle compagnon non appliqué à la création');
+  }
   s.compSession = id;
   rememberCompanion(sid, id, currentAgent);
   logEvent(sid, 'note', `compagnon #${id.slice(-6)} (${currentAgent}${model ? `, modèle ${model.providerID}/${model.id}` : ''})`);
