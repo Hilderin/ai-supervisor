@@ -19,9 +19,10 @@ import {
   armTaskResume, getTaskState, getTaskBrief, getSupervisorMode, listTaskBriefs, logEvent,
   putTaskBrief, reviveTaskResume, setSupervisorMode, upsertTaskState,
 } from './state.mts';
-import { isSupervisorBusy, isSupervisorSession, SUPERVISOR_DIR, wrapOwnerPrompt } from './supervisor.mts';
+import { isSupervisorBusy, isSupervisorSession, SUPERVISOR_DIR } from './supervisor.mts';
 import { taskModelRef } from './prefs.mts';
 import { findModel } from './models.mts';
+import { markTaskSessionRead } from './oc-session.mts';
 
 export interface ToolResult {
   ok: boolean;
@@ -213,9 +214,8 @@ async function resolveProject(ref: string): Promise<{ project?: Project; error?:
   return { error: 'unknown_project', candidates: list.slice(0, 8) };
 }
 
-function sectionOf(row: FleetRow): 'waiting' | 'running' | 'done' {
+function sectionOf(row: FleetRow): 'waiting' | 'running' {
   if (row.pendingForms?.length || row.pendingPermissions?.length) return 'waiting';
-  if (row.sup?.termine && row.status !== 'busy') return 'done';
   return 'running';
 }
 
@@ -232,15 +232,12 @@ async function taskView(row: FleetRow) {
   const task = getTaskState(row.id) as { closed_at?: number } | null;
   const waiting = row.pendingForms?.[0]?.fields?.[0]?.title
     ?? row.pendingForms?.[0]?.title
-    ?? row.sup?.attend
     ?? null;
   return {
     id: row.id,
     title: row.title,
     section: sectionOf(row),
     status: row.status,
-    summary: row.sup?.resume ?? '',
-    next: row.sup?.next ?? '',
     waiting,
     project: row.dir ? projectName(row.dir) : '',
     directory: row.dir ?? '',
@@ -289,8 +286,12 @@ function composePrompt(p: {
     'Plan : tiens ton plan à jour en continu (pas de limite au nombre d\'éléments) : une liste séquentielle d\'étapes, découpées par petits incréments, posée et modifiée avec `planwrite`.',
     'Marque chaque étape `in_progress` quand tu la commences et `completed` quand elle est finie, en mettant à jour l\'élément par son numéro avec `planupdate` plutôt qu\'en réécrivant toute la liste.',
     'Utilise `planread` après une compaction.',
-    'Critères : ta tâche est jugée sur des critères d\'acceptation (AC-01, AC-02, ...) : crée-les avec `criteria_add` (titre, détail, au moins une méthode de validation), soumets tes preuves avec `criteria_to_validate` et relis la liste avec `criteria_list`.',
-    'Le vérificateur du Superviseur valide ou refuse tes preuves ; ses rejets t\'arrivent en notification avec leur raison : corrige puis resoumets une preuve. N\'invente pas de validation toi-même.',
+    'Critères : ta tâche est jugée sur des critères d\'acceptation (AC-01, AC-02, ...), TOI seul juge, il n\'y a pas de vérificateur :',
+    '- crée-les avec `criteria_add` (titre, détail, au moins une méthode de validation), relis-les avec `criteria_list` ;',
+    '- soumets une preuve réelle avec `criteria_to_validate` (sortie de test, capture, extrait de code pointant vers un fichier du projet) ;',
+    '- puis juge-la toi-même : `criteria_set_status` {ref, status: "validated" | "to_fix", note} pour marquer « validé » (note = ce que tu as vérifié) ou « à corriger » (note = raison obligatoire) ;',
+    '- HONNÊTETÉ : ne marque « validé » qu\'après une vérification RÉELLE de la preuve (test passé vu, fichier ouvert, rendu contrôlé). Un critère validé à tort se voit : le propriétaire lit la liste, la preuve et la note. En cas de doute, mets « à corriger » avec la raison, corrige, puis revalide.',
+    '- un critère modifié (criteria_update) repasse « à faire », sa preuve est invalidée ; un retrait (criteria_remove) ne libère jamais son numéro.',
     'Réponse au propriétaire : dès qu\'une information attendue par le propriétaire est prête (réponse à la consigne, point à valider, résultat demandé), envoie-la avec le tool `answer` : elle s\'affiche dans le Superviseur, rendue en markdown (titres, listes, gras quand la réponse le justifie, sans forcer la longueur) ; si la réponse rattache à une question posée, passe cette question dans le champ `question`.',
     'Le propriétaire ne lit PAS la conversation de la tâche (ni le rendu `openchamber_render`, ni un tableau laissé dans la session) : la réponse doit tenir debout seule, et tout tableau ou classement utile est reproduit en markdown dans le texte de `answer`, jamais renvoyé au chat. Un bloc `Table`, `Steps` ou `Callout` y est aussi dessiné.',
     'Pose les questions avec le tool `question` : le formulaire s\'affiche dans le Superviseur ; une question posée en texte dans la conversation n\'arrive jamais au propriétaire.',
@@ -305,12 +306,11 @@ function composePrompt(p: {
 }
 
 function activeCount(): number {
+  // plus de verdict : toute tâche non fermée compte comme active
   const rows = currentFleet().rows;
   return rows.filter(r => {
     const st = getTaskState(r.id) as { closed_at?: number } | null;
-    if (st?.closed_at) return false;
-    if (r.sup?.termine && r.status !== 'busy') return false;
-    return true;
+    return !st?.closed_at;
   }).length;
 }
 
@@ -434,7 +434,6 @@ export async function startTask(args: {
     const duplicate = currentFleet().rows.find(r => {
       const st = getTaskState(r.id) as { closed_at?: number } | null;
       if (st?.closed_at) return false;
-      if (r.sup?.termine && r.status !== 'busy') return false;
       return normTitle(r.title) === normTitle(title) && r.dir === project.directory;
     });
     if (duplicate) {
@@ -540,11 +539,9 @@ export async function sendTask(args: { task?: string; text?: string } = {}): Pro
     cancelledQuestion = pending.forms[0].text;
     logEvent(row.id, 'note', `question annulée par message : ${cancelledQuestion}`);
   }
-  // encadrement owner : le plan doit être remis à jour quand une nouvelle
-  // instruction du propriétaire arrive (session idle et tour busy) ; le journal
-  // et la réponse gardent le texte brut
-  const prompt = wrapOwnerPrompt(text);
-  const out = await jpost(`/api/session/${row.id}/prompt`, { text: prompt, delivery: 'steer' });
+  // encadrement retiré (2026-11-12) : le texte du propriétaire part tel quel ;
+  // les consignes plan/critères/answer vivent dans le prompt initial de la tâche
+  const out = await jpost(`/api/session/${row.id}/prompt`, { text, delivery: 'steer' });
   if (!out.ok) return { ok: false, error: 'send_failed', message: `envoi refusé (${out.status})`, taskId: row.id };
   // le propriétaire écrit à la tâche : sa reprise repart si elle était désactivée
   reviveTaskResume(row.id);
@@ -616,6 +613,9 @@ export async function closeTask(args: { task?: string; note?: string; force?: bo
       ? `fermé en abandonnant la question : ${abandoned}`
       : 'fermé depuis le chat');
   logEvent('supervisor', 'note', `close_task ${row.title}`);
+  // Geste OpenChamber best-effort (lu + In work retiré) : la fermeture est
+  // déjà effective en base, un échec ne fait qu'ajouter une ligne au journal.
+  await markTaskSessionRead(row.id);
   return { ok: true, taskId: row.id, title: row.title, abandonedQuestion: abandoned || undefined };
 }
 
@@ -639,15 +639,31 @@ async function runInvestigationTool(name: string, args: Record<string, unknown>)
   return { ok: false, error: 'unknown_tool', message: name };
 }
 
+/** Tools de lecture bornée du projet sélectionné : réservés au chat de supervision. */
+const INVESTIGATION_TOOLS = new Set(['read_project', 'glob_project', 'grep_project']);
+
+/**
+ * Tools de flotte disponibles à TOUTE session (décision du 2026-11-12) : une
+ * tâche, une conversation quelconque ou le chat de supervision peuvent lister
+ * les projets et tâches, démarrer une tâche, lui parler, annuler sa question
+ * ou la fermer. Plus de garde `not_supervisor` sur ces tools.
+ */
+const FLEET_TOOLS = new Set([
+  'list_projects', 'list_tasks', 'get_task', 'start_task', 'send_task', 'cancel_question', 'close_task',
+]);
+
 /** Dispatch unique pour la route /api/tools/:name. */
 export async function runTool(name: string, callerSessionId: string, args: Record<string, unknown>): Promise<ToolResult> {
-  if (!(await isSupervisorSession(callerSessionId))) {
-    return { ok: false, error: 'not_supervisor', message: 'outil réservé à la session de supervision' };
+  if (INVESTIGATION_TOOLS.has(name)) {
+    // lectures bornées : le chat de supervision, en mode Investigation uniquement
+    if (!(await isSupervisorSession(callerSessionId))) {
+      return { ok: false, error: 'not_supervisor', message: 'outil réservé à la session de supervision' };
+    }
+    const denied = modeDenial(name, getSupervisorMode().mode);
+    if (denied) return denied;
+    return runInvestigationTool(name, args);
   }
-  const mode = getSupervisorMode().mode;
-  const denied = modeDenial(name, mode);
-  if (denied) return denied;
-  if (mode === 'investigation') return runInvestigationTool(name, args);
+  if (!FLEET_TOOLS.has(name)) return { ok: false, error: 'unknown_tool', message: name };
   switch (name) {
     case 'list_projects': return listProjects();
     case 'list_tasks': return listTasks(args as { section?: string; include_closed?: boolean });

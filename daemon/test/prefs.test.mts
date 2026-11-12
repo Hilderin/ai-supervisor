@@ -25,7 +25,6 @@ let state: typeof import('../src/state.mts');
 let models: typeof import('../src/models.mts');
 let prefs: typeof import('../src/prefs.mts');
 let supervisor: typeof import('../src/supervisor.mts');
-let companion: typeof import('../src/companion.mts');
 let tools: typeof import('../src/tools.mts');
 
 /** Modèles exposés : mutable pour simuler un modèle retiré du catalogue. */
@@ -62,10 +61,8 @@ beforeAll(async () => {
           { id: 'plan', name: 'Plan', mode: 'primary', hidden: false },
           { id: 'general', name: 'General', mode: 'subagent', hidden: false },
           { id: 'title', name: 'Title', mode: 'primary', hidden: true },
-          { id: 'superviseur-orchestrateur-dc6b25be', name: 'orchestrateur', mode: 'primary', hidden: false },
-          { id: 'superviseur-analyste-1234', name: 'analyste', mode: 'primary', hidden: false },
-          { id: 'superviseur-verificateur', name: 'verificateur', mode: 'primary', hidden: false },
-        ] });
+          { id: 'superviseur-orchestrateur', name: 'orchestrateur', mode: 'primary', hidden: false },
+                            ] });
       }
       if (path === '/api/config/settings') return Response.json({ defaultModel: 'openai/gpt-fast' });
       if (path === `/api/session/${KEEP}` && req.method === 'GET') {
@@ -96,15 +93,15 @@ beforeAll(async () => {
   models = await import('../src/models.mts');
   prefs = await import('../src/prefs.mts');
   supervisor = await import('../src/supervisor.mts');
-  companion = await import('../src/companion.mts');
   tools = await import('../src/tools.mts');
   models.setBase(`http://127.0.0.1:${server.port}`);
   supervisor.setBase(`http://127.0.0.1:${server.port}`);
-  companion.setBase(`http://127.0.0.1:${server.port}`);
 });
 
 afterAll(async () => {
   server?.stop(true);
+  // la base SQLite ouverte verrouille le dossier sous Windows (EBUSY au rm)
+  try { state.db.close(); } catch { /* déjà fermée */ }
   await rm(root, { recursive: true, force: true });
 });
 
@@ -114,7 +111,7 @@ beforeEach(() => {
   live = { agent: 'build', model: { providerID: 'openai', id: 'gpt-fast' } };
   models.resetCatalogCache();
   prefs.resetPrefWarnings();
-  state.db.run('DELETE FROM supervisor_pref; DELETE FROM supervisor_session; DELETE FROM companion_map;');
+  state.db.run('DELETE FROM supervisor_pref; DELETE FROM supervisor_session; ');
 });
 
 const posts = (pattern: RegExp) => calls.filter(c => c.method === 'POST' && pattern.test(c.path));
@@ -131,7 +128,7 @@ describe('catalogue', () => {
     expect(config.models.find(m => m.ref === 'skytech/DeepSeek-V4.1-Flash-1017')?.providerName).toBe('Skytech');
     expect(config.models.some(m => m.ref === 'openai/embed')).toBe(false);
     expect(config.models.some(m => m.ref === 'openai/judge')).toBe(false);
-    // l'analyste, le vérificateur et les versions de l'orchestrateur ne sont pas des choix
+    // l'orchestrateur et les agents internes ne sont pas des choix
     expect(config.agents.map(a => a.id)).toEqual(['build', 'plan']);
   });
 
@@ -149,7 +146,7 @@ describe('catalogue', () => {
 
   test('sans préférence, tout est au défaut actuel', async () => {
     const config = await prefs.getSupervisorConfig();
-    expect(config.prefs).toEqual({ chatModel: null, chatAgent: null, taskModel: null, companionModel: null });
+    expect(config.prefs).toEqual({ chatModel: null, chatAgent: null, taskModel: null });
     expect(config.defaults.chatModel).toBe('openai/gpt-fast');
     expect(await prefs.chatAgentRef()).toBeNull();
     expect(await prefs.taskModelRef()).toBeNull();
@@ -162,19 +159,17 @@ describe('sauvegarde et repli', () => {
       chatAgent: 'plan',
       chatModel: 'openai/gpt-strong',
       taskModel: 'opencode/free',
-      companionModel: 'openai/gpt-fast',
     });
     expect(saved.warnings).toEqual([]);
     expect(saved.prefs).toEqual({
       chatModel: 'openai/gpt-strong', chatAgent: 'plan',
-      taskModel: 'opencode/free', companionModel: 'openai/gpt-fast',
+      taskModel: 'opencode/free',
     });
     // relecture depuis la base, comme après un redémarrage
     const config = await prefs.getSupervisorConfig();
     expect(config.prefs).toEqual(saved.prefs);
     expect(await prefs.chatAgentRef()).toBe('plan');
     expect(await prefs.taskModelRef()).toBe('opencode/free');
-    expect(await prefs.companionModelRef()).toBe('openai/gpt-fast');
   });
 
   test('une valeur inconnue retombe sur le défaut avec un avertissement clair', async () => {
@@ -182,10 +177,9 @@ describe('sauvegarde et repli', () => {
       chatAgent: 'agent-fantome',
       chatModel: 'openai/inconnu',
       taskModel: 'provider-absent/modele',
-      companionModel: 'openai/gpt-strong',
     });
     expect(saved.prefs).toMatchObject({
-      chatModel: null, chatAgent: null, taskModel: null, companionModel: 'openai/gpt-strong',
+      chatModel: null, chatAgent: null, taskModel: null,
     });
     expect(saved.warnings.map(w => w.field).sort()).toEqual(['chatAgent', 'chatModel', 'taskModel']);
     const byField = Object.fromEntries(saved.warnings.map(w => [w.field, w.message]));
@@ -251,7 +245,7 @@ describe('modèle d’une tâche au lancement', () => {
 });
 
 describe('application à chaud', () => {  test('le chat change d’agent et de modèle sans changer de session', async () => {
-    state.setSupervisorSession({ ocSessionId: KEEP, agent: 'build', version: 1, title: 'Superviseur' });
+    state.setSupervisorSession({ ocSessionId: KEEP, agent: 'build', title: 'Superviseur' });
     await prefs.saveSupervisorConfig({ chatAgent: 'plan', chatModel: 'openai/gpt-strong' });
 
     const applied = await supervisor.applySupervisorChatConfig();
@@ -273,31 +267,17 @@ describe('application à chaud', () => {  test('le chat change d’agent et de m
   });
 
   test('revenir au défaut ramène l’orchestrateur et le modèle par défaut', async () => {
-    state.setSupervisorSession({ ocSessionId: KEEP, agent: 'build', version: 1, title: 'Superviseur' });
+    state.setSupervisorSession({ ocSessionId: KEEP, agent: 'build', title: 'Superviseur' });
     await prefs.saveSupervisorConfig({ chatAgent: 'build', chatModel: 'openai/gpt-strong' });
     await prefs.saveSupervisorConfig({ chatAgent: '', chatModel: '' });
 
     const applied = await supervisor.applySupervisorChatConfig();
     expect(applied.applied).toBe(true);
-    expect(applied.agent?.startsWith('superviseur-orchestrateur-')).toBe(true);
-    expect(live.agent.startsWith('superviseur-orchestrateur-')).toBe(true);
+    expect(applied.agent).toBe('superviseur-orchestrateur');
+    expect(live.agent).toBe('superviseur-orchestrateur');
     expect(live.model).toEqual({ providerID: 'openai', id: 'gpt-fast' });
     expect(state.getSupervisorSession()?.oc_session_id).toBe(KEEP);
   });
 
-  test('le modèle du compagnon est propagé aux compagnons vivants, pas au défaut', async () => {
-    state.putCompanion('ses_parent', COMP, 'build');
-    await prefs.saveSupervisorConfig({ companionModel: 'openai/gpt-strong' });
 
-    const out = await companion.applyCompanionModelPref();
-    expect(out).toEqual({ updated: 1, failed: 0 });
-    expect(bodyOf(posts(new RegExp(`/api/session/${COMP}/model$`))[0])).toEqual({
-      model: { providerID: 'openai', id: 'gpt-strong' },
-    });
-
-    calls = [];
-    await prefs.saveSupervisorConfig({ companionModel: '' });
-    expect(await companion.applyCompanionModelPref()).toEqual({ updated: 0, failed: 0 });
-    expect(posts(/\/model$/)).toHaveLength(0);
-  });
 });

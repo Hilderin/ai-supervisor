@@ -2,7 +2,7 @@
  * La session de supervision du chat de gauche.
  *
  * C'est une session OpenChamber ordinaire, créée dans `~/.superviseur` avec
- * l'agent `superviseur-orchestrateur-<hash>`. Elle est exclue de la flotte et
+ * l'agent `superviseur-orchestrateur` (nom fixe). Elle est exclue de la flotte et
  * du compagnon. Les messages vivent dans OpenChamber ; le daemon ne garde que
  * l'id, l'agent et la version.
  */
@@ -11,7 +11,7 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  ensureOrchestratorDefinition, getOrchestratorVersion, getSupervisorMode, getSupervisorSession,
+  ensureOrchestratorDefinition, getSupervisorMode, getSupervisorSession,
   logEvent, setSupervisorSession,
 } from './state.mts';
 import { messageText } from './messages.mts';
@@ -218,10 +218,10 @@ async function liveSessionMeta(id: string): Promise<SessionMeta | null> {
 }
 
 /**
- * Que faire de la conversation de supervision ?
- * Un changement de version du prompt ne doit JAMAIS la remplacer : la
- * conversation est conservée et son agent bascule en place sur le nom versionné
- * (`POST /api/session/:id/agent`), qui charge le nouveau prompt.
+ * Que faire de la conversation de supervision ? Elle n'est JAMAIS remplacée :
+ * nom d'agent fixe, la conversation est conservée ; bascule en place
+ * (`POST /api/session/:id/agent`) seulement si l'agent courant diffère
+ * (agent choisi dans la config, ancien nom versionné).
  */
 export function supervisorSessionAction(p: {
   exists: boolean;
@@ -355,10 +355,8 @@ async function ensureSupervisorSessionOnce(): Promise<{
   agent: string;
   model: SessionMeta['model'] | null;
 }> {
-  const version = getOrchestratorVersion();
-  const orchestrator = ensureOrchestratorDefinition(version);
-  // l'agent choisi dans la config remplace l'orchestrateur ; sans choix, le
-  // nom versionné du repo reste la référence (cache de prompt par nom)
+  const orchestrator = ensureOrchestratorDefinition();
+  // l'agent choisi dans la config remplace l'orchestrateur (nom fixe)
   const agent = (await chatAgentRef()) ?? orchestrator;
   await trustWorkspace();
   void quietSupervisorSessions();
@@ -372,7 +370,7 @@ async function ensureSupervisorSessionOnce(): Promise<{
   });
   if (action === 'create' || !knownId) {
     const id = await createSupervisorSession(agent);
-    setSupervisorSession({ ocSessionId: id, agent, version, title: 'Superviseur' });
+    setSupervisorSession({ ocSessionId: id, agent, title: 'Superviseur' });
     logEvent('supervisor', 'note', `session de supervision #${id.slice(-6)} (${agent})`);
     return { id, agent, model: (await sessionMeta(id))?.model ?? null };
   }
@@ -394,9 +392,9 @@ async function ensureSupervisorSessionOnce(): Promise<{
       }
     }
   }
-  if (!known || known.agent !== effectiveAgent || known.version !== version) {
+  if (!known || known.agent !== effectiveAgent) {
     setSupervisorSession({
-      ocSessionId: knownId, agent: effectiveAgent, version, title: known?.title ?? 'Superviseur',
+      ocSessionId: knownId, agent: effectiveAgent, title: known?.title ?? 'Superviseur',
     });
   }
   return { id: knownId, agent: effectiveAgent, model: meta?.model ?? null };
@@ -622,18 +620,11 @@ export async function getSupervisorState(): Promise<SupervisorState> {
 }
 
 /**
- * Encadrement des messages du propriétaire envoyés dans le chat de supervision.
- * Il ne s'applique qu'aux envois du chat (sendSupervisor / queueSupervisor) :
- * les messages du daemon lui-même (ordres système, annulations vers les tâches)
- * ne passent pas par là.
- *
- * Préfixe UNIQUE combiné : remise à jour du plan + instructions du tool
- * `answer`. Il est appliqué à toutes les unités d'écriture du propriétaire
- * (chat de supervision ET panel d'une tâche existante), là où l'encadrement
- * existe déjà ; SuperviseurPlan n'y touche pas.
- *
- * Le texte encadré part tel quel à OpenChamber, donc la bulle du chat le
- * porte aussi : `stripOwnerWrap` ne fait le retirer que pour l'affichage.
+ * OWNER_WRAP : encadrement RETIRÉ (2026-11-12). La constante reste définie
+ * uniquement pour que `stripOwnerWrap` dépouille les anciens messages encore
+ * encadrés dans l'historique. Les nouveaux envois du propriétaire partent
+ * tels quels ; les consignes plan/critères/answer vivent dans le prompt
+ * initial de la tâche (composePrompt de tools.mts).
  */
 export const OWNER_WRAP =
   "Nouvelle instruction de l\u2019utilisateur : mets ton plan à jour au besoin ; "
@@ -641,22 +632,23 @@ export const OWNER_WRAP =
   + "le vérificateur du Superviseur juge tes preuves) ; "
   + "les réponses pour le propriétaire partent avec le tool `answer` (elles s\u2019affichent dans le Superviseur) :";
 
-export function wrapOwnerPrompt(text: string): string {
-  return `${OWNER_WRAP}\n\n${text}`;
-}
-
 const PILOT_WRAP = 'Mode Piloter : tu peux cadrer et lancer des tâches selon tes règles habituelles.';
 const INVESTIGATION_WRAP = 'Mode Investigation : lecture seule du projet sélectionné, sans création de tâche ni modification de fichier.';
 
 export function wrapSupervisorPrompt(text: string, mode: 'pilot' | 'investigation', projectDirectory: string | null): string {
   if (mode === 'investigation' && projectDirectory) return wrapInvestigationPrompt(text, projectDirectory);
-  return `${OWNER_WRAP}\n\n${PILOT_WRAP}\n\n${text}`;
+  return `${PILOT_WRAP}\n\n${text}`;
 }
 
 export function wrapInvestigationPrompt(text: string, projectDirectory: string): string {
   return `${INVESTIGATION_WRAP}\nProjet sélectionné : ${projectDirectory}\n\n${text}`;
 }
 
+/**
+ * Dépouille l'ancien encadrement (OWNER_WRAP, messages d'avant le 2026-11-12)
+ * des messages déjà écrits dans l'historique : les conversations d'avant le
+ * retrait restent affichées propres. Les nouveaux envois ne sont plus encadrés.
+ */
 export function stripOwnerWrap(text: string): string {
   const clean = String(text ?? '');
   if (clean.startsWith(INVESTIGATION_WRAP)) {
@@ -672,19 +664,57 @@ export function stripOwnerWrap(text: string): string {
   return body;
 }
 
+/**
+ * Annule les formulaires « question » en attente d'une session : le même geste
+ * qu'OpenChamber quand le propriétaire écrit à la place de répondre. Petit
+ * doublet local de `cancelPendingForms` (tools.mts) : supervisor.mts ne peut pas
+ * importer tools.mts (cycle d'imports, tools.mts importe déjà supervisor.mts).
+ */
+async function cancelPendingQuestions(
+  id: string,
+  forms: SupervisorPendingForm[],
+  message = 'Un message du propriétaire arrive à la place : la question est annulée.',
+): Promise<{ ok: boolean; cancelled: string[]; error?: string }> {
+  const cancelled: string[] = [];
+  for (const form of forms) {
+    if (!form.id) continue;
+    const res = await jdel(
+      `/api/session/${encodeURIComponent(id)}/form/${encodeURIComponent(form.id)}?message=${encodeURIComponent(message)}`,
+    );
+    if (!res.ok) return { ok: false, cancelled, error: `annulation formulaire ${form.id} → ${res.status}` };
+    cancelled.push(form.id);
+  }
+  return { ok: true, cancelled };
+}
+
 export async function sendSupervisor(text: string, rawAttachments: unknown = []): Promise<SupervisorState> {
   const clean = String(text ?? '').trim();
   const files = toPromptFiles(rawAttachments);
   if (!clean && !files.length) return getSupervisorState();
   const { id, agent } = await ensureSupervisorSession();
   await applySessionSetup(id, agent);
+  // Une question du tool `question` attend une réponse : l'envoi du
+  // propriétaire LA REMPLACE. On annule le formulaire (le même geste
+  // qu'OpenChamber), puis le message part tout de suite, jamais en file.
+  const snapshot = await statusSnapshot(id);
+  let cancelledQuestion: string | null = null;
+  if (snapshot.forms.length) {
+    const cancelled = await cancelPendingQuestions(id, snapshot.forms);
+    if (!cancelled.ok) throw new Error(cancelled.error ?? 'annulation impossible');
+    cancelledQuestion = snapshot.forms[0]?.title ?? snapshot.forms[0]?.id;
+    logEvent('supervisor', 'note', `question annulée par message : ${cancelledQuestion}`);
+  }
   const mode = getSupervisorMode();
   const prompt = wrapSupervisorPrompt(clean || 'Voir la pièce jointe.', mode.mode, mode.projectDir);
   // le prompt v2 porte les pièces jointes ; l'agent est déjà sur la session
   // (ensureSupervisorSession le bascule en place), le champ `agent` n'existe
-  // pas sur cette route.
+  // pas sur cette route. Le tour peut être busy (reprise d'une question
+  // annulée, envoi immédiat d'un message en file) : le steer le livre au
+  // prochain pas du tour au lieu d'un refus.
+  const steer = cancelledQuestion !== null || snapshot.status === 'busy';
   const out = await jpost(`/api/session/${encodeURIComponent(id)}/prompt`, {
     text: prompt,
+    ...(steer ? { delivery: 'steer' } : {}),
     ...(files.length ? { files } : {}),
   });
   if (!out.ok) throw new Error(`envoi superviseur → ${out.status}`);
@@ -735,6 +765,49 @@ export async function cancelQueuedSupervisor(itemId: string): Promise<Supervisor
   return getSupervisorState();
 }
 
+/** Item repris de la file : texte dépouillé de l'encadrement, pièces jointes lisibles. */
+export interface TakenSupervisorItem {
+  id: string;
+  text: string;
+  at: number;
+  attachments: Array<{ id: string; name: string; mimeType: string; size: number; dataUrl: string }>;
+}
+
+/**
+ * Reprend un message de la file (geste OpenChamber « Modifier » et « Envoyer
+ * maintenant ») : la route `take` d'OpenChamber retire l'item de la file et
+ * renvoie son contenu COMPLET, pièces jointes incluses (payloads omis des
+ * snapshots). Le texte est dépouillé de l'encadrement pour qu'un envoi ou un
+ * brouillon reparti ne soit pas wrappé deux fois.
+ */
+export async function takeQueuedSupervisor(itemId: string): Promise<TakenSupervisorItem> {
+  const clean = String(itemId ?? '').trim();
+  const id = getSupervisorSession()?.oc_session_id;
+  if (!id || !clean) throw new Error('reprise de la file : item inconnu');
+  const out = await jpost(
+    `/api/message-queue/sessions/${encodeURIComponent(id)}/items/${encodeURIComponent(clean)}/take`,
+    {},
+  );
+  if (!out.ok) throw new Error(`reprise de la file superviseur → ${out.status}`);
+  const item = ((out.data as { item?: Record<string, unknown> })?.item ?? {}) as Record<string, unknown>;
+  const raw = Array.isArray(item.attachments) ? item.attachments : [];
+  return {
+    id: String(item.id ?? clean),
+    text: stripOwnerWrap(String(item.text ?? item.content ?? '')),
+    at: Number(item.createdAt ?? 0),
+    attachments: raw
+      .filter((a): a is Record<string, unknown> => !!a && typeof a === 'object')
+      .map(a => ({
+        id: String(a.id ?? ''),
+        name: String(a.filename ?? 'pièce jointe'),
+        mimeType: String(a.mimeType ?? 'application/octet-stream'),
+        size: Number(a.size ?? 0),
+        dataUrl: String(a.dataUrl ?? ''),
+      }))
+      .filter(a => a.dataUrl.startsWith('data:')),
+  };
+}
+
 /** « Revenir à partir d'ici » : supprime les messages à partir de celui-ci. */
 export async function revertSupervisor(messageId: string): Promise<SupervisorState> {
   const clean = String(messageId ?? '').trim();
@@ -754,10 +827,9 @@ export async function revertSupervisor(messageId: string): Promise<SupervisorSta
 
 export function newSupervisorConversation(): Promise<SupervisorState> {
   return serializedSupervisor(async () => {
-    const version = getOrchestratorVersion();
-    const agent = (await chatAgentRef()) ?? ensureOrchestratorDefinition(version);
+    const agent = (await chatAgentRef()) ?? ensureOrchestratorDefinition();
     const id = await createSupervisorSession(agent);
-    setSupervisorSession({ ocSessionId: id, agent, version, title: 'Superviseur' });
+    setSupervisorSession({ ocSessionId: id, agent, title: 'Superviseur' });
     logEvent('supervisor', 'note', `nouvelle conversation #${id.slice(-6)}`);
     // session neuve : pas besoin de relire 80 messages ni le statut, elle est vide
     const mode = getSupervisorMode();
@@ -802,8 +874,7 @@ export async function applySupervisorChatConfig(): Promise<{
         error: 'la conversation courante n’est plus vivante',
       };
     }
-    const version = getOrchestratorVersion();
-    const agent = (await chatAgentRef()) ?? ensureOrchestratorDefinition(version);
+    const agent = (await chatAgentRef()) ?? ensureOrchestratorDefinition();
     let applied = true;
     let error: string | undefined;
     if (meta.agent !== agent) {
@@ -833,7 +904,7 @@ export async function applySupervisorChatConfig(): Promise<{
     const fresh = await sessionMeta(id);
     const effectiveAgent = fresh?.agent ?? meta.agent ?? agent;
     setSupervisorSession({
-      ocSessionId: id, agent: effectiveAgent, version, title: known?.title ?? 'Superviseur',
+      ocSessionId: id, agent: effectiveAgent, title: known?.title ?? 'Superviseur',
     });
     logEvent('supervisor', 'note',
       `config chat appliquée : agent ${effectiveAgent}${ref ? `, modèle ${ref}` : ''}${applied ? '' : ' (partiel)'}`);

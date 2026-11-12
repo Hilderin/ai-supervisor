@@ -13,10 +13,14 @@
  * Le cache évite de relire 60 messages à chaque tick de flotte. Il est indexé
  * par session et invalidé par les événements `message.*` / fin de tour.
  */
-import type { PlanStep } from './verdict.mts';
-
 export type PlanItemStatus = 'pending' | 'in_progress' | 'completed';
 export type PlanItemPriority = 'high' | 'medium' | 'low';
+
+/** Étape réduite du plan (cartes, tools) : texte + fait/pas fait. */
+export interface PlanStep {
+  step: string;
+  done: boolean;
+}
 
 export interface PlanItem {
   content: string;

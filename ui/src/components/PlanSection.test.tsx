@@ -14,7 +14,7 @@ describe('planDefaultOpen', () => {
     expect(planDefaultOpen('busy')).toBe(true);
     expect(planDefaultOpen('waiting')).toBe(true);
     expect(planDefaultOpen('done')).toBe(false);
-    expect(planDefaultOpen('idle')).toBe(false);
+    expect(planDefaultOpen('warning')).toBe(false);
   });
 });
 

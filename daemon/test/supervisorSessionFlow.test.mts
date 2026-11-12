@@ -82,11 +82,13 @@ beforeAll(async () => {
   if (!file.startsWith(root)) throw new Error(`test lié à une base non temporaire : ${file}`);
 
   supervisor.setBase(`http://127.0.0.1:${server.port}`);
-  agent = state.orchestratorNameFor(state.getOrchestratorVersion());
+  agent = state.ORCHESTRATOR_AGENT;
 });
 
 afterAll(async () => {
   server?.stop(true);
+  // la base SQLite ouverte verrouille le dossier sous Windows (EBUSY au rm)
+  try { state.db.close(); } catch { /* déjà fermée */ }
   await rm(root, { recursive: true, force: true });
 });
 
@@ -96,7 +98,7 @@ describe('ensureSupervisorSession : le prompt change, la conversation reste', ()
   test('un agent différent bascule en place et ne recrée pas la session', async () => {
     calls = [];
     liveAgent = 'superviseur-orchestrateur-00000001';
-    state.setSupervisorSession({ ocSessionId: KEEP, agent: liveAgent, version: 1, title: 'Superviseur' });
+    state.setSupervisorSession({ ocSessionId: KEEP, agent: liveAgent, title: 'Superviseur' });
     const out = await supervisor.ensureSupervisorSession();
     expect(out.id).toBe(KEEP);
     expect(out.agent).toBe(agent);
@@ -107,13 +109,13 @@ describe('ensureSupervisorSession : le prompt change, la conversation reste', ()
     const stored = state.getSupervisorSession();
     expect(stored?.oc_session_id).toBe(KEEP);
     expect(stored?.agent).toBe(agent);
-    expect(stored?.version).toBe(state.getOrchestratorVersion());
+    expect(stored?.version).toBeNull();
   });
 
   test('un agent déjà à jour est réutilisé sans bascule', async () => {
     calls = [];
     liveAgent = agent;
-    state.setSupervisorSession({ ocSessionId: KEEP, agent, version: state.getOrchestratorVersion(), title: 'Superviseur' });
+    state.setSupervisorSession({ ocSessionId: KEEP, agent, title: 'Superviseur' });
     const out = await supervisor.ensureSupervisorSession();
     expect(out.id).toBe(KEEP);
     expect(postsTo(/\/agent$/)).toHaveLength(0);
@@ -122,7 +124,7 @@ describe('ensureSupervisorSession : le prompt change, la conversation reste', ()
 
   test('une session absente ou archivée fait créer une nouvelle conversation', async () => {
     calls = [];
-    state.setSupervisorSession({ ocSessionId: 'ses_gone', agent, version: state.getOrchestratorVersion(), title: 'Superviseur' });
+    state.setSupervisorSession({ ocSessionId: 'ses_gone', agent, title: 'Superviseur' });
     const out = await supervisor.ensureSupervisorSession();
     expect(out.id).toBe(NEW);
     expect(postsTo(/\/api\/openchamber\/sessions$/)).toHaveLength(1);
@@ -132,7 +134,7 @@ describe('ensureSupervisorSession : le prompt change, la conversation reste', ()
 
 describe('isSupervisorSession : le dossier fait foi', () => {
   test('la conversation courante et les autres conversations du dossier sont acceptées', async () => {
-    state.setSupervisorSession({ ocSessionId: KEEP, agent, version: state.getOrchestratorVersion(), title: 'Superviseur' });
+    state.setSupervisorSession({ ocSessionId: KEEP, agent, title: 'Superviseur' });
     expect(await supervisor.isSupervisorSession(KEEP)).toBe(true);
     expect(await supervisor.isSupervisorSession(OTHER)).toBe(true);
   });

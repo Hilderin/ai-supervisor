@@ -1,7 +1,7 @@
 /**
  * Bouton config de la conversation : un petit engrenage dans l'en-tête du
- * chat, et un popover compact pour changer l'agent et le modèle du chat, le
- * modèle des tâches et celui du compagnon.
+ * chat, et un popover compact pour changer l'agent et le modèle du chat, et le
+ * modèle des tâches.
  *
  * Le popover vit dans un portail en position fixe : l'aside du chat est en
  * `overflow-hidden`, un panneau absolu serait rogné, et la bulle doit rester
@@ -25,7 +25,7 @@ const GAP = 8;
 const MARGIN = 8;
 
 const EMPTY_VALUES: SupervisorPrefs = {
-  chatModel: null, chatAgent: null, taskModel: null, companionModel: null,
+  chatModel: null, chatAgent: null, taskModel: null,
 };
 
 export function prefsToValues(config: SupervisorConfig): SupervisorPrefs {
@@ -37,7 +37,6 @@ function valuesToPayload(values: SupervisorPrefs): Record<string, string | null>
     chatAgent: prefValue(values.chatAgent) || null,
     chatModel: prefValue(values.chatModel) || null,
     taskModel: prefValue(values.taskModel) || null,
-    companionModel: prefValue(values.companionModel) || null,
   };
 }
 
@@ -134,18 +133,6 @@ export function ConfigFields({
           models={config.models}
           defaultLabel={config.defaults.taskModelLabel}
           onChange={(next) => onChange('taskModel', next || null)}
-        />
-      </section>
-
-      <section className="flex flex-col gap-[7px] border-t border-border pt-[9px]">
-        <div className="text-[10px] font-semibold uppercase tracking-[0.04em] text-muted">Compagnon</div>
-        <ModelSelect
-          testId="config-companion-model"
-          label="Modèle des analyses du compagnon"
-          value={prefValue(values.companionModel)}
-          models={config.models}
-          defaultLabel={config.defaults.companionModelLabel}
-          onChange={(next) => onChange('companionModel', next || null)}
         />
       </section>
 

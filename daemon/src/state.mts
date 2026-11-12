@@ -35,22 +35,6 @@ CREATE TABLE IF NOT EXISTS task_state (
   closed_at INTEGER,
   closure TEXT                       -- 'terminé' | 'repart' | null
 );
-CREATE TABLE IF NOT EXISTS task_verdict (
-  session_id TEXT PRIMARY KEY,
-  resume TEXT,
-  confiance REAL,
-  progress INTEGER,
-  termine INTEGER,
-  attend TEXT,
-  note TEXT,
-  at INTEGER
-);
-CREATE TABLE IF NOT EXISTS companion_map (
-  parent_session_id TEXT PRIMARY KEY,
-  companion_session_id TEXT NOT NULL,
-  version INTEGER,
-  created_at INTEGER NOT NULL
-);
 CREATE TABLE IF NOT EXISTS supervisor_session (
   id INTEGER PRIMARY KEY CHECK (id = 1),
   oc_session_id TEXT NOT NULL,
@@ -67,12 +51,12 @@ CREATE TABLE IF NOT EXISTS supervisor_mode (
 -- Préférences de modèles et d'agent du chat (bouton config de la conversation).
 -- Aucune clé ni secret : des références « provider/model » et un id d'agent.
 -- NULL = pas de choix explicite, le défaut d'OpenChamber s'applique.
+-- (colonne companion_model héritée des sous-agents retirés : plus écrite)
 CREATE TABLE IF NOT EXISTS supervisor_pref (
   id INTEGER PRIMARY KEY CHECK (id = 1),
   chat_model TEXT,
   chat_agent TEXT,
   task_model TEXT,
-  companion_model TEXT,
   updated_at INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS task_brief (
@@ -118,8 +102,8 @@ CREATE TABLE IF NOT EXISTS task_answer (
 CREATE INDEX IF NOT EXISTS idx_task_answer_session ON task_answer(session_id, at);
 -- Critères d'acceptation d'une tâche (spec : docs/analyses/mvp1/criteres-acceptation.md).
 -- Le statut n'est jamais écrit directement : uniquement via les transitions de
--- daemon/src/criteria.mts (tools criteria pour l'agent, JSON du vérificateur
--- pour le daemon).
+-- daemon/src/criteria.mts (tools criteria de l'agent, dont criteria_set_status
+-- pour le jugement).
 CREATE TABLE IF NOT EXISTS criteria (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   task_id TEXT NOT NULL,             -- suit la tâche migrée (migrateTaskSession)
@@ -129,120 +113,60 @@ CREATE TABLE IF NOT EXISTS criteria (
   methods TEXT NOT NULL,             -- JSON array
   status TEXT NOT NULL DEFAULT 'todo',
   evidence TEXT,                     -- JSON array {kind, text, path, start_line, line_count, at}
-  review TEXT,                       -- dernier commentaire du vérificateur
+  review TEXT,                       -- dernier commentaire (jugement de l'agent)
   review_at INTEGER,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
-  -- version du contenu jugé : incrémentée à chaque preuve soumise ou contenu
-  -- modifié ; l'approbation vise une version précise, périmée elle est ignorée
+  -- version du contenu : incrémentée à chaque preuve soumise, jugement ou
+  -- modification ; l'historique des jugements reste daté
   version INTEGER NOT NULL DEFAULT 0,
-  validated_at INTEGER,              -- horodatage de l'approbation (staleness)
-  validated_work TEXT,               -- version du travail examiné : JSON {commit?, at}
-  -- proposition de retrait (jamais une suppression physique par le vérificateur)
-  remove_proposed_at INTEGER,
-  remove_reason TEXT,
+  validated_at INTEGER,              -- horodatage de la validation (staleness)
+  validated_work TEXT,               -- version du travail validé : JSON {commit?, at}
   removed_at INTEGER,                -- suppression douce : l'historique reste
   UNIQUE(task_id, ref)
 );
 CREATE INDEX IF NOT EXISTS idx_criteria_task ON criteria(task_id);
--- Session du vérificateur (sous-conversation enfant, une seule par tâche,
--- réutilisée pour toutes les vérifications) ; comme companion_map.
--- colonne « signature » : état critères déjà jugé, persisté pour qu'un
--- redémarrage du daemon ne relance pas une phase à vide.
-CREATE TABLE IF NOT EXISTS verifier_map (
-  parent_session_id TEXT PRIMARY KEY,
-  verifier_session_id TEXT NOT NULL,
-  agent TEXT,
-  signature TEXT,
-  created_at INTEGER NOT NULL
-);
-
--- journal durable des notifications critères : identifiant, statut de
--- livraison (pending, sent, queued, failed) et nombre d essais ; les reprises
--- réutilisent la même ligne, jamais de message en double.
-CREATE TABLE IF NOT EXISTS notification (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  session_id TEXT NOT NULL,
-  text TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'pending',
-  attempts INTEGER NOT NULL DEFAULT 0,
-  created_at INTEGER NOT NULL,
-  delivered_at INTEGER
-);
-
--- index local des messages : l API OpenChamber ignore offset et curseurs, ses
--- deux extrémités laissent un angle mort central sur une longue conversation ;
--- le daemon alimente cet index progressivement (upsert dédupliqué par id) et
--- la recherche du vérificateur l interroge en pleine couverture.
-CREATE TABLE IF NOT EXISTS message_index (
-  msg_id TEXT PRIMARY KEY,
-  session_id TEXT NOT NULL,
-  at INTEGER NOT NULL,
-  type TEXT NOT NULL,
-  text TEXT,
-  tool_calls TEXT,
-  indexed_at INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS message_index_session ON message_index(session_id, at);
-
--- Supervision opt-in : une conversation démarrée directement dans OpenChamber
--- reste visible dans la flotte mais n installe PAS ses sous-agents (compagnon,
--- vérificateur) par défaut. Ligne explicite seulement : le défaut (tâche du
--- Superviseur = supervisée, autre = non) est lu, jamais migré.
-CREATE TABLE IF NOT EXISTS supervision (
+-- Registre du tableau (fleet_seen) : /api/sessions/status d'OpenChamber est une
+-- carte EN MÉMOIRE (perdue au redémarrage d'OpenChamber ou d'OpenCode, entrées
+-- expirées après 24 h). Ce registre persistant note chaque conversation montrée
+-- dans le tableau pour la remettre au démarrage tant qu'elle existe encore et
+-- n'est pas marquée terminée (work=done), archivée ou supprimée.
+CREATE TABLE IF NOT EXISTS fleet_seen (
   session_id TEXT PRIMARY KEY,
-  supervised INTEGER NOT NULL,       -- 1 = supervisée, 0 = non supervisée
+  title TEXT,                        -- dernier titre vu (repli si l'annuaire ne répond pas)
+  dir TEXT,                          -- dossier du projet
+  first_seen_at INTEGER NOT NULL,    -- première carte du tableau
+  last_seen_at INTEGER NOT NULL,     -- dernier passage dans le statut vivant
+  last_update_at INTEGER,            -- dernière activité connue (statut)
   updated_at INTEGER NOT NULL
 );
 `);
-try { db.exec('ALTER TABLE task_verdict ADD COLUMN note TEXT'); } catch { /* colonne déjà présente */ }
-try { db.exec('ALTER TABLE companion_map ADD COLUMN version INTEGER'); } catch { /* colonne déjà présente */ }
-// nom exact de l'agent versionné utilisé par le compagnon (le prompt est mis en cache par nom)
-try { db.exec('ALTER TABLE companion_map ADD COLUMN agent TEXT'); } catch { /* colonne déjà présente */ }
-// signature de l'état critères déjà jugé par le vérificateur (survit aux redémarrages)
-try { db.exec('ALTER TABLE verifier_map ADD COLUMN signature TEXT'); } catch { /* colonne déjà présente */ }// objectif courant + plan : une nouvelle consigne change l'objectif, pas seulement le tour
+// objectif courant : une nouvelle consigne change l'objectif, pas seulement le tour
 try { db.exec('ALTER TABLE task_state ADD COLUMN objective TEXT'); } catch { /* colonne déjà présente */ }
 try { db.exec('ALTER TABLE task_state ADD COLUMN objective_version INTEGER'); } catch { /* colonne déjà présente */ }
 try { db.exec('ALTER TABLE task_state ADD COLUMN last_user_id TEXT'); } catch { /* colonne déjà présente */ }
-try { db.exec('ALTER TABLE task_state ADD COLUMN plan TEXT'); } catch { /* colonne déjà présente */ }
 // compteur des refs de critères (AC-01, AC-02, ...) : un retrait ne libère pas son numéro
 try { db.exec('ALTER TABLE task_state ADD COLUMN criteria_seq INTEGER'); } catch { /* colonne déjà présente */ }
-// colonnes critères (version de soumission, staleness, proposition de retrait, suppression douce)
+// colonnes critères (version de contenu, staleness, suppression douce)
 try { db.exec('ALTER TABLE criteria ADD COLUMN version INTEGER NOT NULL DEFAULT 0'); } catch { /* colonne déjà présente */ }
 try { db.exec('ALTER TABLE criteria ADD COLUMN validated_at INTEGER'); } catch { /* colonne déjà présente */ }
 try { db.exec('ALTER TABLE criteria ADD COLUMN validated_work TEXT'); } catch { /* colonne déjà présente */ }
-try { db.exec('ALTER TABLE criteria ADD COLUMN remove_proposed_at INTEGER'); } catch { /* colonne déjà présente */ }
-try { db.exec('ALTER TABLE criteria ADD COLUMN remove_reason TEXT'); } catch { /* colonne déjà présente */ }
 try { db.exec('ALTER TABLE criteria ADD COLUMN removed_at INTEGER'); } catch { /* colonne déjà présente */ }
-// état sémantique du verdict (working/waiting_human/done/blocked) et provenance de l'attente
-try { db.exec('ALTER TABLE task_verdict ADD COLUMN state TEXT'); } catch { /* colonne déjà présente */ }
-try { db.exec('ALTER TABLE task_verdict ADD COLUMN human_source TEXT'); } catch { /* colonne déjà présente */ }
-try { db.exec('ALTER TABLE task_verdict ADD COLUMN next TEXT'); } catch { /* colonne déjà présente */ }
-try { db.exec('ALTER TABLE task_verdict ADD COLUMN objective_version INTEGER'); } catch { /* colonne déjà présente */ }
-// règle dure : un verdict terminé vaut 100, même si une ancienne ligne avait null
-db.run('UPDATE task_verdict SET progress = 100 WHERE termine = 1 AND progress IS NULL');
 
-/** version du prompt de l'agent analyste : hash du contenu, pas mtime (un touch ne recrée plus tous les comps) */
-import { existsSync, readFileSync, symlinkSync } from 'node:fs';
-import { createHash } from 'node:crypto';
+/**
+ * Agents de supervision à nom FIXE : l'orchestrateur du chat est le seul agent
+ * défini par le daemon (décision du 2026-11-12 : les sous-agents compagnon et
+ * vérificateur sont retirés). Le prompt reste mis en cache par NOM dans
+ * OpenCode : un changement de prompt n'est pris en compte que pour les
+ * sessions créées après un redémarrage d'OpenCode.
+ */
+import { existsSync, symlinkSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-const agentMD = join(dirname(fileURLToPath(import.meta.url)), '..', 'agent', 'superviseur-analyste.md');
 const orchestratorMD = join(dirname(fileURLToPath(import.meta.url)), '..', 'agent', 'superviseur-orchestrateur.md');
 
-/**
- * Hash du contenu, relu à chaque appel (8 Ko, négligeable) : un cache par mtime
- * pouvait mémoriser un fichier lu pendant une écriture et rester figé ensuite.
- */
-function versionOf(path: string): number {
-  try {
-    const digest = createHash('sha256').update(readFileSync(path)).digest('hex');
-    return parseInt(digest.slice(0, 8), 16);
-  } catch { return 0; }
-}
-
-export function getAgentVersion(): number { return versionOf(agentMD); }
+export const ORCHESTRATOR_AGENT = 'superviseur-orchestrateur';
 
 function ensureDefinition(md: string, name: string): string {
   try {
@@ -254,75 +178,23 @@ function ensureDefinition(md: string, name: string): string {
   return name;
 }
 
-/**
- * OpenChamber garde en cache le prompt d'un agent par NOM. Un simple changement
- * de contenu ne suffit donc pas : on donne à chaque version un nom neuf
- * (`superviseur-analyste-<hash>`), avec un lien vers le fichier canonique.
- * Une session créée avec ce nom charge forcément le prompt de cette version.
- */
-export function agentNameFor(version: number): string {
-  return `superviseur-analyste-${version.toString(16)}`;
-}
-
-export function ensureAgentDefinition(version: number): string {
-  return ensureDefinition(agentMD, agentNameFor(version));
-}
-
-export function getOrchestratorVersion(): number { return versionOf(orchestratorMD); }
-
-/**
- * Vérificateur : agent global à nom FIXE (pas de hash, choix du propriétaire),
- * une seule session par tâche, réutilisée pour toutes les vérifications.
- * Conséquence documentée : modifier le prompt exige un redémarrage d'OpenCode
- * (prompt mis en cache par nom).
- */
-const verifierMD = join(dirname(fileURLToPath(import.meta.url)), '..', 'agent', 'superviseur-verificateur.md');
-export const VERIFIER_AGENT = 'superviseur-verificateur';
-export function ensureVerifierDefinition(): string {
-  return ensureDefinition(verifierMD, VERIFIER_AGENT);
-}
-
-export function orchestratorNameFor(version: number): string {
-  return `superviseur-orchestrateur-${version.toString(16)}`;
-}
-
-export function ensureOrchestratorDefinition(version: number): string {
-  return ensureDefinition(orchestratorMD, orchestratorNameFor(version));
-}
-
-export function getVerdict(sessionId: string) {
-  return db.query('SELECT * FROM task_verdict WHERE session_id = ?').get(sessionId) ?? null;
-}
-/**
- * Concept de confiance retiré (2026-11-07) : les colonnes `confiance` et
- * `note` restent dans le schéma (aucune migration destructive) mais ne sont
- * plus écrites ; le signal de fiabilité est la liste des critères.
- */
-export function upsertVerdict(sessionId: string, v: {
-  resume?: string; termine?: boolean; progress?: number | null;
-  attend?: string; state?: string; humanSource?: string; next?: string; objectiveVersion?: number;
-}) {
-  db.query(`INSERT INTO task_verdict (session_id, resume, confiance, progress, termine, attend, note, at, state, human_source, next, objective_version)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
-            ON CONFLICT(session_id) DO UPDATE SET resume=excluded.resume,
-              progress=excluded.progress, termine=excluded.termine, attend=excluded.attend, at=excluded.at,
-              state=excluded.state, human_source=excluded.human_source, next=excluded.next, objective_version=excluded.objective_version`)
-    .run(sessionId, v.resume ?? null, null, v.progress ?? null, v.termine ? 1 : 0,
-      v.attend ?? null, null, Date.now(), v.state ?? null, v.humanSource ?? null, v.next ?? null, v.objectiveVersion ?? null);
+export function ensureOrchestratorDefinition(): string {
+  return ensureDefinition(orchestratorMD, ORCHESTRATOR_AGENT);
 }
 
 /**
- * Objectif courant et version. Le plan est stocké à part pour rester stable
- * entre deux analyses (la progression est recalculée à partir de lui).
+ * Objectif courant (texte libre, versionné par le chat à la création de tâche).
+ * Le plan de travail ne vit PAS ici : il est relu du tool part `planwrite` de
+ * la session (daemon/src/plan.mts).
  */
 export function setTaskObjective(sessionId: string, p: {
   objective: string; version: number; goal?: string; lastUserId?: string;
 }) {
   const cur = db.query('SELECT session_id FROM task_state WHERE session_id = ?').get(sessionId) as { session_id?: string } | undefined;
   if (!cur) {
-    db.query(`INSERT INTO task_state (session_id, goal, title, created_at, objective, objective_version, last_user_id, plan)
-              VALUES (?,?,?,?,?,?,?,?)`)
-      .run(sessionId, p.goal ?? null, null, Date.now(), p.objective, p.version, p.lastUserId ?? null, '[]');
+    db.query(`INSERT INTO task_state (session_id, goal, title, created_at, objective, objective_version, last_user_id)
+              VALUES (?,?,?,?,?,?,?)`)
+      .run(sessionId, p.goal ?? null, null, Date.now(), p.objective, p.version, p.lastUserId ?? null);
     return;
   }
   db.query(`UPDATE task_state SET
@@ -332,112 +204,12 @@ export function setTaskObjective(sessionId: string, p: {
     .run(p.goal ?? null, p.objective, p.version, p.lastUserId ?? null, sessionId);
 }
 
-export function setTaskPlan(sessionId: string, plan: unknown) {
-  const json = JSON.stringify(plan ?? []);
-  const cur = db.query('SELECT session_id FROM task_state WHERE session_id = ?').get(sessionId) as { session_id?: string } | undefined;
-  if (!cur) {
-    db.query('INSERT INTO task_state (session_id, created_at, plan) VALUES (?,?,?)')
-      .run(sessionId, Date.now(), json);
-    return;
-  }
-  db.query('UPDATE task_state SET plan = ? WHERE session_id = ?').run(json, sessionId);
-}
-
-export function getCompanion(parentSid: string): { compId: string; version: number | null; agent: string | null } | null {
-  const r = db.query('SELECT companion_session_id c, version v, agent a FROM companion_map WHERE parent_session_id = ?').get(parentSid) as { c: string; v: number | null; a: string | null } | undefined;
-  return r ? { compId: r.c, version: r.v, agent: r.a } : null;
-}
-export function putCompanion(parentSid: string, compId: string, agent?: string) {
-  const version = getAgentVersion();
-  db.query(`INSERT INTO companion_map (parent_session_id, companion_session_id, version, agent, created_at)
-            VALUES (?,?,?,?,?)
-            ON CONFLICT(parent_session_id) DO UPDATE SET companion_session_id=excluded.companion_session_id,
-              version=excluded.version, agent=excluded.agent`)
-    .run(parentSid, compId, version, agent ?? null, Date.now());
-}
 export function reopenTaskState(sid: string) {
   db.query('UPDATE task_state SET closed_at = NULL, closure = NULL WHERE session_id = ?').run(sid);
-  db.query('DELETE FROM task_verdict WHERE session_id = ?').run(sid);
   // carte rouverte : la reprise redevient possible (budget remis à zéro)
   db.query(`UPDATE task_resume SET disabled_at = NULL, disabled_reason = NULL,
       attempts = 0, session_since = NULL, last_seen_at = NULL, updated_at = ?
       WHERE session_id = ?`).run(Date.now(), sid);
-}
-
-export function getCompanionOut(parentSid: string): string | null { return getCompanion(parentSid); }
-
-/** Session du vérificateur d'une tâche (mapping parent → enfant). */
-export function getVerifier(parentSid: string): { verifierId: string; agent: string | null; signature: string | null } | null {
-  const r = db.query('SELECT verifier_session_id v, agent a, signature s FROM verifier_map WHERE parent_session_id = ?')
-    .get(parentSid) as { v: string; a: string | null; s: string | null } | undefined;
-  return r ? { verifierId: r.v, agent: r.a, signature: r.s ?? null } : null;
-}
-export function putVerifier(parentSid: string, verifierId: string, agent: string) {
-  db.query(`INSERT INTO verifier_map (parent_session_id, verifier_session_id, agent, created_at)
-            VALUES (?,?,?,?)
-            ON CONFLICT(parent_session_id) DO UPDATE SET verifier_session_id=excluded.verifier_session_id,
-              agent=excluded.agent, created_at=excluded.created_at`)
-    .run(parentSid, verifierId, agent, Date.now());
-}
-/** L'état critères vient d'être jugé : mémorisé en DB, un redémarrage ne repart pas à vide. */
-export function setVerifierSignature(parentSid: string, signature: string) {
-  db.query('UPDATE verifier_map SET signature = ? WHERE parent_session_id = ?').run(signature, parentSid);
-}
-export function deleteVerifier(parentSid: string) {
-  db.query('DELETE FROM verifier_map WHERE parent_session_id = ?').run(parentSid);
-}
-
-/* --- Journal durable des notifications (id + statut de livraison) --- */
-
-/**
- * Chaque notification critères à une tâche est journalisée avec un
- * identifiant et un statut : pending (créée), sent (steer accepté), queued
- * (repli file d'attente), failed (steer ET file en échec). Les reprises
- * réutilisent la MÊME ligne : pas de doublon.
- */
-export function putNotification(sessionId: string, text: string): number {
-  const out = db.query('INSERT INTO notification (session_id, text, status, attempts, created_at) VALUES (?,?,0,1,?)')
-    .run(sessionId, text, Date.now());
-  return Number(out.lastInsertRowid);
-}
-
-export function setNotificationStatus(id: number, status: 'pending' | 'sent' | 'queued' | 'failed', attempts?: number) {
-  db.query('UPDATE notification SET status = ?, attempts = COALESCE(?, attempts), delivered_at = ? WHERE id = ?')
-    .run(status, attempts ?? null, status === 'sent' || status === 'queued' ? Date.now() : null, id);
-}
-
-/* --- Index local des messages (recherche pleine couverture) --- */
-
-/**
- * L'API OpenChamber ignore offset et curseurs : ses 200 premières + 200
- * dernières messages laissent un angle mort central sur une longue
- * conversation. Le daemon alimente donc un index local, progressivement
- * (fenêtre glissante des deux extrémités, upsert dédupliqué par id) : la
- * recherche du vérificateur interroge CET index, qui ne rétrécit jamais.
- */
-export interface IndexedMessage {
-  msg_id: string; session_id: string; at: number; type: string;
-  text: string; tool_calls: string | null; indexed_at: number;
-}
-
-export function upsertIndexedMessages(sessionId: string, rows: Array<{
-  msgId: string; at: number; type: string; text: string; toolInputs: string | null;
-}>) {
-  for (const r of rows) {
-    db.query(`INSERT INTO message_index (msg_id, session_id, at, type, text, tool_calls, indexed_at)
-              VALUES (?,?,?,?,?,?,?)
-              ON CONFLICT(msg_id) DO UPDATE SET at=excluded.at, type=excluded.type,
-                text=excluded.text, tool_calls=excluded.tool_calls, indexed_at=excluded.indexed_at`)
-      .run(r.msgId, sessionId, r.at, r.type, r.text, r.toolInputs, Date.now());
-  }
-}
-
-export function indexedCount(sessionId: string): number {
-  return (db.query('SELECT COUNT(*) AS n FROM message_index WHERE session_id = ?').get(sessionId) as { n: number }).n;
-}
-
-export function searchIndexedMessages(sessionId: string, query: string, limit: number): Array<IndexedMessage> {
-  return db.query(`SELECT * FROM message_index WHERE session_id = ? ORDER BY at ASC`).all(sessionId) as IndexedMessage[];
 }
 
 export function logEvent(sessionId: string, kind: string, text: string, meta?: object) {
@@ -463,33 +235,6 @@ export function upsertTaskState(sessionId: string, patch: {
 
 export function getTaskState(sessionId: string) {
   return db.query('SELECT * FROM task_state WHERE session_id = ?').get(sessionId) ?? null;
-}
-
-/* --- Supervision opt-in (docs/analyses/mvp1/supervision-bascule.md) --- */
-
-/** Ligne explicite de la table supervision, null = aucun choix du propriétaire. */
-export function getSupervision(sessionId: string): boolean | null {
-  const row = db.query('SELECT supervised FROM supervision WHERE session_id = ?').get(sessionId) as
-    { supervised?: number } | undefined;
-  return row ? row.supervised === 1 : null;
-}
-
-export function setSupervision(sessionId: string, supervised: boolean) {
-  db.query(`INSERT INTO supervision (session_id, supervised, updated_at) VALUES (?,?,?)
-            ON CONFLICT(session_id) DO UPDATE SET supervised = excluded.supervised,
-              updated_at = excluded.updated_at`)
-    .run(sessionId, supervised ? 1 : 0, Date.now());
-}
-
-/**
- * Règle de défaut (lue, jamais migrée) : le choix explicite fait foi, sinon
- * une session avec un task_brief (démarrée via le Superviseur) est supervisée,
- * toute autre conversation OpenChamber est non supervisée par défaut.
- */
-export function isSupervised(sessionId: string): boolean {
-  const explicit = getSupervision(sessionId);
-  if (explicit !== null) return explicit;
-  return !!db.query('SELECT session_id FROM task_brief WHERE session_id = ?').get(sessionId);
 }
 
 export interface SupervisorSessionRow {
@@ -524,49 +269,40 @@ export interface SupervisorPrefRow {
   chat_model: string | null;
   chat_agent: string | null;
   task_model: string | null;
-  companion_model: string | null;
   updated_at: number | null;
 }
 
 /** Préférences explicites : une colonne NULL = pas de choix, le défaut s'applique. */
 export function getSupervisorPref(): SupervisorPrefRow {
-  const row = db.query('SELECT chat_model, chat_agent, task_model, companion_model, updated_at FROM supervisor_pref WHERE id = 1')
-    .get() as SupervisorPrefRow | undefined;
+  const row = db.query('SELECT chat_model, chat_agent, task_model, updated_at FROM supervisor_pref WHERE id = 1')
+    .get() as { chat_model?: string | null; chat_agent?: string | null; task_model?: string | null; updated_at?: number | null } | undefined;
   return {
     chat_model: row?.chat_model ?? null,
     chat_agent: row?.chat_agent ?? null,
     task_model: row?.task_model ?? null,
-    companion_model: row?.companion_model ?? null,
     updated_at: row?.updated_at ?? null,
   };
 }
 
 export function setSupervisorPref(p: {
-  chatModel: string | null; chatAgent: string | null;
-  taskModel: string | null; companionModel: string | null;
+  chatModel: string | null; chatAgent: string | null; taskModel: string | null;
 }): void {
-  db.query(`INSERT INTO supervisor_pref (id, chat_model, chat_agent, task_model, companion_model, updated_at)
-            VALUES (1, ?, ?, ?, ?, ?)
+  db.query(`INSERT INTO supervisor_pref (id, chat_model, chat_agent, task_model, updated_at)
+            VALUES (1, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET chat_model=excluded.chat_model, chat_agent=excluded.chat_agent,
-              task_model=excluded.task_model, companion_model=excluded.companion_model,
-              updated_at=excluded.updated_at`)
-    .run(p.chatModel, p.chatAgent, p.taskModel, p.companionModel, Date.now());
-}
-
-/** Compagnons vivants connus (mapping parent → enfant), pour propager un modèle. */
-export function listCompanions(): Array<{ parentId: string; companionId: string }> {
-  return (db.query('SELECT parent_session_id p, companion_session_id c FROM companion_map').all() as
-    Array<{ p: string; c: string }>).map(r => ({ parentId: r.p, companionId: r.c }));
+              task_model=excluded.task_model, updated_at=excluded.updated_at`)
+    .run(p.chatModel, p.chatAgent, p.taskModel, Date.now());
 }
 
 export function setSupervisorSession(p: {
-  ocSessionId: string; agent: string; version: number; title: string;
+  ocSessionId: string; agent: string; title: string;
 }) {
+  // colonne version (nom d'agent versionné) : plus écrite, nom fixe
   db.query(`INSERT INTO supervisor_session (id, oc_session_id, agent, version, title, created_at)
-            VALUES (1, ?, ?, ?, ?, ?)
+            VALUES (1, ?, ?, NULL, ?, ?)
             ON CONFLICT(id) DO UPDATE SET oc_session_id = excluded.oc_session_id,
-              agent = excluded.agent, version = excluded.version, title = excluded.title`)
-    .run(p.ocSessionId, p.agent, p.version, p.title, Date.now());
+              agent = excluded.agent, version = NULL, title = excluded.title`)
+    .run(p.ocSessionId, p.agent, p.title, Date.now());
 }
 
 export interface TaskBriefRow {
@@ -737,8 +473,6 @@ export function reviveTaskResume(sessionId: string) {
 
 /**
  * La tâche passe à une nouvelle session : ses données locales suivent.
- * Le verdict est supprimé ici : un verdict ancien sur une session neuve
- * masquerait le travail en cours (carte « terminé » figée).
  */
 export function migrateTaskSession(oldId: string, newId: string) {
   if (!oldId || !newId || oldId === newId) return;
@@ -751,17 +485,50 @@ export function migrateTaskSession(oldId: string, newId: string) {
     db.query('UPDATE task_answer SET session_id = ? WHERE session_id = ?').run(newId, oldId);
     // les critères suivent la tâche (refs et états conservés)
     db.query('UPDATE criteria SET task_id = ? WHERE task_id = ?').run(newId, oldId);
-    // le choix de supervision (s'il a été tranché explicitement) suit la tâche
-    db.query('UPDATE supervision SET session_id = ? WHERE session_id = ?').run(newId, oldId);
-    db.query('DELETE FROM task_verdict WHERE session_id = ?').run(oldId);
-    // Le compagnon enfant est détruit avec son parent : la mapping ne doit pas
-    // ressusciter une session morte, le nouveau parent refabrique le sien.
-    db.query('DELETE FROM companion_map WHERE parent_session_id = ?').run(oldId);
-    // Le vérificateur aussi : une nouvelle session de travail repart avec un
-    // nouveau vérificateur (la liste des critères, elle, suit la tâche).
-    db.query('DELETE FROM verifier_map WHERE parent_session_id = ?').run(oldId);
     // le registre suit la tâche : la session de reprise devient la nouvelle
     db.query('UPDATE task_resume SET session_id = ?, session_since = NULL, last_seen_at = NULL WHERE session_id = ?')
       .run(newId, oldId);
   })();
+}
+
+/* --- Registre du tableau (fleet_seen) ---
+ * Une ligne par conversation montrée dans le tableau. Le statut vivant
+ * d'OpenChamber étant éphémère (carte en mémoire, expirée après 24 h), c'est
+ * ce registre qui permet de remettre les cartes au démarrage : fleet.mts
+ * persiste chaque carte vue et restaure celles absentes du statut, tant que
+ * la conversation existe encore (jamais archivée, jamais marquée terminée).
+ */
+
+export interface FleetSeenRow {
+  session_id: string;
+  title: string | null;
+  dir: string | null;
+  first_seen_at: number;
+  last_seen_at: number;
+  last_update_at: number | null;
+  updated_at: number;
+}
+
+export function upsertFleetSeen(sessionId: string, p: {
+  title?: string | null; dir?: string | null; lastUpdateAt?: number | null; at?: number;
+}) {
+  const at = p.at ?? Date.now();
+  db.query(`INSERT INTO fleet_seen (session_id, title, dir, first_seen_at, last_seen_at, last_update_at, updated_at)
+            VALUES (?,?,?,?,?,?,?)
+            ON CONFLICT(session_id) DO UPDATE SET
+              title = COALESCE(excluded.title, title),
+              dir = COALESCE(excluded.dir, dir),
+              last_seen_at = excluded.last_seen_at,
+              last_update_at = COALESCE(excluded.last_update_at, last_update_at),
+              updated_at = excluded.updated_at`)
+    .run(sessionId, p.title ?? null, p.dir ?? null, at, at, p.lastUpdateAt ?? null, at);
+}
+
+export function listFleetSeen(): FleetSeenRow[] {
+  return db.query('SELECT * FROM fleet_seen ORDER BY last_seen_at DESC').all() as FleetSeenRow[];
+}
+
+/** La conversation n'existe plus (supprimée, archivée) : elle quitte le registre. */
+export function forgetFleetSeen(sessionId: string) {
+  db.query('DELETE FROM fleet_seen WHERE session_id = ?').run(sessionId);
 }

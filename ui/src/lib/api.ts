@@ -49,7 +49,7 @@ export interface ConfigSaveResult {
   applied: { sessionId: string | null; agent: string | null; model: string | null; applied: boolean; error?: string };
 }
 
-/** Enregistre et applique à chaud (agent et modèle du chat, compagnons vivants). */
+/** Enregistre et applique à chaud (agent et modèle du chat). */
 export async function saveSupervisorConfig(
   input: Record<string, string | null>,
 ): Promise<ConfigSaveResult> {
@@ -92,6 +92,19 @@ export async function queueSupervisor(text: string, attachments: ComposerAttachm
 
 export async function cancelQueuedSupervisor(itemId: string): Promise<SupervisorState> {
   return postJson<SupervisorState>('/api/supervisor/queue/cancel', { itemId });
+}
+
+/** Item repris de la file (geste OpenChamber) : texte dépouillé + pièces jointes. */
+export interface TakenQueueItem {
+  id: string;
+  text: string;
+  at: number;
+  attachments: ComposerAttachment[];
+}
+
+/** « Modifier » ou « Envoyer maintenant » : la reprise retire l'item de la file. */
+export async function takeQueuedSupervisor(itemId: string): Promise<TakenQueueItem> {
+  return postJson<TakenQueueItem>('/api/supervisor/queue/take', { itemId });
 }
 
 /** « Revenir à partir d'ici » : supprime les messages à partir de celui-ci. */
@@ -147,16 +160,6 @@ export async function sendPrompt(sessionId: string, text: string, attachments: C
 /** Fermer = retirer du Superviseur (pas d'archivage ; une activité future rouvre la carte). */
 export async function closeConversation(sessionId: string, force = false): Promise<void> {
   await post('/api/fleet/done', { sessionId, force });
-}
-
-/**
- * Bascule la supervision d'une conversation existante (supervision opt-in) :
- * le choix est persisté en BD côté daemon, le frame SSE suivant porte le
- * nouvel état ; activer pousse un kick de cadrage, désactiver archive les
- * enfants (compagnon, vérificateur) sans toucher à la conversation.
- */
-export async function setSupervision(sessionId: string, supervised: boolean): Promise<void> {
-  await post('/api/fleet/supervision', { sessionId, supervised });
 }
 
 /** Réponses au propriétaire de cette tâche (lues et non lues), les plus anciennes d'abord. */

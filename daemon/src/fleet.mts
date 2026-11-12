@@ -15,36 +15,15 @@ export interface OpenchamberSession {
   tokens?: Record<string, number>; outcome?: string;
   metadata?: { openchamber?: { work?: { state?: string }, turn?: { durationMs?: number } } };
 }
-import { companionTick, verdictOf } from './companion.mts';
-import { verifierTick } from './verifier.mts';
 import { setBase as setResumeBase, resumeTick } from './resume.mts';
-import { getSupervisorSession, isSupervised } from './state.mts';
+import { forgetFleetSeen, getSupervisorSession, listFleetSeen, upsertFleetSeen } from './state.mts';
 import { SUPERVISOR_DIR } from './supervisor.mts';
 import { getPlanSnapshot } from './plan.mts';
 import { criteriaCounts, listCriteria, type CriteriaCounts } from './criteria.mts';
 import { activityOf, activityTracker, type LiveActivity } from './activity.mts';
 import { SessionIssueTracker, type SessionIssue } from './session-issues.mts';
-import type { WaitInfo } from './verdict.mts';
-
 const sessionIssues = new SessionIssueTracker();
 
-function supOf(id: string): Verdict | undefined {
-  const v = verdictOf(id) as {
-    resume?: string; progress?: number | null; termine?: number;
-    attend?: string; at?: number; state?: string; human_source?: string; next?: string;
-  } | null;
-  if (!v) return undefined;
-  return {
-    resume: v.resume ?? undefined,
-    progress: v.progress ?? undefined,
-    termine: !!v.termine,
-    attend: v.attend ?? undefined,
-    at: v.at ?? undefined,
-    state: (v.state as Verdict['state']) ?? undefined,
-    humanSource: (v.human_source as Verdict['humanSource']) ?? undefined,
-    next: v.next ?? undefined,
-  };
-}
 export interface PendingForm {
   id: string; sessionID: string; title?: string;
   metadata?: { kind?: string };
@@ -54,7 +33,6 @@ export interface FleetRow {
   id: string; title: string; status: string;
   issue?: SessionIssue;
   dir?: string;
-  sup?: Verdict;
   turnStartedAt?: number; lastUpdateAt?: number;
   busy?: number | null; idle?: number | null;
   pendingForms: PendingForm[]; pendingPermissions: unknown[];
@@ -64,15 +42,6 @@ export interface FleetRow {
   criteria?: CriteriaCounts;
   /** ce que l'agent fait à l'instant (uniquement pendant un tour busy) */
   activity?: LiveActivity;
-  /** supervision opt-in : false = conversation OpenChamber sans compagnon ni vérificateur */
-  supervised: boolean;
-}
-export interface Verdict {
-  resume?: string; progress?: number | null; termine?: boolean;
-  attend?: string; at?: number;
-  state?: 'working' | 'waiting_human' | 'done' | 'blocked';
-  humanSource?: 'question_tool' | 'permission' | 'agent_ask' | 'none';
-  next?: string;
 }
 export interface Fleet {
   at: number; rows: FleetRow[]; concern: string | null;
@@ -105,6 +74,20 @@ interface StatusPayload {
   pending?: Record<string, { permissions?: unknown[]; forms?: PendingForm[] }>;
 }
 
+/** Tri partagé des cartes : demandes en attente d'abord, busy ensuite, puis la
+ *  clé stable turnStartedAt (et non lastUpdateAt : les refresh de metadata
+ *  d'OpenChamber faisaient re-trier à chaque tick = cartes qui se déplacent et
+ *  flicker à l'écran). Utilisé par buildFleet ET par la restauration. */
+function sortFleetRows(rows: FleetRow[]): void {
+  rows.sort((a, b) => {
+    const wa = a.pendingForms.length + a.pendingPermissions.length;
+    const wb = b.pendingForms.length + b.pendingPermissions.length;
+    if (wb !== wa) return wb - wa;
+    if (a.status !== b.status) return a.status === 'busy' ? -1 : 1;
+    return (b.turnStartedAt ?? 0) - (a.turnStartedAt ?? 0);
+  });
+}
+
 function buildFleet(status: StatusPayload): Fleet {
   const rows: FleetRow[] = [];
   let concern: string | null = null;
@@ -122,33 +105,17 @@ function buildFleet(status: StatusPayload): Fleet {
     if (meta.parentID) continue;
     const pendingForms = (status.pending?.[id]?.forms ?? []).filter(f => f?.metadata?.kind === 'question');
     const pendingPermissions = status.pending?.[id]?.permissions ?? [];
-    // le verdict appartient au tour précédent ? (prompt renvoyé depuis la dernière analyse)
-    // → strip résumé/attend : la carte repasse en « Réflexion en cours »
-    const supRaw = supOf(id);
-    const staleBusy = !!(supRaw && s.status === 'busy' && supRaw.at && s.turnStartedAt && supRaw.at < s.turnStartedAt);
-    // verdict écrit avant la dernière activité du tour : ne pas afficher un
-    // résumé périmé (souvent « rien n'a encore été produit ») à côté d'une
-    // livraison fraîche. On garde la progression du plan, on attend le bilan.
-    const staleIdle = !!(supRaw && !supRaw.termine && s.status !== 'busy' && (supRaw.at ?? 0) < (s.lastUpdateAt ?? 0));
-    const sup = staleBusy
-      ? { at: supRaw!.at }
-      : staleIdle
-        ? { at: supRaw!.at, progress: supRaw!.progress }
-        : supRaw;
     const row: FleetRow = {
       id,
       title: meta.title ?? id.slice(0, 18),
       status: s.status,
       issue: sessionIssues.get(id),
       dir: meta.location?.directory,
-      sup,
       turnStartedAt: s.turnStartedAt,
       lastUpdateAt: s.lastUpdateAt,
       busy: meta?.time?.busy ?? null,
       idle: meta?.time?.idle ?? null,
       pendingForms, pendingPermissions,
-      // relu de la BD à chaque frame : la bascule est effective sans redémarrage
-      supervised: isSupervised(id),
     };
     if (pendingForms.length || pendingPermissions.length) {
       if (!concern) {
@@ -160,15 +127,7 @@ function buildFleet(status: StatusPayload): Fleet {
     }
     rows.push(row);
   }
-  rows.sort((a, b) => {
-    const wa = a.pendingForms.length + a.pendingPermissions.length;
-    const wb = b.pendingForms.length + b.pendingPermissions.length;
-    if (wb !== wa) return wb - wa;
-    if (a.status !== b.status) return a.status === 'busy' ? -1 : 1;
-    // clé stable: turnStartedAt (et non lastUpdateAt: les refresh de metadata d'OpenChamber
-    // faisaient re-trier à chaque tick = les cartes se déplacaient et flicker à l'écran)
-    return (b.turnStartedAt ?? 0) - (a.turnStartedAt ?? 0);
-  });
+  sortFleetRows(rows);
   // TEMP: trace les bascules (qui surgit/disparaît entre deux polls)
   const sigNow = rows.map(r => r.id).join(',');
   if ((globalThis as { lastRowSig?: string }).lastRowSig && (globalThis as { lastRowSig?: string }).lastRowSig !== sigNow) {
@@ -179,6 +138,118 @@ function buildFleet(status: StatusPayload): Fleet {
   }
   (globalThis as { lastRowSig?: string }).lastRowSig = sigNow;
   return { at: Date.now(), rows, concern };
+}
+
+/* --- Registre du tableau : persister les cartes vues, restaurer les absentes ---
+ *
+ * /api/sessions/status d'OpenChamber est une carte EN MÉMOIRE : perdue au
+ * redémarrage d'OpenChamber ou d'OpenCode (une session au repos ne réémet
+ * jamais d'événement session.status), et expirée après 24 h
+ * (SESSION_STATE_MAX_AGE_MS côté OpenChamber). Sans registre, fermer le
+ * Superviseur (ou redémarrer OpenChamber) vide le tableau alors que les
+ * conversations existent toujours.
+ *
+ * Chaque carte vue est notée dans `fleet_seen` (state.mts) ; celles absentes
+ * du statut vivant sont remises au tableau tant que la conversation existe
+ * encore (annuaire ou lecture directe), n'est pas archivée, pas une
+ * sous-session, pas le chat de supervision et pas marquée terminée
+ * (work=done : le bouton « Done » d'OpenChamber ou le « Terminé » du
+ * Superviseur, qui écrit closed_at de toute façon).
+ */
+
+/** Cache des lectures directes (l'annuaire est paginé, une session peut en
+ *  manquer) : évite un GET par carte restaurée à chaque tick. */
+type MetaResolution = { kind: 'ok'; meta: OpenchamberSession } | { kind: 'gone' } | { kind: 'unknown' };
+const directMetaCache = new Map<string, { at: number; kind: 'ok' | 'gone'; meta: OpenchamberSession | null }>();
+const DIRECT_META_TTL_MS = 5 * 60_000;
+
+async function resolveSessionMeta(id: string, directory: Map<string, OpenchamberSession>, now: number): Promise<MetaResolution> {
+  const indexed = directory.get(id);
+  if (indexed) return { kind: 'ok', meta: indexed };
+  const cached = directMetaCache.get(id);
+  if (cached && now - cached.at < DIRECT_META_TTL_MS) {
+    return cached.kind === 'ok' && cached.meta ? { kind: 'ok', meta: cached.meta } : { kind: 'gone' };
+  }
+  try {
+    const body = await jget(`/api/session/${encodeURIComponent(id)}`) as { data?: OpenchamberSession };
+    const meta = body?.data ?? null;
+    if (!meta?.id) return { kind: 'unknown' }; // 200 sans donnée : on ne décide rien
+    directMetaCache.set(id, { at: now, kind: 'ok', meta });
+    return { kind: 'ok', meta };
+  } catch (e) {
+    const msg = String((e as Error)?.message ?? e);
+    if (/→ 404/.test(msg)) {
+      directMetaCache.set(id, { at: now, kind: 'gone', meta: null });
+      return { kind: 'gone' };
+    }
+    return { kind: 'unknown' }; // instance injoignable : on ne supprime rien
+  }
+}
+
+/** Note chaque carte du tableau dans le registre persistant. */
+export function persistFleetSeen(fleet: Fleet, now = Date.now()): void {
+  for (const row of fleet.rows) {
+    upsertFleetSeen(row.id, {
+      title: row.title,
+      dir: row.dir ?? null,
+      lastUpdateAt: row.lastUpdateAt ?? null,
+      at: now,
+    });
+  }
+}
+
+/** Remet au tableau les conversations du registre absentes du statut vivant.
+ *  Filtres identiques à buildFleet, revérifiés sur l'état COURANT de la session
+ *  (annuaire, sinon lecture directe). Appelé AVANT l'enrichissement : une carte
+ *  restaurée porte son plan et ses critères sur la même frame (anti-flicker). */
+export async function restoreFleetRows(
+  fleet: Fleet,
+  status: StatusPayload,
+  directory: Map<string, OpenchamberSession>,
+  now = Date.now(),
+): Promise<void> {
+  const supervisorId = getSupervisorSession()?.oc_session_id;
+  const liveIds = new Set(fleet.rows.map(r => r.id));
+  const statusIds = new Set(Object.keys(status.sessions ?? {}));
+  const restored: FleetRow[] = [];
+  for (const entry of listFleetSeen()) {
+    const id = entry.session_id;
+    if (liveIds.has(id)) continue;
+    // déjà dans le statut vivant mais sans annuaire (fantôme, page en retard) :
+    // buildFleet en décide, on ne fabrique pas une carte « idle » fausse
+    if (statusIds.has(id)) continue;
+    const res = await resolveSessionMeta(id, directory, now);
+    if (res.kind === 'gone') { forgetFleetSeen(id); continue; }
+    if (res.kind === 'unknown') continue;
+    const meta = res.meta;
+    if (supervisorId && id === supervisorId) continue;
+    if (meta.time?.archived) { forgetFleetSeen(id); continue; }
+    if (meta.location?.directory === SUPERVISOR_DIR) continue;
+    if (meta.parentID) continue;
+    if (meta.metadata?.openchamber?.work?.state === 'done') continue;
+    const pendingForms = (status.pending?.[id]?.forms ?? []).filter(f => f?.metadata?.kind === 'question');
+    restored.push({
+      id,
+      title: meta.title ?? entry.title ?? id.slice(0, 18),
+      status: 'idle',
+      dir: meta.location?.directory,
+      turnStartedAt: meta.time?.busy ?? undefined,
+      lastUpdateAt: meta.time?.updated ?? meta.time?.idle ?? entry.last_update_at ?? entry.last_seen_at,
+      busy: meta.time?.busy ?? null,
+      idle: meta.time?.idle ?? null,
+      pendingForms,
+      pendingPermissions: status.pending?.[id]?.permissions ?? [],
+    });
+  }
+  if (restored.length) {
+    fleet.rows.push(...restored);
+    sortFleetRows(fleet.rows);
+  }
+}
+
+/** Pour les tests : vide les caches de lectures directes. */
+export function resetFleetSeenCaches(): void {
+  directMetaCache.clear();
 }
 
 /** Progression : uniquement le plan `planwrite` de la session de travail. */
@@ -193,14 +264,6 @@ async function enrichPlanProgress(fleet: Fleet): Promise<void> {
         total: snap.total,
         steps: snap.items.map(i => ({ text: i.content, status: i.status })),
       };
-      row.sup = {
-        ...(row.sup ?? {}),
-        progress: row.sup?.termine ? 100 : (snap.progress ?? 0),
-      };
-    } else if (row.sup) {
-      // plus de repli sur la progression inventée par le compagnon ; un job
-      // terminé reste à 100 même sans plan (règle done ⇒ 100)
-      row.sup = { ...row.sup, progress: row.sup.termine ? 100 : null };
     }
   }
 }
@@ -251,43 +314,15 @@ async function runPoll(): Promise<void> {
     // échantillonnée par le SSE 500 ms et le poll 3 s de l'UI : barres qui se
     // relancent (38 % → 0 → 38 %) et section Plan du détail démontée/remontée.
     const fleet = buildFleet(status);
+    // registre du tableau : noter les cartes vues, remettre celles que le
+    // statut éphémère d'OpenChamber a perdues (redémarrage, expiration 24 h)
+    persistFleetSeen(fleet);
+    await restoreFleetRows(fleet, status, sessionsIndex);
     await enrichPlanProgress(fleet);
     enrichCriteriaCounts(fleet);
     await enrichActivity(fleet);
     cachedFleet = fleet;
     lastGood = Date.now();
-    // l'attente humaine est décidée par les formulaires/permissions réels, pas par le LLM
-    const waitingMap = new Map<string, WaitInfo>();
-    for (const row of cachedFleet.rows) {
-      const form = row.pendingForms[0];
-      const permission = row.pendingPermissions[0];
-      if (form) {
-        waitingMap.set(row.id, {
-          waiting: true,
-          source: 'question_tool',
-          ask: (form.fields?.[0]?.title ?? form.title ?? 'Une question t’attend.').slice(0, 180),
-        });
-      } else if (permission) {
-        waitingMap.set(row.id, {
-          waiting: true,
-          source: 'permission',
-          ask: 'Une permission t’attend.',
-        });
-      }
-    }
-    // le compagnon juge les sessions nouvelles (idle) ou périodiquement (busy)
-    // supervision opt-in : les ticks ne voient que les sessions supervisées
-    // (les ticks refiltrent eux-mêmes : les tests les appellent sans la flotte)
-    const supervisorId = getSupervisorSession()?.oc_session_id;
-    const tickSessions = [...sessionsIndex.values()].filter(
-      s => s.id !== supervisorId && s.location?.directory !== SUPERVISOR_DIR && isSupervised(s.id),
-    );
-    void companionTick(tickSessions, status.sessions ?? {}, waitingMap)
-      .catch(() => { /* l'analyse compagnon réessaie au prochain tick */ });
-    // vérificateur des critères : déclenché par les tool criteria, les preuves
-    // en attente et les fins de tour (verifier-kicks)
-    void verifierTick(tickSessions, status.sessions ?? {})
-      .catch(() => { /* une phase ratée réessaie au prochain tick */ });
     // auto-restart : une tâche armée dont la session a été détruite repart sur
     // une session neuve (modèle default courant), registre task_resume.
     // Les archivées ne comptent pas comme vivantes : être dans l'annuaire avec
@@ -330,8 +365,7 @@ export function pollOnce(): Promise<void> {
 export function baseOk(): boolean { return base !== '' && lastGood > 0; }
 
 /* --- SSE : l'événement pousse un poll immédiat (le poll 3 s reste le filet) --- */
-import { ingestEvent } from './kicks.mts';
-import { noteMessageActivity } from './message-index.mts';
+import { ingestEvent } from './events.mts';
 
 let sseBusy = false;          // reconnexion déjà planifiée
 let pollDebounce: ReturnType<typeof setTimeout> | null = null;
@@ -340,11 +374,6 @@ function onEventLine(type: string, data: Record<string, unknown>) {
   sessionIssues.ingest({ type, data });
   activityTracker.ingest(type, data);
   ingestEvent({ type, data });
-  // événements message.* : la session est marquée pour réindexation (index
-  // local, pleine couverture de recherche : message-index.mts)
-  if (type.startsWith('message.')) {
-    noteMessageActivity(data.sessionID ?? (data.data as Record<string, unknown> | undefined)?.sessionID);
-  }
   const relevant = /^(session\.|permission\.|form\.|project\.|workspace\.|message\.)/.test(type);
   if (!relevant) return;
   if (pollDebounce) return;

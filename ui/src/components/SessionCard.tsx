@@ -2,17 +2,15 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import type { CardState } from '../lib/cardState';
 import { cardStateLabel } from '../lib/cardState';
-import { fetchFleet, setSupervision } from '../lib/api';
 import { closeQuestionOf, closeTask } from '../lib/closeTask';
 import { cx } from '../lib/cx';
-import { BUSY_BRIEF, briefRow, isStaleTurn, planLabel } from '../lib/fleet';
-import { isUnsupervised, supervisionActionLabel } from '../lib/supervision';
+import { briefRow, planLabel } from '../lib/fleet';
 import { useFleetStore } from '../store/fleetStore';
 import type { FleetRow } from '../types';
 import { ActivityLine } from './ActivityLine';
 import { CardStateIcon } from './CardStateIcon';
 import { CriteriaPopover } from './CriteriaPopover';
-import { CloseConversationIcon, OpenChamberIcon, QuestionIcon, SupervisionIcon, SupervisionOffIcon } from './Icons';
+import { CloseConversationIcon, OpenChamberIcon, QuestionIcon } from './Icons';
 import { PlanPopover } from './PlanPopover';
 
 interface Props {
@@ -32,6 +30,11 @@ const CARD_BTN =
  * Carte à hauteur fixe, sans composer : l'écriture à une tâche passe par le
  * détail. Toutes les zones sont réservées dans tous les états : l'état ne
  * change que l'icône, le contenu interne et l'action du pied.
+ *
+ * États 2026-11-12 (plus de verdict de compagnon) : waiting, busy, done
+ * (déterministe : plan 100 % + critères tous validés + au repos) et warning
+ * (au repos, travail incomplet). Le libellé et le détail du warning disent ce
+ * qui manque (étapes, critères), jamais une invention de résumé.
  */
 export function SessionCard({ row, state, selected, flash, now, onOpen, onOpenChamber }: Props) {
   const closeSession = useFleetStore((s) => s.closeSession);
@@ -44,26 +47,21 @@ export function SessionCard({ row, state, selected, flash, now, onOpen, onOpenCh
   const waiting = state === 'waiting';
   const done = state === 'done';
   const busy = state === 'busy';
-  // supervision opt-in : false = conversation démarrée directement dans
-  // OpenChamber, sans compagnon ni vérificateur ; undefined (daemon ancien) = supervisée
-  const unsupervised = isUnsupervised(row);
-  const supervisionLabel = supervisionActionLabel(row);
+  const warning = state === 'warning';
   // au repos, jamais de ligne résiduelle : le daemon ne publie activity que
   // pour une session busy, l'UI s'abstient aussi par sécurité
   const activity = busy ? row.activity : undefined;
   const issue = row.issue;
-  const stale = isStaleTurn(row);
   const form = row.pendingForms?.[0];
   const perm = row.pendingPermissions?.[0];
   const waitingKind = form ? 'form' : perm ? 'permission' : undefined;
-  const brief = issue?.message || (issue ? cardStateLabel(state, waitingKind) : stale ? BUSY_BRIEF : row.sup?.resume || briefRow(row, waiting, now));
+  const brief = issue?.message || (issue ? cardStateLabel(state, waitingKind) : briefRow(row, waiting, now));
   const stateLabel = cardStateLabel(state, waitingKind);
 
-  const hasProgress = row.sup?.progress != null || !!row.plan;
-  const progress = row.sup?.progress != null ? Math.max(0, Math.min(100, Number(row.sup.progress))) : 0;
+  const hasProgress = !!row.plan;
+  const progress = row.plan ? Math.max(0, Math.min(100, Math.round((row.plan.done / row.plan.total) * 100))) : 0;
   const planSteps = row.plan?.steps ?? [];
   const progressLabel = planLabel(row.plan, done, progress);
-  const attend = row.sup?.attend && (waiting || row.sup.humanSource === 'agent_ask') ? row.sup.attend : '';
   // critères : deuxième barre au même format que celle du plan, à sa droite ;
   // masquée sans critère (même règle que la barre du plan sans plan)
   const crit = row.criteria;
@@ -88,19 +86,6 @@ export function SessionCard({ row, state, selected, flash, now, onOpen, onOpenCh
     setCloseError(null);
     try {
       await closeTask(row, closeSession, !!question);
-    } catch (e) {
-      setCloseError(String((e as Error)?.message ?? e));
-    }
-  };
-
-  // Bascule de supervision (opt-in) : le choix est persisté en BD côté daemon ;
-  // le frame SSE suivant porte le nouvel état, aucun rechargement n'est requis.
-  const toggleSupervision = async () => {
-    setMenuOpen(false);
-    setCloseError(null);
-    try {
-      await setSupervision(row.id, unsupervised);
-      void fetchFleet().catch(() => undefined);
     } catch (e) {
       setCloseError(String((e as Error)?.message ?? e));
     }
@@ -134,7 +119,7 @@ export function SessionCard({ row, state, selected, flash, now, onOpen, onOpenCh
     return () => {
       window.removeEventListener('scroll', place, true);
       window.removeEventListener('resize', place);
-      document.removeEventListener('mousedown', onDown);
+      window.removeEventListener('mousedown', onDown);
       document.removeEventListener('keydown', onKey);
     };
   }, [menuOpen]);
@@ -142,11 +127,9 @@ export function SessionCard({ row, state, selected, flash, now, onOpen, onOpenCh
   const action =
     state === 'waiting'
       ? { label: 'Répondre', primary: true, run: onOpen }
-      : state === 'busy'
-        ? { label: 'Détail', primary: false, run: onOpen }
-        : state === 'error' || state === 'retry'
-          ? { label: 'Détail', primary: false, run: onOpen }
-          : { label: 'Terminé', primary: true, run: () => void close() };
+      : state === 'done'
+        ? { label: 'Terminé', primary: true, run: () => void close() }
+        : { label: 'Détail', primary: false, run: onOpen };
 
   let detail: ReactNode = null;
   if (state === 'waiting') {
@@ -163,19 +146,15 @@ export function SessionCard({ row, state, selected, flash, now, onOpen, onOpenCh
       </span>
     );
   } else if (busy) {
-    detail = currentStep ? (
-      <span>Étape : {currentStep.text}</span>
-    ) : attend ? (
-      <span className="text-attend">
-        <QuestionIcon /> {attend}
-      </span>
-    ) : null;
-  } else if (state === 'idle' && attend) {
-    detail = (
-      <span className="text-attend">
-        <QuestionIcon /> {attend}
-      </span>
-    );
+    detail = currentStep ? <span>Étape : {currentStep.text}</span> : null;
+  } else if (warning) {
+    // ce qui manque, en faits : le plan d'abord, les critères ensuite
+    const missing: string[] = [];
+    if (row.plan && row.plan.done < row.plan.total) missing.push(`Plan : ${row.plan.done}/${row.plan.total} étapes`);
+    if (!row.plan) missing.push('Pas de plan posé');
+    if (critTotal > 0 && critValidated < critTotal) missing.push(`Critères : ${critValidated}/${critTotal} validés`);
+    if (critTotal === 0) missing.push('Aucun critère défini');
+    detail = missing.length ? <span title={missing.join(' · ')}>{missing.join(' · ')}</span> : null;
   }
   // Au repos, pas de bloc de résultat dans la carte : l'aperçu de deux lignes
   // n'apportait rien et poussait le résumé hors du peu de place disponible ;
@@ -226,16 +205,6 @@ export function SessionCard({ row, state, selected, flash, now, onOpen, onOpenCh
             {unreadAnswers > 1 ? `${unreadAnswers} réponses` : '1 réponse'}
           </span>
         ) : null}
-        {unsupervised ? (
-          <span
-            data-testid="card-unsupervised"
-            title="Conversation démarrée directement dans OpenChamber : ni compagnon ni vérificateur. Menu ⋯ pour l'activer."
-            className="flex shrink-0 items-center gap-[4px] rounded-full border border-border px-[7px] py-[1px] text-[10px] font-semibold text-muted"
-          >
-            <SupervisionOffIcon />
-            Non supervisée
-          </span>
-        ) : null}
         <button
           ref={kebabRef}
           type="button"
@@ -281,7 +250,7 @@ export function SessionCard({ row, state, selected, flash, now, onOpen, onOpenCh
             // colonne à largeur fixe : le libellé ne pousse plus la barre ni la
             // valeur de progression, qui restent alignées d'une carte à l'autre
             'w-[112px] min-w-0 shrink truncate text-[11.5px] font-semibold',
-            waiting ? 'text-attend' : 'text-muted',
+            waiting || warning ? 'text-attend' : 'text-muted',
           )}
         >
           {stateLabel}
@@ -304,25 +273,16 @@ export function SessionCard({ row, state, selected, flash, now, onOpen, onOpenCh
           ) : null}
         </span>
         {hasProgress ? (
-          planSteps.length ? (
-            <PlanPopover
-              label={progressLabel}
-              steps={planSteps}
-              done={row.plan?.done ?? 0}
-              total={row.plan?.total ?? 0}
-            />
-          ) : (
-            // même largeur que le compteur cliquable du plan (38 px), sinon la
-            // valeur glisse selon la présence d'un plan ; le retrait de 2 px
-            // aligne le texte sur celui du bouton (qui a un padding de 2 px)
-            <span
-              data-testid="card-progress-value"
-              className="w-[38px] shrink-0 pr-[2px] text-right text-[11.5px] font-[650] tabular-nums"
-            >
-              {progressLabel}
-            </span>
-          )
+          <PlanPopover
+            label={progressLabel}
+            steps={planSteps}
+            done={row.plan?.done ?? 0}
+            total={row.plan?.total ?? 0}
+          />
         ) : (
+          // même largeur que le compteur cliquable du plan (38 px), sinon la
+          // valeur glisse selon la présence d'un plan ; le retrait de 2 px
+          // aligne le texte sur celui du bouton (qui a un padding de 2 px)
           <span className="w-[38px] shrink-0" />
         )}
         {critTotal > 0 ? (
@@ -355,7 +315,7 @@ export function SessionCard({ row, state, selected, flash, now, onOpen, onOpenCh
         <button
           type="button"
           title={
-            state === 'idle' || state === 'done'
+            state === 'done'
               ? 'Terminer la tâche et la retirer de la flotte'
               : state === 'waiting'
                 ? 'Ouvrir la question'
@@ -390,19 +350,6 @@ export function SessionCard({ row, state, selected, flash, now, onOpen, onOpenCh
               onClick={(e) => e.stopPropagation()}
               className="z-[200] overflow-hidden rounded-[8px] border border-border bg-card shadow-[0_6px_18px_rgba(0,0,0,.12)]"
             >
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  void toggleSupervision();
-                }}
-                className="flex w-full cursor-pointer items-center gap-[8px] bg-transparent px-[12px] py-[9px] text-left text-[13.5px] text-text hover:bg-hover"
-              >
-                <span className="shrink-0 opacity-[.65]">
-                  <SupervisionIcon />
-                </span>
-                {supervisionLabel}
-              </button>
               <button
                 type="button"
                 onClick={(e) => {

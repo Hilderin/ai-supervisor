@@ -20,7 +20,6 @@ function renderInspector(r: FleetRow): string {
     <TaskInspector
       row={r}
       state={cardState(r, 'running' as Section)}
-      now={0}
       onClose={() => {}}
       onOpenChamber={() => {}}
     />,
@@ -56,10 +55,11 @@ describe('TaskInspector', () => {
     expect(html).toContain('NetworkError');
   });
 
-  test('le résumé porte un encadré titré « Résumé »', () => {
-    const html = renderInspector(row({ sup: { resume: 'Voici le résumé du tour.', at: 1 } }));
-    expect(html).toContain('Résumé');
-    expect(html).toContain('Voici le résumé du tour.');
+  test('plus d encadré « Résumé » ni d attente du verdict (compagnon retiré)', () => {
+    const html = renderInspector(row());
+    expect(html).not.toContain('Résumé');
+    expect(html).not.toContain('tour terminé ·');
+    expect(html).not.toContain('QuestionIcon');
   });
 
   test('avec un plan : pas de barre de progression, le badge X/X vit dans le Plan', () => {
@@ -67,17 +67,17 @@ describe('TaskInspector', () => {
       { text: 'a', status: 'completed' as const },
       { text: 'b', status: 'pending' as const },
     ];
-    const html = renderInspector(row({ sup: { resume: 'r', at: 1 }, plan: { done: 1, total: 2, steps } }));
+    const html = renderInspector(row({ plan: { done: 1, total: 2, steps } }));
     expect(html).toContain('Plan');
     expect(html).toContain('1/2'); // badge du plan
     expect(html).not.toContain('bg-track'); // la barre a disparu du détail
     expect(html).not.toContain('data-testid="progress"');
   });
 
-  test('sans plan : repli discret, sans barre', () => {
-    const html = renderInspector(row({ sup: { resume: 'r', at: 1 } }));
+  test('sans plan : pas de repli de pourcentage, la section est simplement absente', () => {
+    const html = renderInspector(row());
     expect(html).not.toContain('bg-track');
-    expect(html).toContain('pas de plan');
+    expect(html).not.toContain('pas de plan');
   });
 
   test('la section des questions porte un titre et le « ? » orange, dans le gabarit des autres sections', () => {
@@ -96,22 +96,14 @@ describe('TaskInspector', () => {
   });
 });
 
-describe('supervision opt-in dans le détail', () => {
-  test('badge non supervisée dans la ligne d état + bouton de bascule dans l en-tête', () => {
-    const html = renderInspector(row({ supervised: false }));
-    expect(html).toContain('data-testid="inspector-unsupervised"');
-    expect(html).toContain('Non supervisée');
-    // icône œil barré distinctive du badge
-    expect(html).toContain('M4 4l16 16');
-    expect(html).toContain('data-testid="inspector-supervision-toggle"');
-    expect(html).toContain('aria-label="Activer la supervision"');
-    expect(html).toContain('Activer la supervision (compagnon + vérificateur sur cette conversation)');
-  });
-
-  test('tâche supervisée : pas de badge, bouton présent pour désactiver', () => {
-    const html = renderInspector(row({ supervised: true }));
-    expect(html).not.toContain('data-testid="inspector-unsupervised"');
-    expect(html).toContain('data-testid="inspector-supervision-toggle"');
-    expect(html).toContain('aria-label="Désactiver la supervision"');
+describe('supervision : retirée du détail', () => {
+  test('plus de badge ni de bascule, quel que soit l ancien état', () => {
+    for (const supervised of [true, false, undefined]) {
+      const html = renderInspector(row({ supervised } as Partial<FleetRow>));
+      expect(html).not.toContain('inspector-unsupervised');
+      expect(html).not.toContain('inspector-supervision-toggle');
+      expect(html).not.toContain('Non supervisée');
+      expect(html).not.toContain('M4 4l16 16');
+    }
   });
 });

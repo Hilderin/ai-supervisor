@@ -10,7 +10,7 @@
  *
  * Sans logique métier : l'appel part vers le daemon Superviseur
  * (POST /api/task/answer), qui valide la session (une tâche top-level connue,
- * jamais le chat de supervision ni un compagnon), journalise et stocke.
+ * jamais le chat de supervision), journalise et stocke.
  *
  * Le bilan final de la tâche reste une réponse dans la session OpenChamber :
  * il ne passe PAS par `answer`.

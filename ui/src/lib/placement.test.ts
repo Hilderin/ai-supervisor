@@ -13,11 +13,24 @@ const row = (over: Partial<FleetRow>): FleetRow => ({
   ...over,
 });
 
-const doneRow = (over: Partial<FleetRow> = {}) =>
-  row({ sup: { termine: true, at: 60 }, turnStartedAt: 50, ...over });
+const plan = (done: number, total: number): FleetRow['plan'] => ({
+  done,
+  total,
+  steps: Array.from({ length: total }, (_, i) => ({
+    text: 'étape',
+    status: i < done ? 'completed' : 'pending',
+  })),
+});
 
+const crit = (validated: number, total: number) => ({ total, todo: 0, toValidate: 0, toFix: 0, validated });
+
+/** plan 100 % + critères tous validés : la règle TERMINÉ déterministe */
+const doneRow = (over: Partial<FleetRow> = {}) =>
+  row({ plan: plan(3, 3), criteria: crit(2, 2), turnStartedAt: 50, ...over });
+
+/** plan incomplet : EN COURS / warning */
 const runningRow = (over: Partial<FleetRow> = {}) =>
-  row({ sup: { termine: false, at: 60 }, turnStartedAt: 50, ...over });
+  row({ plan: plan(1, 3), criteria: crit(0, 2), turnStartedAt: 50, ...over });
 
 describe('updatePlacements', () => {
   test('première vue : section immédiate', () => {
@@ -35,7 +48,7 @@ describe('updatePlacements', () => {
     expect(late.ses_test.section).toBe('done');
   });
 
-  test('TERMINÉ → EN COURS attend aussi (verdict qui se rétracte)', () => {
+  test('TERMINÉ → EN COURS attend aussi (l agent ajoute un critère ou une étape)', () => {
     const prev = updatePlacements({}, [doneRow()], T0);
     const early = updatePlacements(prev, [runningRow()], T0 + 1000);
     expect(early.ses_test.section).toBe('done');
@@ -52,11 +65,11 @@ describe('updatePlacements', () => {
     expect(back.ses_test.candidate).toBeUndefined();
   });
 
-  test('busy : EN COURS immédiat, même avec un verdict done frais', () => {
+  test('busy : EN COURS immédiat, même avec plan et critères complets', () => {
     const prev = updatePlacements({}, [doneRow()], T0);
     const busy = updatePlacements(
       prev,
-      [doneRow({ status: 'busy', sup: { termine: true, at: 60 } })],
+      [doneRow({ status: 'busy' })],
       T0 + 1000,
     );
     expect(busy.ses_test.section).toBe('running');

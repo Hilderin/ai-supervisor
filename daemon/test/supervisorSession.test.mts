@@ -1,26 +1,27 @@
 import { describe, expect, test } from 'bun:test';
+import { ORCHESTRATOR_AGENT } from '../src/state.mts';
 import { supervisorSessionAction } from '../src/supervisor.mts';
 
 /**
- * Un changement de prompt (hash du fichier) ne doit jamais remplacer la
- * conversation de supervision : c'est ce qui a fait « disparaître » le chat
- * le 2026-11-07, quand une tâche a renommé todowrite en planwrite dans l'agent
- * pendant que le propriétaire écrivait dans le chat.
+ * Nom d'agent FIXE (retrait du versionnage par hash) : la conversation de
+ * supervision n'est jamais remplacée. Une session vivante portant encore un
+ * ancien nom versionné (ou un agent choisi) bascule en place, l'historique
+ * reste ; seule une session absente ou archivée fait créer une conversation.
  */
 describe('cycle de vie de la conversation de supervision', () => {
-  test('une session vivante avec un autre agent bascule en place (jamais de remplacement)', () => {
+  test('une session vivante avec un ancien nom versionné bascule en place (jamais de remplacement)', () => {
     expect(supervisorSessionAction({
       exists: true,
       sessionAgent: 'superviseur-orchestrateur-c453c714',
-      agent: 'superviseur-orchestrateur-dc6b25be',
+      agent: ORCHESTRATOR_AGENT,
     })).toBe('switch');
   });
 
   test('une session vivante avec le bon agent est réutilisée', () => {
     expect(supervisorSessionAction({
       exists: true,
-      sessionAgent: 'superviseur-orchestrateur-dc6b25be',
-      agent: 'superviseur-orchestrateur-dc6b25be',
+      sessionAgent: ORCHESTRATOR_AGENT,
+      agent: ORCHESTRATOR_AGENT,
     })).toBe('reuse');
   });
 
@@ -28,7 +29,7 @@ describe('cycle de vie de la conversation de supervision', () => {
     expect(supervisorSessionAction({
       exists: true,
       sessionAgent: null,
-      agent: 'superviseur-orchestrateur-dc6b25be',
+      agent: ORCHESTRATOR_AGENT,
     })).toBe('switch');
   });
 
@@ -36,7 +37,7 @@ describe('cycle de vie de la conversation de supervision', () => {
     expect(supervisorSessionAction({
       exists: false,
       sessionAgent: null,
-      agent: 'superviseur-orchestrateur-dc6b25be',
+      agent: ORCHESTRATOR_AGENT,
     })).toBe('create');
   });
 });

@@ -39,6 +39,12 @@ beforeEach(() => {
       url,
       body: init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : null,
     });
+    if (url === '/api/supervisor/queue/take') {
+      return new Response(
+        JSON.stringify({ id: 'q1', text: 'texte repris', at: 1, attachments: [] }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    }
     return new Response(JSON.stringify(base()), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
@@ -70,6 +76,35 @@ describe('supervisorStore : envoi direct, file et actions', () => {
     await useSupervisorStore.getState().removeQueued('q1');
     expect(calls[0]?.url).toBe('/api/supervisor/queue/cancel');
     expect(calls[0]?.body?.itemId).toBe('q1');
+  });
+
+  test('une question en attente : le message part immédiatement, jamais en file', async () => {
+    useSupervisorStore.setState({
+      state: base({ status: 'busy', pendingForms: [{ id: 'form_1', metadata: { kind: 'question' } }] }),
+    });
+    await useSupervisorStore.getState().send('réponds plutôt à ça');
+    expect(calls[0]?.url).toBe('/api/supervisor/send');
+    expect(calls[0]?.body?.text).toBe('réponds plutôt à ça');
+    expect(calls.some((c) => c.url === '/api/supervisor/queue')).toBe(false);
+  });
+
+  test('« Envoyer maintenant » reprend l’item de la file puis l’envoie tout de suite', async () => {
+    useSupervisorStore.setState({ state: base({ status: 'busy', queued: [{ id: 'q1', text: 'en file', at: 1 }] }) });
+    await useSupervisorStore.getState().sendQueued('q1');
+    expect(calls[0]?.url).toBe('/api/supervisor/queue/take');
+    expect(calls[0]?.body?.itemId).toBe('q1');
+    expect(calls[1]?.url).toBe('/api/supervisor/send');
+    expect(calls[1]?.body?.text).toBe('texte repris');
+    expect(useSupervisorStore.getState().state?.queued).toHaveLength(0);
+  });
+
+  test('« Modifier » reprend l’item et remet son texte dans le brouillon', async () => {
+    useSupervisorStore.setState({ state: base({ queued: [{ id: 'q1', text: 'en file', at: 1 }] }) });
+    await useSupervisorStore.getState().editQueued('q1');
+    expect(calls[0]?.url).toBe('/api/supervisor/queue/take');
+    expect(useSupervisorStore.getState().draft).toBe('texte repris');
+    expect(useSupervisorStore.getState().state?.queued).toHaveLength(0);
+    expect(calls.some((c) => c.url === '/api/supervisor/send')).toBe(false);
   });
 
   test('revenir à un message restaure son texte dans le brouillon', async () => {
@@ -196,12 +231,13 @@ describe('MessageMeta : heure et actions sur une ligne', () => {
 });
 
 describe('ComposerActions : Envoyer et Stop', () => {
-  const render = (canStop: boolean, hasText: boolean, disabled = false) =>
+  const render = (canStop: boolean, hasText: boolean, disabled = false, waiting = false) =>
     renderToStaticMarkup(
       <ComposerActions
         canStop={canStop}
         hasText={hasText}
         disabled={disabled}
+        waiting={waiting}
         onSend={() => {}}
         onStop={() => {}}
       />,
@@ -225,5 +261,13 @@ describe('ComposerActions : Envoyer et Stop', () => {
     expect(out).toContain('data-testid="supervisor-queue-send"');
     expect(out).toContain('data-testid="supervisor-stop"');
     expect(out.indexOf('supervisor-queue-send')).toBeLessThan(out.indexOf('supervisor-stop'));
+    expect(out).toContain('Mettre le message en file');
+  });
+
+  test('quand une question attend, Envoyer annonce l’annulation de la question', () => {
+    const out = render(true, true, false, true);
+    expect(out).toContain('data-testid="supervisor-queue-send"');
+    expect(out).toContain('Envoyer maintenant et annuler la question');
+    expect(out).not.toContain('Mettre le message en file');
   });
 });

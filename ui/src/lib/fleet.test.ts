@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import { isClosedRow } from '../store/fleetStore';
 import type { Fleet, FleetRow } from '../types';
-import { briefRow, fmtAge, isDone, isStaleTurn, planLabel, taskTitleOf } from './fleet';
+import { briefRow, criteriaAllValidated, fmtAge, isDone, isWarning, planComplete, planLabel, taskTitleOf } from './fleet';
 
-const row = (over: Partial<FleetRow>): FleetRow => ({
+const row = (over: Partial<FleetRow> = {}): FleetRow => ({
   id: 'ses_test',
   title: 'test',
   status: 'idle',
@@ -12,68 +12,87 @@ const row = (over: Partial<FleetRow>): FleetRow => ({
   ...over,
 });
 
-describe('isDone / isStaleTurn', () => {
-  test('terminé et verdict postérieur au tour → TERMINÉ', () => {
-    expect(isDone(row({ sup: { termine: true, at: 60 }, turnStartedAt: 50 }))).toBe(true);
+const plan = (done: number, total: number): FleetRow['plan'] => ({
+  done,
+  total,
+  steps: Array.from({ length: total }, (_, i) => ({
+    text: 'étape',
+    status: i < done ? 'completed' : 'pending',
+  })),
+});
+
+const crit = (validated: number, total: number) => ({ total, todo: 0, toValidate: 0, toFix: 0, validated });
+
+describe('isDone déterministe (plan 100 % + critères tous validés + au repos)', () => {
+  test('plan terminé et critères validés → TERMINÉ', () => {
+    expect(isDone(row({ plan: plan(3, 3), criteria: crit(2, 2) }))).toBe(true);
   });
 
-  test('terminé mais busy avec verdict périmé → pas TERMINÉ', () => {
-    expect(
-      isDone(row({ status: 'busy', sup: { termine: true, at: 40 }, turnStartedAt: 50 })),
-    ).toBe(false);
+  test('plan incomplet → pas TERMINÉ, warning', () => {
+    const r = row({ plan: plan(2, 3), criteria: crit(2, 2) });
+    expect(isDone(r)).toBe(false);
+    expect(isWarning(r)).toBe(true);
   });
 
-  test('busy avec verdict frais (relance) reste EN COURS', () => {
-    expect(
-      isDone(row({ status: 'busy', sup: { termine: true, at: 60 }, turnStartedAt: 50 })),
-    ).toBe(false);
+  test('critères manquants ou non validés → warning', () => {
+    expect(isWarning(row({ plan: plan(3, 3), criteria: crit(1, 2) }))).toBe(true);
+    expect(isWarning(row({ plan: plan(3, 3), criteria: crit(0, 0) }))).toBe(true);      // aucun critère défini
+    expect(isDone(row({ plan: plan(3, 3), criteria: crit(0, 0) }))).toBe(false);
   });
 
-  test('idle avec verdict antérieur au tour → pas TERMINÉ', () => {
-    expect(
-      isDone(row({ status: 'idle', sup: { termine: true, at: 40 }, turnStartedAt: 50 })),
-    ).toBe(false);
+  test('aucun plan → pas TERMINÉ (le travail n est pas cadré)', () => {
+    expect(isDone(row({ criteria: crit(2, 2) }))).toBe(false);
+    expect(isWarning(row({ criteria: crit(2, 2) }))).toBe(true);
   });
 
-  test('busy sans verdict → pas TERMINÉ', () => {
-    expect(isDone(row({ status: 'busy' }))).toBe(false);
+  test('busy → jamais TERMINÉ, jamais warning', () => {
+    const r = row({ status: 'busy', plan: plan(3, 3), criteria: crit(2, 2) });
+    expect(isDone(r)).toBe(false);
+    expect(isWarning(r)).toBe(false);
   });
 
-  test('verdict périmé sur un tour busy → stale', () => {
-    expect(isStaleTurn(row({ status: 'busy', sup: { at: 40 }, turnStartedAt: 50 }))).toBe(true);
+  test('question ou permission en attente → jamais TERMINÉ', () => {
+    const r = row({ plan: plan(3, 3), criteria: crit(2, 2), pendingForms: [{ id: 'f' }] });
+    expect(isDone(r)).toBe(false);
+    expect(isWarning(r)).toBe(false);
   });
 
-  test('busy sans at → pas stale', () => {
-    expect(isStaleTurn(row({ status: 'busy', sup: {}, turnStartedAt: 50 }))).toBe(false);
+  test('planComplete / criteriaAllValidated : règles unitaires', () => {
+    expect(planComplete(row({ plan: plan(3, 3) }))).toBe(true);
+    expect(planComplete(row({ plan: plan(2, 3) }))).toBe(false);
+    expect(planComplete(row())).toBe(false);
+    expect(criteriaAllValidated(row({ criteria: crit(2, 2) }))).toBe(true);
+    expect(criteriaAllValidated(row({ criteria: crit(1, 2) }))).toBe(false);
+    expect(criteriaAllValidated(row())).toBe(false);
   });
 });
 
 describe('planLabel', () => {
-  const plan = (done: number, statuses: Array<'pending' | 'in_progress' | 'completed'>) => ({
+  const mk = (done: number, statuses: Array<'pending' | 'in_progress' | 'completed'>) => ({
     done,
     total: statuses.length,
     steps: statuses.map((status) => ({ text: 'étape', status })),
   });
 
   test('plan non commencé → taille du plan, jamais 0/N', () => {
-    expect(planLabel(plan(0, ['pending', 'pending', 'pending', 'pending', 'pending']), false, 0)).toBe(
+    expect(planLabel(mk(0, ['pending', 'pending', 'pending', 'pending', 'pending']), false, 0)).toBe(
       '5 étapes',
     );
   });
 
   test('une étape en cours → 0/N est honnête', () => {
-    expect(planLabel(plan(0, ['in_progress', 'pending']), false, 0)).toBe('0/2');
+    expect(planLabel(mk(0, ['in_progress', 'pending']), false, 0)).toBe('0/2');
   });
 
   test('plan commencé → étapes faites / total', () => {
-    expect(planLabel(plan(2, ['completed', 'completed', 'pending']), false, 66)).toBe('2/3');
+    expect(planLabel(mk(2, ['completed', 'completed', 'pending']), false, 66)).toBe('2/3');
   });
 
   test('tâche terminée → pourcentage', () => {
-    expect(planLabel(plan(2, ['completed', 'completed', 'pending']), true, 100)).toBe('100 %');
+    expect(planLabel(mk(2, ['completed', 'completed', 'pending']), true, 100)).toBe('100 %');
   });
 
-  test('sans plan → pourcentage du verdict', () => {
+  test('sans plan → pourcentage calculé de la progression', () => {
     expect(planLabel(undefined, false, 40)).toBe('40 %');
   });
 });

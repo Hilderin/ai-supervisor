@@ -9,7 +9,7 @@ import { ChatMarkdown } from './ChatMarkdown';
 import { ComposerInput } from './ComposerInput';
 import { ConfigPopover } from './ConfigPopover';
 import { QuestionBox } from './QuestionBox';
-import { BroomIcon, CopyIcon, OpenChamberIcon, PanelLeftIcon, RevertIcon, SendIcon, StopIcon } from './Icons';
+import { BroomIcon, CopyIcon, OpenChamberIcon, PanelLeftIcon, PencilIcon, RevertIcon, SendIcon, StopIcon } from './Icons';
 
 interface Props {
   onCollapse: () => void;
@@ -42,17 +42,23 @@ async function copyText(text: string): Promise<void> {
   try { document.execCommand('copy'); } finally { area.remove(); }
 }
 
-/** Boutons du composer : Envoyer au repos, Stop + Envoyer pendant un tour. */
+/**
+ * Boutons du composer : Envoyer au repos, Stop + Envoyer pendant un tour.
+ * Une question en attente change le sens du bouton Envoyer : il annule la
+ * question et part tout de suite, il ne met plus en file.
+ */
 export function ComposerActions({
   canStop,
   hasText,
   disabled,
+  waiting,
   onSend,
   onStop,
 }: {
   canStop: boolean;
   hasText: boolean;
   disabled: boolean;
+  waiting: boolean;
   onSend: () => void;
   onStop: () => void;
 }) {
@@ -63,8 +69,8 @@ export function ComposerActions({
           <button
             type="button"
             data-testid="supervisor-queue-send"
-            title="Mettre en file d'attente"
-            aria-label="Mettre le message en file d'attente"
+            title={waiting ? 'Envoyer (annule la question en attente)' : "Mettre en file d'attente"}
+            aria-label={waiting ? 'Envoyer maintenant et annuler la question' : "Mettre le message en file d'attente"}
             onClick={onSend}
             className="flex h-[30px] w-[30px] shrink-0 cursor-pointer items-center justify-center rounded-[7px] bg-transparent p-[3px] text-green transition-colors hover:text-green"
           >
@@ -272,6 +278,8 @@ export function SupervisorChat({ onCollapse, onOpenMiniChat }: Props) {
   const attachments = useSupervisorStore((s) => s.attachments);
   const setAttachments = useSupervisorStore((s) => s.setAttachments);
   const send = useSupervisorStore((s) => s.send);
+  const sendQueued = useSupervisorStore((s) => s.sendQueued);
+  const editQueued = useSupervisorStore((s) => s.editQueued);
   const removeQueued = useSupervisorStore((s) => s.removeQueued);
   const revert = useSupervisorStore((s) => s.revert);
   const reverting = useSupervisorStore((s) => s.reverting);
@@ -586,6 +594,26 @@ export function SupervisorChat({ onCollapse, onOpenMiniChat }: Props) {
                   <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{item.text}</span>
                   <button
                     type="button"
+                    data-testid="supervisor-queue-edit"
+                    title="Modifier"
+                    aria-label="Modifier le message en attente"
+                    onClick={() => void editQueued(item.id)}
+                    className="shrink-0 cursor-pointer rounded-[4px] px-[3px] leading-none text-placeholder hover:text-text"
+                  >
+                    <PencilIcon />
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="supervisor-queue-send-now"
+                    title="Envoyer maintenant"
+                    aria-label="Envoyer maintenant le message en attente"
+                    onClick={() => void sendQueued(item.id)}
+                    className="shrink-0 cursor-pointer rounded-[4px] px-[3px] leading-none text-placeholder hover:text-green"
+                  >
+                    <SendIcon />
+                  </button>
+                  <button
+                    type="button"
                     data-testid="supervisor-queue-remove"
                     title="Retirer de la file"
                     aria-label="Retirer de la file"
@@ -607,7 +635,9 @@ export function SupervisorChat({ onCollapse, onOpenMiniChat }: Props) {
               creating
                 ? 'Nettoyage…'
                 : busy
-                  ? 'Ton message sera mis en file…'
+                  ? waiting
+                    ? 'Envoyer annulera la question et partira tout de suite…'
+                    : 'Ton message sera mis en file…'
                   : mode === 'investigation'
                     ? 'Que veux-tu explorer dans ce projet ?'
                     : 'Décris une tâche…'
@@ -625,6 +655,7 @@ export function SupervisorChat({ onCollapse, onOpenMiniChat }: Props) {
                 canStop={canStop && !creating && !reverting}
                 hasText={hasContent}
                 disabled={sending || creating || reverting || !hasContent}
+                waiting={waiting}
                 onSend={submit}
                 onStop={() => void stop()}
               />
@@ -632,7 +663,9 @@ export function SupervisorChat({ onCollapse, onOpenMiniChat }: Props) {
             footer={
               busy ? (
                 <div className="mt-[5px] text-[10.5px] text-placeholder">
-                  Le superviseur travaille : ton message sera mis en file.
+                  {waiting
+                    ? 'Une question attend : Envoyer annule la question et part tout de suite.'
+                    : 'Le superviseur travaille : ton message sera mis en file.'}
                 </div>
               ) : undefined
             }

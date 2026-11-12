@@ -8,7 +8,7 @@
  * consultable dans le journal réaffichable.
  *
  * Le tool appelant est identifié côté daemon : un sessionId qui n'est pas une
- * tâche connue est refusé (not_task), compagnon et chat de supervision inclus.
+ * tâche connue est refusé (not_task), chat de supervision inclus.
  */
 import { db, getSupervisorSession, getTaskBrief, getTaskResume, getTaskState, logEvent } from './state.mts';
 import { currentFleet } from './fleet.mts';

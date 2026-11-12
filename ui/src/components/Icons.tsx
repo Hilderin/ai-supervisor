@@ -93,6 +93,26 @@ export function RevertIcon() {
   );
 }
 
+/** Crayon « Modifier », comme l'action équivalente d'OpenChamber sur la file. */
+export function PencilIcon() {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
+      <path d="m15 5 4 4" />
+    </svg>
+  );
+}
+
 export function BroomIcon() {
   return (
     <svg
@@ -166,47 +186,6 @@ export function ChevronIcon() {
       aria-hidden="true"
     >
       <path d="M6 9l6 6 6-6" />
-    </svg>
-  );
-}
-
-/** Œil : supervision opt-in (badge « non supervisée » et action du menu de la carte). */
-export function SupervisionIcon() {
-  return (
-    <svg
-      width="14"
-      height="14"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2.2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M2 12s3.5-6.5 10-6.5S22 12 22 12s-3.5 6.5-10 6.5S2 12 2 12Z" />
-      <circle cx="12" cy="12" r="3" />
-    </svg>
-  );
-}
-
-/** Œil barré : conversation non supervisée (badge de carte et du détail). */
-export function SupervisionOffIcon() {
-  return (
-    <svg
-      width="12"
-      height="12"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2.2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M2 12s3.5-6.5 10-6.5S22 12 22 12s-3.5 6.5-10 6.5S2 12 2 12Z" />
-      <circle cx="12" cy="12" r="3" />
-      <path d="M4 4l16 16" />
     </svg>
   );
 }

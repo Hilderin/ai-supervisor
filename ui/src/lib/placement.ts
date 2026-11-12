@@ -15,8 +15,9 @@ export interface Placement {
 
 /**
  * Délai de stabilisation avant de déplacer une carte entre EN COURS et TERMINÉ.
- * Le verdict du compagnon peut osciller d'une analyse à l'autre ; sans ce délai,
- * la carte saute de section et décale les titres au-dessus (flicker connu).
+ * L'état est déterministe (plan 100 % + critères validés + au repos) mais il
+ * peut rebondir quand l'agent ajoute un critère ou une étape à la fin : sans ce
+ * délai, la carte saute de section et décale les titres au-dessus (flicker connu).
  */
 export const SECTION_HYSTERESIS_MS = 8000;
 

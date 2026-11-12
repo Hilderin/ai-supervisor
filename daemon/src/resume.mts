@@ -19,6 +19,7 @@ import {
   noteResumeAlive, noteResumeAttempt, resetResumeAttempts,
 } from './state.mts';
 import { defaultModelRef, findModel } from './models.mts';
+import { getPlanSnapshot, planStepsOf } from './plan.mts';
 
 let base = '';
 export function setBase(b: string) { base = b.replace(/\/$/, ''); }
@@ -229,11 +230,10 @@ export function backfillResumeTasks(liveIds: Set<string>, cfg: ResumeConfig, now
 }
 
 function lastKnownActivityAt(sessionId: string, fallback: number): number {
-  const rows = db.query(`SELECT MAX(at) m FROM task_log WHERE session_id = ?
-    UNION ALL SELECT at FROM task_verdict WHERE session_id = ?`).all(sessionId, sessionId) as Array<{ m?: number; at?: number }>;
+  const rows = db.query('SELECT MAX(at) m FROM task_log WHERE session_id = ?').all(sessionId) as Array<{ m?: number }>;
   let max = fallback;
   for (const r of rows) {
-    const v = r?.m ?? r?.at ?? 0;
+    const v = r?.m ?? 0;
     if (v > max) max = v;
   }
   return max;
@@ -356,11 +356,10 @@ async function restartTask(row: NonNullable<ReturnType<typeof getTaskResume>>, m
     if (!raw) return [];
     try { const v = JSON.parse(raw); return Array.isArray(v) ? v.map(String) : []; } catch { return []; }
   };
-  let plan: Array<{ step?: string; done?: boolean }> = [];
-  try {
-    const parsed = JSON.parse(st?.plan ?? '[]');
-    if (Array.isArray(parsed)) plan = parsed.map((x) => (x && typeof x === 'object' ? x as { step?: string; done?: boolean } : {}));
-  } catch { /* plan absent */ }
+  // le plan est relu du tool part `planwrite` de la session perdue (le plan
+  // n'est plus stocké en base depuis le retrait du compagnon)
+  const snap = await getPlanSnapshot(row.session_id);
+  const plan = planStepsOf(snap).map(s => ({ step: s.step, done: s.done }));
   const prompt = composeResumePrompt({
     goal,
     doneCriteria: parseList(brief?.done_criteria),
@@ -395,9 +394,11 @@ async function restartTask(row: NonNullable<ReturnType<typeof getTaskResume>>, m
 }
 
 function lastSummaryOf(sessionId: string): string | undefined {
-  const v = db.query('SELECT resume, next FROM task_verdict WHERE session_id = ?').get(sessionId) as { resume?: string; next?: string } | undefined;
-  if (!v) return undefined;
-  const text = [v.resume, v.next].filter(Boolean).join('. ').trim();
+  // plus de verdict (compagnon retiré) : le dernier bilan connu est la
+  // dernière réponse de la tâche au propriétaire (tool answer)
+  const v = db.query('SELECT text FROM task_answer WHERE session_id = ? ORDER BY at DESC, id DESC LIMIT 1')
+    .get(sessionId) as { text?: string } | undefined;
+  const text = String(v?.text ?? '').trim();
   return text ? text.slice(0, 600) : undefined;
 }
 

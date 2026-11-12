@@ -11,8 +11,19 @@ const row = (over: Partial<FleetRow> = {}): FleetRow => ({
   ...over,
 });
 
+const plan = (done: number, total: number): FleetRow['plan'] => ({
+  done,
+  total,
+  steps: Array.from({ length: total }, (_, i) => ({
+    text: 'étape',
+    status: i < done ? 'completed' : 'pending',
+  })),
+});
+
+const crit = (validated: number, total: number) => ({ total, todo: 0, toValidate: 0, toFix: 0, validated });
+
 describe('état visuel d’une carte', () => {
-  test('une attente gagne sur busy', () => {
+  test('une attente gagne sur tout le reste', () => {
     const waiting = row({ status: 'busy', pendingForms: [{ id: 'f' }] });
     expect(cardState(waiting, 'waiting')).toBe('waiting');
     expect(cardStateLabel('waiting', 'form')).toBe('attend ta réponse');
@@ -28,25 +39,26 @@ describe('état visuel d’une carte', () => {
     expect(cardStateLabel('retry')).toBe('Nouvel essai');
   });
 
-  test('busy gagne sur un verdict done', () => {
-    const busy = row({ status: 'busy', sup: { termine: true, at: 60 } });
+  test('busy gagne sur done (travail relancé)', () => {
+    const busy = row({ status: 'busy', plan: plan(3, 3), criteria: crit(2, 2) });
     expect(cardState(busy, 'running')).toBe('busy');
   });
 
-  test('le placement done affiche la coche', () => {
-    const done = row({ sup: { termine: true, at: 60 } });
+  test('terminé : plan 100 %, critères tous validés, au repos', () => {
+    const done = row({ plan: plan(3, 3), criteria: crit(2, 2) });
     expect(cardState(done, 'done')).toBe('done');
+    expect(cardState(done)).toBe('done');
     expect(cardStateLabel('done')).toBe('terminé');
   });
 
-  test('un verdict done encore en hysteresis reste « fini, à valider »', () => {
-    const done = row({ sup: { termine: true, at: 60 } });
-    expect(cardState(done, 'running')).toBe('idle');
-    expect(cardStateLabel('idle')).toBe('fini, à valider');
+  test('l hystérésis de section s applique : EN COURS reste « à compléter » tant que pas stable', () => {
+    const done = row({ plan: plan(3, 3), criteria: crit(2, 2) });
+    expect(cardState(done, 'running')).toBe('warning');
+    expect(cardStateLabel('warning')).toBe('à compléter');
   });
 
-  test('sans placement, isDone décide', () => {
-    expect(cardState(row({ sup: { termine: true, at: 60 } }))).toBe('done');
-    expect(cardState(row())).toBe('idle');
+  test('au repos, travail incomplet → warning, sans placement connu', () => {
+    expect(cardState(row({ plan: plan(2, 3), criteria: crit(2, 2) }))).toBe('warning');
+    expect(cardState(row())).toBe('warning');
   });
 });

@@ -452,7 +452,9 @@ Règles de compatibilité et points de vigilance :
    `todowrite: false` dans le frontmatter : mettre à jour les fichiers
    canonical (`superviseur-analyste.md`, `superviseur-orchestrateur.md`) ;
    les hash de version changent, les compagnons sont déclassés et recréés
-   naturellement au tick suivant.
+   naturellement au tick suivant (mécanisme retiré le 2026-11-10 : noms
+   d'agents fixes, plus aucun déclassement ; un changement de prompt demande
+   un redémarrage d'OpenCode pour prendre effet).
 4. **Le prompt de création de tâche** (`composePrompt`) et les prompts des
    agents citent les nouveaux noms. Les sessions déjà créées gardent l'ancien
    texte mais l'injection `<plan_list>` (fraîche à chaque requête) porte les

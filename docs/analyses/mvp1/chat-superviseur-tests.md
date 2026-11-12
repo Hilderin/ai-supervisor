@@ -39,7 +39,7 @@
 
 ## Notes de campagne
 
-- Les tests utilisent le vrai agent `superviseur-orchestrateur-<hash>` et de vraies sessions OpenChamber.
+- Les tests utilisent le vrai agent `superviseur-orchestrateur` (nom fixe) et de vraies sessions OpenChamber.
 - Les tâches de test restent sans effet de bord : demander explicitement « ne modifie aucun fichier ».
 - Nettoyage : fermer les tâches de test (`close_task` ou carte) et archiver les sessions de test dans OpenChamber.
 - Captures principales : `/tmp/opencode/verify-ui2-*.png`, `sub-b-*.png`, `sub-c-*.png`, `chat-1280.png`.

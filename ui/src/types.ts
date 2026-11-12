@@ -1,19 +1,5 @@
 /** Contrat de données du daemon (`GET /api/fleet`, SSE `/api/fleet/stream`). */
 
-export type VerdictState = 'working' | 'waiting_human' | 'done' | 'blocked';
-export type HumanSource = 'question_tool' | 'permission' | 'agent_ask' | 'none';
-
-export interface Verdict {
-  resume?: string;
-  progress?: number | null;
-  termine?: boolean;
-  attend?: string;
-  at?: number;
-  state?: VerdictState;
-  humanSource?: HumanSource;
-  next?: string;
-}
-
 export interface FormOption {
   value: string;
   label: string;
@@ -76,14 +62,11 @@ export interface Criterion {
   review_at: number | null;
   created_at: number;
   updated_at: number;
-  /** version du contenu jugé (l'approbation vise cette version) */
+  /** version du contenu (preuve, jugement ou modification) */
   version?: number;
   validated_at?: number | null;
-  /** version du travail examiné à l'approbation : JSON {commit?, at} */
+  /** version du travail validé : JSON {commit?, at} */
   validated_work?: string | null;
-  /** proposition de retrait du vérificateur (jamais une suppression physique) */
-  remove_proposed_at?: number | null;
-  remove_reason?: string | null;
   /** suppression douce : la ligne reste, filtrée des listes */
   removed_at?: number | null;
 }
@@ -134,7 +117,6 @@ export interface FleetRow {
     updatedAt: number;
   };
   dir?: string;
-  sup?: Verdict;
   turnStartedAt?: number;
   lastUpdateAt?: number;
   busy?: number | null;
@@ -151,12 +133,6 @@ export interface FleetRow {
   activity?: FleetActivity;
   /** réponses au propriétaire (tool `answer`) pas encore lues (« Got it ») */
   unreadAnswers?: number;
-  /**
-   * Supervision opt-in : false = conversation démarrée directement dans
-   * OpenChamber, sans compagnon ni vérificateur (aucun enfant installé).
-   * undefined : daemon ancien, on considère la carte supervisée.
-   */
-  supervised?: boolean;
 }
 
 /** Réponse d'une tâche au propriétaire, `GET /api/fleet/answers?sessionId=…`. */
@@ -238,13 +214,12 @@ export interface SupervisorAgentOption {
   description?: string;
 }
 
-export type SupervisorPrefField = 'chatModel' | 'chatAgent' | 'taskModel' | 'companionModel';
+export type SupervisorPrefField = 'chatModel' | 'chatAgent' | 'taskModel';
 
 export interface SupervisorPrefs {
   chatModel: string | null;
   chatAgent: string | null;
   taskModel: string | null;
-  companionModel: string | null;
 }
 
 export interface SupervisorConfig {
@@ -255,8 +230,6 @@ export interface SupervisorConfig {
     chatModel: string | null;
     taskModel: null;
     taskModelLabel: string;
-    companionModel: null;
-    companionModelLabel: string;
   };
   models: SupervisorModelOption[];
   agents: SupervisorAgentOption[];

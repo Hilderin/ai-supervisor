@@ -3,29 +3,34 @@ import type { Fleet, FleetRow } from '../types';
 /** Phrase d'activité quand aucun résumé n'est disponible pour le tour en cours. */
 export const BUSY_BRIEF = 'Réflexion en cours...';
 
-/**
- * Le verdict appartient au tour précédent (un prompt a été renvoyé depuis l'analyse) :
- * le daemon a déjà retiré resume/attend, la carte repasse en « Réflexion en cours... ».
- */
-export function isStaleTurn(row: FleetRow): boolean {
-  return (
-    row.status === 'busy' &&
-    !!row.sup &&
-    !!row.turnStartedAt &&
-    !!row.sup.at &&
-    row.sup.at < row.turnStartedAt
-  );
+/** Le plan est-il présent et entièrement terminé ? */
+export function planComplete(row: FleetRow): boolean {
+  const plan = row.plan;
+  return !!plan && plan.total > 0 && plan.done >= plan.total;
+}
+
+/** Tous les critères définis sont-ils validés ? (aucun critère = non, le travail n'est pas cadré) */
+export function criteriaAllValidated(row: FleetRow): boolean {
+  const crit = row.criteria;
+  return !!crit && crit.total > 0 && crit.validated >= crit.total;
 }
 
 /**
- * TERMINÉ seulement si le travail LLM est arrêté ET si le verdict est postérieur au tour en cours.
- * Un job relancé garde le verdict « done » du tour précédent, et le compagnon peut même le
- * reconfirmer pendant le nouveau tour (verdict frais mais travail visible) : busy est prioritaire.
+ * Terminé est DÉTERMINISTE (2026-11-12, plus de compagnon) : le travail LLM
+ * est arrêté, rien n'attend l'humain, le plan est à 100 % et tous les critères
+ * sont validés. Un tour relancé (busy) reste en cours, quoi qu'il arrive.
  */
 export function isDone(row: FleetRow): boolean {
   if (row.status === 'busy') return false;
-  if (!row.sup?.termine) return false;
-  return !(!!row.turnStartedAt && (row.sup.at ?? 0) < row.turnStartedAt);
+  if (isWaiting(row)) return false;
+  return planComplete(row) && criteriaAllValidated(row);
+}
+
+/** Au repos mais pas terminé proprement : plan incomplet, absent, ou critères non validés. */
+export function isWarning(row: FleetRow): boolean {
+  if (row.status === 'busy') return false;
+  if (isWaiting(row)) return false;
+  return !isDone(row);
 }
 
 export function isWaiting(row: FleetRow): boolean {

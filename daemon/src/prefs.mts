@@ -1,12 +1,12 @@
 /**
- * Préférences du Superviseur : modèle et agent du chat, modèle des tâches,
- * modèle du compagnon.
+ * Préférences du Superviseur : modèle et agent du chat, modèle des tâches.
  *
  * Une préférence est un choix EXPLICITE. Sans choix (NULL en base), les
- * défauts actuels restent en place : orchestrateur versionné pour le chat,
+ * défauts actuels restent en place : orchestrateur (nom fixe) pour le chat,
  * modèle par défaut d'OpenChamber pour tout le reste. Une valeur inconnue
  * n'est jamais conservée : elle est remplacée par le défaut et signalée par un
  * avertissement lisible, plutôt que de casser un envoi plus tard.
+ * (Le modèle du compagnon a disparu avec les sous-agents, 2026-11-12.)
  */
 
 import { getSupervisorPref, logEvent, setSupervisorPref } from './state.mts';
@@ -14,13 +14,12 @@ import {
   defaultModelRef, findAgent, findModel, loadCatalog, type AgentOption, type ModelOption,
 } from './models.mts';
 
-export type PrefField = 'chatModel' | 'chatAgent' | 'taskModel' | 'companionModel';
+export type PrefField = 'chatModel' | 'chatAgent' | 'taskModel';
 
 export interface SupervisorPrefs {
   chatModel: string | null;
   chatAgent: string | null;
   taskModel: string | null;
-  companionModel: string | null;
 }
 
 export interface ConfigWarning {
@@ -33,15 +32,13 @@ export interface ConfigWarning {
 export interface SupervisorConfig {
   prefs: SupervisorPrefs;
   defaults: {
-    /** null = l'orchestrateur versionné du repo */
+    /** null = l'orchestrateur (nom fixe) du repo */
     chatAgent: null;
     chatAgentLabel: string;
     /** modèle par défaut d'OpenChamber, null si l'instance ne le donne pas */
     chatModel: string | null;
     taskModel: null;
     taskModelLabel: string;
-    companionModel: null;
-    companionModelLabel: string;
   };
   models: ModelOption[];
   agents: AgentOption[];
@@ -54,7 +51,6 @@ const FIELD_LABEL: Record<PrefField, string> = {
   chatModel: 'Modèle du chat',
   chatAgent: 'Agent du chat',
   taskModel: 'Modèle des tâches',
-  companionModel: 'Modèle du compagnon',
 };
 
 export function prefsFromRow(): SupervisorPrefs {
@@ -63,7 +59,6 @@ export function prefsFromRow(): SupervisorPrefs {
     chatModel: row.chat_model,
     chatAgent: row.chat_agent,
     taskModel: row.task_model,
-    companionModel: row.companion_model,
   };
 }
 
@@ -84,7 +79,7 @@ function warnOnce(field: PrefField, value: string, message: string): void {
 async function validatedStored(): Promise<{ prefs: SupervisorPrefs; warnings: ConfigWarning[] }> {
   const raw = prefsFromRow();
   const warnings: ConfigWarning[] = [];
-  const model = async (field: 'chatModel' | 'taskModel' | 'companionModel'): Promise<string | null> => {
+  const model = async (field: 'chatModel' | 'taskModel'): Promise<string | null> => {
     const value = raw[field];
     if (!value) return null;
     const found = await findModel(value);
@@ -115,7 +110,6 @@ async function validatedStored(): Promise<{ prefs: SupervisorPrefs; warnings: Co
       chatModel: await model('chatModel'),
       chatAgent: await agent(),
       taskModel: await model('taskModel'),
-      companionModel: await model('companionModel'),
     },
     warnings,
   };
@@ -135,10 +129,6 @@ export async function taskModelRef(): Promise<string | null> {
   return (await validatedStored()).prefs.taskModel;
 }
 
-export async function companionModelRef(): Promise<string | null> {
-  return (await validatedStored()).prefs.companionModel;
-}
-
 export async function getSupervisorConfig(): Promise<SupervisorConfig> {
   const [catalog, chatModel, stored] = await Promise.all([
     loadCatalog(),
@@ -153,8 +143,6 @@ export async function getSupervisorConfig(): Promise<SupervisorConfig> {
       chatModel,
       taskModel: null,
       taskModelLabel: 'Défaut de la session',
-      companionModel: null,
-      companionModelLabel: 'Défaut OpenChamber',
     },
     models: catalog.models,
     agents: catalog.agents,
@@ -182,7 +170,7 @@ export async function saveSupervisorConfig(
   const next: SupervisorPrefs = { ...current };
   const warnings: ConfigWarning[] = [];
 
-  for (const field of ['chatModel', 'taskModel', 'companionModel'] as const) {
+  for (const field of ['chatModel', 'taskModel'] as const) {
     const value = readString(input, field);
     if (value === undefined) continue;
     if (value === null) { next[field] = null; continue; }
@@ -213,7 +201,6 @@ export async function saveSupervisorConfig(
     chatModel: next.chatModel,
     chatAgent: next.chatAgent,
     taskModel: next.taskModel,
-    companionModel: next.companionModel,
   });
   // une valeur corrigée ne doit pas rester dans la mémoire des avertissements
   if (!warnings.length) warned.clear();

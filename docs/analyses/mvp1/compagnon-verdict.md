@@ -67,10 +67,15 @@ Le verdict JSON du compagnon contient :
 8. **Le digest porte des faits.** Les actions d'outils (fichier écrit, commande,
    test) sont ajoutées au digest. Le raisonnement brut reste indicatif et ne
    doit pas être recopié.
-9. **Le prompt est versionné par nom d'agent.** OpenChamber met en cache le
-   prompt d'un agent par nom : changer le contenu du fichier ne suffit pas. Le
-   daemon crée `superviseur-analyste-<hash>` (symlink vers le fichier canonique)
-   et recrée le compagnon si `companion_map.agent` ne correspond pas.
+9. **Nom d'agent FIXE (retrait du versionnage par hash, 2026-11-10).** Le
+   prompt d'un agent reste mis en cache par nom : changer le contenu du
+   fichier ne suffit pas. Mais le versionnage par hash
+   (`superviseur-analyste-<hash>`) déclassait les compagnons vivants à chaque
+   changement de prompt : les discussions précédentes « arrêtaient de
+   fonctionner ». L'agent s'appelle `superviseur-analyste` (symlink vers le
+   fichier canonique) ; un changement de prompt n'est pris en compte que pour
+   les compagnons créés après un redémarrage d'OpenCode, et les compagnons
+   d'avant (nom versionné) restent vivants, jamais déclassés.
 10. **Un digest inchangé n'est pas réanalysé.** Intervalle minimal de 20 s par
     session, 3 analyses simultanées au maximum, migration prioritaire pour
     éviter que deux sessions busy affament les sessions au repos.

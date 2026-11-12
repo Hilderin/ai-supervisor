@@ -10,9 +10,7 @@
     "dev:ui": "bun run --cwd ui dev",
     "typecheck:ui": "bun run --cwd ui typecheck",
     "app": "electron .",
-    "build:exe": "bun scripts/build-exe.mts",
-    "cleanup:companions": "bun daemon/scripts/cleanup-companions.mts",
-    "test:verdict": "bun test daemon/test/verdict.test.mts"
+    "build:exe": "bun scripts/build-exe.mts"
   },
   "main": "electron/main.cjs",
   "author": "Skytech",

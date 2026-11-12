@@ -28,7 +28,7 @@ const {
   armTaskResume, disableTaskResume, getTaskResume, getTaskBrief, getTaskState,
   listTaskBriefs, putTaskBrief, upsertTaskState, migrateTaskSession,
   noteResumeAlive, noteResumeAttempt, resetResumeAttempts, reviveTaskResume,
-  logEvent, upsertVerdict, db,
+  logEvent, db,
 } = state;
 
 const resume = await import('../src/resume.mts');
@@ -121,7 +121,7 @@ describe('prompt de reprise', () => {
 describe('registre task_resume', () => {
   beforeEach(() => {
     console.log('RESUME_DB_FILES', (db as any).query('pragma database_list').all().map((d: any) => d.file));
-    db.run('DELETE FROM task_resume; DELETE FROM task_brief; DELETE FROM task_state; DELETE FROM task_log; DELETE FROM task_verdict;');
+    db.run('DELETE FROM task_resume; DELETE FROM task_brief; DELETE FROM task_state; DELETE FROM task_log;');
     resetResumeState();
     models.resetCatalogCache();
   });
@@ -154,7 +154,7 @@ describe('registre task_resume', () => {
   test('migration de carte : tout suit vers la nouvelle session, jamais en double', () => {
     putTaskBrief('ses_a', { title: 'Reprise test', goal: 'g', doneCriteria: ['c'], constraints: [], projectDir: '/p', agent: 'build' });
     upsertTaskState('ses_a', { title: 'Reprise test', goal: 'g' });
-    upsertVerdict('ses_a', { resume: 'r', termine: false });
+    // plus de verdict (compagnon retiré) : la reprise lit les réponses answer
     logEvent('ses_a', 'open', 'lancement');
     armTaskResume('ses_a', { sessionId: 'ses_a', title: 'Reprise test', projectDir: '/p' });
 
@@ -170,9 +170,6 @@ describe('registre task_resume', () => {
     const logsNew = db.query('SELECT COUNT(*) c FROM task_log WHERE session_id = ?').get('ses_b') as { c: number };
     expect(logsOld.c).toBe(0);
     expect(logsNew.c).toBe(1);
-    // le verdict ancien disparaît : une session neuve repart sans bilan figé
-    const verdicts = db.query('SELECT COUNT(*) c FROM task_verdict WHERE session_id IN (?, ?)').get('ses_a', 'ses_b') as { c: number };
-    expect(verdicts.c).toBe(0);
   });
 });
 
@@ -203,7 +200,7 @@ describe('resumeTick de bout en bout', () => {
   const originalFetch = globalThis.fetch;
 
   beforeEach(() => {
-    db.run('DELETE FROM task_resume; DELETE FROM task_brief; DELETE FROM task_state; DELETE FROM task_log; DELETE FROM task_verdict;');
+    db.run('DELETE FROM task_resume; DELETE FROM task_brief; DELETE FROM task_state; DELETE FROM task_log;');
     calls.length = 0;
     resetResumeState();
   });
@@ -211,7 +208,8 @@ describe('resumeTick de bout en bout', () => {
   test('une session détruite et confirmée repart sur une nouvelle session, modèle default', async () => {
     putTaskBrief('ses_gone', { title: 'Analyse X', goal: 'g', doneCriteria: ['c'], constraints: [], projectDir: '/proj', agent: 'build' });
     upsertTaskState('ses_gone', { title: 'Analyse X', goal: 'g' });
-    upsertVerdict('ses_gone', { resume: 'dernier résumé', next: 'prochaine étape', termine: false });
+    // le « dernier bilan connu » de la reprise est la dernière réponse answer
+    db.run('INSERT INTO task_answer (session_id, at, text, question, read_at) VALUES (?, ?, ?, NULL, NULL)', ['ses_gone', 1, 'dernier résumé']);
     logEvent('ses_gone', 'open', 'lancement');
     armTaskResume('ses_gone', { sessionId: 'ses_gone', title: 'Analyse X', projectDir: '/proj', agent: 'build' });
 
@@ -262,7 +260,7 @@ describe('resumeTick de bout en bout', () => {
     });
     // un réglage global différent ne doit pas écraser le modèle de la tâche
     state.setSupervisorPref({
-      chatModel: null, chatAgent: null, taskModel: 'global/model', companionModel: null,
+      chatModel: null, chatAgent: null, taskModel: 'global/model',
     });
     const tickCfg = { ...cfg, confirmMissingMs: 0 };
     globalThis.fetch = fakeFetch([
@@ -289,7 +287,7 @@ describe('resumeTick de bout en bout', () => {
     upsertTaskState('ses_no_model', { title: 'Sans modèle', goal: 'g' });
     armTaskResume('ses_no_model', { sessionId: 'ses_no_model', title: 'Sans modèle', projectDir: '/proj' });
     state.setSupervisorPref({
-      chatModel: null, chatAgent: null, taskModel: 'global/model', companionModel: null,
+      chatModel: null, chatAgent: null, taskModel: 'global/model',
     });
     const tickCfg = { ...cfg, confirmMissingMs: 0 };
     globalThis.fetch = fakeFetch([

@@ -1,23 +1,21 @@
 /**
  * Critères d'acceptation : machine à états et accès DB (table `criteria`).
  *
- * Source unique des transitions : les tools criteria de l'agent principal ET
- * l'application du JSON du vérificateur passent tous par ces fonctions ; le
- * statut d'un critère n'est jamais écrit directement ailleurs.
+ * Source unique des transitions : les tools criteria de l'agent principal
+ * passent tous par ces fonctions ; le statut d'un critère n'est jamais écrit
+ * directement ailleurs.
  *
  * États : todo (À faire), to_validate (À valider, preuve soumise),
- * to_fix (À corriger, rejet avec justification), validated (Validé).
+ * to_fix (À corriger, raison enregistrée), validated (Validé).
  *
- * Transitions (spec : docs/analyses/mvp1/criteres-acceptation.md §2) :
- * - add → todo ; to_validate : todo|to_fix → to_validate (preuve requise) ;
- * - approve (daemon seul) : to_validate → validated ;
- * - reject (daemon seul) : to_validate → to_fix (raison requise) ;
+ * Transitions (spécification : docs/analyses/mvp1/criteres-acceptation.md) :
+ * - add → todo ;
+ * - to_validate : todo|to_fix → to_validate (preuve requise, chemin vérifié) ;
+ * - set_status (l'agent juge lui-même) : → validated (commentaire) ou to_fix
+ *   (raison requise) ; l'honnêteté de l'usage est portée par les instructions
+ *   du tool, la machine ne l'impose pas ;
  * - update de contenu : un critère non todo repasse todo (preuve invalidée) ;
- * - remove : ligne supprimée, ref jamais réattribuée (criteria_seq).
- *
- * Preuves : `path` est vérifié au dépôt (fichier existant dans le dossier du
- * projet, chemin relatif sans sortie ni lien symbolique) : une preuve à
- * chemin inexistant est refusée au tool, pas au vérificateur.
+ * - remove : suppression douce, ref jamais réattribuée (criteria_seq).
  */
 import { lstat, realpath, stat } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
@@ -60,14 +58,11 @@ export interface CriterionRow {
   review_at: number | null;
   created_at: number;
   updated_at: number;
-  /** version du contenu jugé (preuve ou contenu) : l'approbation vise une version précise */
+  /** version du contenu (preuve, jugement ou modification) */
   version: number;
   validated_at: number | null;
-  /** version du travail examiné à l'approbation : JSON {commit?, at} */
+  /** version du travail examiné à la validation : JSON {commit?, at} */
   validated_work: string | null;
-  /** proposition de retrait du vérificateur (jamais une suppression physique) */
-  remove_proposed_at: number | null;
-  remove_reason: string | null;
   removed_at: number | null;
 }
 
@@ -171,7 +166,7 @@ interface RawCriterion {
   detail: string | null; methods: string; status: string; evidence: string | null;
   review: string | null; review_at: number | null; created_at: number; updated_at: number;
   version: number | null; validated_at: number | null; validated_work: string | null;
-  remove_proposed_at: number | null; remove_reason: string | null; removed_at: number | null;
+  removed_at: number | null;
 }
 
 function rowOf(raw: RawCriterion): CriterionRow {
@@ -236,8 +231,8 @@ function bumpRef(taskId: string) {
     .run(taskId, Date.now());
 }
 
-function logTransition(taskId: string, ref: string, from: CriterionStatus | 'none', to: CriterionStatus | 'removed', source: 'agent' | 'verifier', note?: string) {
-  logEvent(taskId, 'criteria', `${ref} : ${from} → ${to}${note ? ` : ${note}` : ''}`, { ref, from, to, source });
+function logTransition(taskId: string, ref: string, from: CriterionStatus | 'none', to: CriterionStatus | 'removed', note?: string) {
+  logEvent(taskId, 'criteria', `${ref} : ${from} → ${to}${note ? ` : ${note}` : ''}`, { ref, from, to, source: 'agent' });
 }
 
 const STATUS_LABEL: Record<CriterionStatus, string> = {
@@ -250,7 +245,7 @@ export function statusLabel(s: CriterionStatus): string { return STATUS_LABEL[s]
 
 /* --- Transitions (agent principal) --- */
 
-export function addCriterion(taskId: string, p: { title: string; detail?: string; methods?: unknown }, source: 'agent' | 'verifier' = 'agent'): CriterionRow {
+export function addCriterion(taskId: string, p: { title: string; detail?: string; methods?: unknown }): CriterionRow {
   const title = String(p.title ?? '').trim();
   if (!title) throw new CriteriaError('invalid', 'titre requis');
   const existing = listCriteria(taskId);
@@ -268,23 +263,22 @@ export function addCriterion(taskId: string, p: { title: string; detail?: string
     .run(taskId, ref, title.slice(0, MAX_TITLE), String(p.detail ?? '').trim().slice(0, MAX_DETAIL) || null,
       JSON.stringify(methods), at, at);
   bumpRef(taskId);
-  logTransition(taskId, ref, 'none', 'todo', source, title.slice(0, 80));
+  logTransition(taskId, ref, 'none', 'todo', title.slice(0, 80));
   return getCriterion(taskId, ref)!;
 }
 
-export function removeCriterion(taskId: string, ref: string, source: 'agent' | 'verifier' = 'agent'): boolean {
+export function removeCriterion(taskId: string, ref: string): boolean {
   const row = getCriterion(taskId, ref);
   if (!row) throw new CriteriaError('unknown_ref', `critère inconnu : ${ref}`);
   // suppression DOUCE : la ligne reste (historique des régressions), filtrée
-  // des listes et comptes ; le vérificateur, lui, ne propose jamais de retrait
-  // physique (voir proposeRemoval)
+  // des listes et comptes
   db.query(`UPDATE criteria SET removed_at = ?, updated_at = ? WHERE task_id = ? AND ref = ?`)
     .run(Date.now(), Date.now(), taskId, row.ref);
-  logTransition(taskId, row.ref, row.status, 'removed', source);
+  logTransition(taskId, row.ref, row.status, 'removed');
   return true;
 }
 
-export function updateCriterion(taskId: string, ref: string, patch: { title?: string; detail?: string; methods?: unknown }, source: 'agent' | 'verifier' = 'agent'): CriterionRow {
+export function updateCriterion(taskId: string, ref: string, patch: { title?: string; detail?: string; methods?: unknown }): CriterionRow {
   const row = getCriterion(taskId, ref);
   if (!row) throw new CriteriaError('unknown_ref', `critère inconnu : ${ref}`);
   const title = patch.title != null ? String(patch.title ?? '').trim() : undefined;
@@ -301,7 +295,7 @@ export function updateCriterion(taskId: string, ref: string, patch: { title?: st
   db.query(`UPDATE criteria SET
       title = COALESCE(?, title), detail = COALESCE(?, detail), methods = COALESCE(?, methods),
       status = ?, evidence = NULL, review = NULL, review_at = NULL, validated_at = NULL,
-      validated_work = NULL, remove_proposed_at = NULL, remove_reason = NULL,
+      validated_work = NULL,
       version = version + 1, updated_at = ?
       WHERE task_id = ? AND ref = ?`)
     .run(
@@ -310,12 +304,12 @@ export function updateCriterion(taskId: string, ref: string, patch: { title?: st
       invalidate ? 'todo' : row.status,
       Date.now(), taskId, row.ref,
     );
-  logTransition(taskId, row.ref, row.status, invalidate ? 'todo' : row.status, source,
+  logTransition(taskId, row.ref, row.status, invalidate ? 'todo' : row.status,
     invalidate ? 'contenu modifié : preuve invalidée' : 'contenu modifié');
   return getCriterion(taskId, row.ref)!;
 }
 
-export async function submitEvidence(taskId: string, ref: string, rawEvidence: unknown, projectDir?: string, source: 'agent' | 'verifier' = 'agent'): Promise<CriterionRow> {
+export async function submitEvidence(taskId: string, ref: string, rawEvidence: unknown, projectDir?: string): Promise<CriterionRow> {
   const row = getCriterion(taskId, ref);
   if (!row) throw new CriteriaError('unknown_ref', `critère inconnu : ${ref}`);
   if (row.status !== 'todo' && row.status !== 'to_fix') {
@@ -336,108 +330,73 @@ export async function submitEvidence(taskId: string, ref: string, rawEvidence: u
     evidence.push(ev);
   }
   db.query(`UPDATE criteria SET status = 'to_validate', evidence = ?, review = NULL, review_at = NULL, validated_at = NULL,
-              remove_proposed_at = NULL, remove_reason = NULL, version = version + 1, updated_at = ?
+              validated_work = NULL, version = version + 1, updated_at = ?
             WHERE task_id = ? AND ref = ?`)
     .run(JSON.stringify(evidence), Date.now(), taskId, row.ref);
-  logTransition(taskId, row.ref, row.status, 'to_validate', source,
+  logTransition(taskId, row.ref, row.status, 'to_validate',
     evidence.map(e => e.kind).join(', '));
   return getCriterion(taskId, row.ref)!;
 }
 
-/* --- Transitions (daemon seul : retour JSON du vérificateur) --- */
+/* --- Jugement par l'agent lui-même (criteria_set_status) --- */
 
 /**
- * Approbation ATOMIQUE et versionnée : `UPDATE ... WHERE status='to_validate'
- * AND version = ?` ; si la version ne correspond plus (l'agent a soumis une
- * nouvelle preuve ou modifié le critère pendant la phase), le jugement périmé
- * est ignoré (`stale_judgment`) : jamais une approbation d'un état devenu
- * autre. `version` absent : repli sur la version courante (compatibilité).
+ * Version du travail COURANTE : commit du dossier projet quand disponible
+ * (certaines tâches vivent hors git) + horodatage ; enregistrée avec chaque
+ * validation pour que l'UI distingue « validé sur l'état actuel » d'un
+ * « validé avant les dernières modifications ».
  */
-export function approveCriterion(taskId: string, ref: string, comment: string, version?: number, workVersion?: string): CriterionRow {
+export function currentWorkVersion(dir: string | undefined): { commit: string | null; at: number } {
+  let commit: string | null = null;
+  if (dir) {
+    try {
+      const out = Bun.spawnSync(['git', '-C', dir, 'rev-parse', 'HEAD'], { stdout: 'pipe', stderr: 'pipe' });
+      const hash = out.stdout.toString().trim();
+      if (out.exitCode === 0 && /^[0-9a-f]{40}$/.test(hash)) commit = hash;
+    } catch { /* pas git : indéterminable */ }
+  }
+  return { commit, at: Date.now() };
+}
+
+/**
+ * L'agent fixe lui-même le statut final d'un critère : `validated`
+ * (commentaire recommandé) ou `to_fix` (raison requise). Transitions tolérantes
+ * depuis n'importe quel état vivant : l'agent peut se corriger (to_fix) puis
+ * revalider, ou marquer validé sans repasser par une preuve soumise. La
+ * writing est atomique sur la ligne, version incrémentée (l'historique des
+ * jugements reste daté). `workDir` alimente `validated_work` (commit courant).
+ */
+export function setStatusCriterion(
+  taskId: string,
+  ref: string,
+  status: 'validated' | 'to_fix',
+  note: string,
+  workDir?: string,
+): CriterionRow {
   const row = getCriterion(taskId, ref);
   if (!row) throw new CriteriaError('unknown_ref', `critère inconnu : ${ref}`);
-  const v = version ?? row.version;
+  if (status !== 'validated' && status !== 'to_fix') {
+    throw new CriteriaError('invalid_transition', `statut impossible : ${status} ; criteria_set_status porte « validé » ou « à corriger »`);
+  }
+  const clean = String(note ?? '').trim();
+  if (status === 'to_fix' && !clean) {
+    throw new CriteriaError('invalid', 'une raison est requise pour passer un critère « à corriger »');
+  }
   const at = Date.now();
-  // workVersion : référence de la version du travail EXAMINÉE (commit du
-  // projet quand disponible + activité) : l'injection la comparera au commit
-  // courant pour distinguer toujours applicable / changement potentiellement
-  // pertinent / indéterminable
-  const changes = db.query(`UPDATE criteria SET status = 'validated', review = ?, review_at = ?, validated_at = ?, validated_work = ?, updated_at = ?
-            WHERE task_id = ? AND ref = ? AND status = 'to_validate' AND version = ?`)
-    .run(String(comment ?? '').trim().slice(0, 500) || null, at, at, workVersion ?? null, at, taskId, row.ref, v).changes;
-  if (!changes) {
-    if (row.status !== 'to_validate') {
-      throw new CriteriaError('invalid_transition', `approbation impossible : ${row.ref} est « ${statusLabel(row.status)} » (attendu : à valider)`);
-    }
-    throw new CriteriaError('stale_judgment', `jugement périmé : ${row.ref} a changé depuis (version examinée ${v}, version courante ${row.version})`);
-  }
-  logTransition(taskId, row.ref, 'to_validate', 'validated', 'verifier', comment);
+  const work = status === 'validated' ? currentWorkVersion(workDir) : null;
+  const changes = db.query(`UPDATE criteria SET
+      status = ?, review = ?, review_at = ?,
+      validated_at = CASE WHEN ? = 'validated' THEN ? ELSE validated_at END,
+      validated_work = CASE WHEN ? = 'validated' THEN ? ELSE validated_work END,
+      version = version + 1, updated_at = ?
+      WHERE task_id = ? AND ref = ? AND removed_at IS NULL`)
+    .run(
+      status, clean.slice(0, 500) || null, at,
+      status, at, status, work ? JSON.stringify(work) : null, at, taskId, row.ref,
+    ).changes;
+  if (!changes) throw new CriteriaError('unknown_ref', `critère inconnu : ${ref}`);
+  logTransition(taskId, row.ref, row.status, status,
+    clean ? clean.slice(0, 120) : undefined);
   return getCriterion(taskId, row.ref)!;
 }
 
-/** Rejet versionné et atomique : même garde anti-péremption que l'approbation. */
-export function rejectCriterion(taskId: string, ref: string, reason: string, version?: number): CriterionRow {
-  const row = getCriterion(taskId, ref);
-  if (!row) throw new CriteriaError('unknown_ref', `critère inconnu : ${ref}`);
-  const reasonClean = String(reason ?? '').trim();
-  if (!reasonClean) throw new CriteriaError('invalid', 'une raison est requise pour un rejet');
-  const v = version ?? row.version;
-  const at = Date.now();
-  const changes = db.query(`UPDATE criteria SET status = 'to_fix', review = ?, review_at = ?, updated_at = ?
-            WHERE task_id = ? AND ref = ? AND status = 'to_validate' AND version = ?`)
-    .run(reasonClean.slice(0, 500), at, at, taskId, row.ref, v).changes;
-  if (!changes) {
-    if (row.status !== 'to_validate') {
-      throw new CriteriaError('invalid_transition', `rejet impossible : ${row.ref} est « ${statusLabel(row.status)} » (attendu : à valider)`);
-    }
-    throw new CriteriaError('stale_judgment', `jugement périmé : ${row.ref} a changé depuis (version examinée ${v}, version courante ${row.version})`);
-  }
-  logTransition(taskId, row.ref, 'to_validate', 'to_fix', 'verifier', reasonClean);
-  return getCriterion(taskId, row.ref)!;
-}
-
-/**
- * Proposition de retrait : le vérificateur ne supprime JAMAIS physiquement.
- * La proposition reste visible (injection, UI, notification) jusqu'à ce que
- * l'agent retire le critère (criteria_remove) ou le modifie (criteria_update,
- * qui l'efface) ; idempotente à raison identique.
- */
-export function proposeRemoval(taskId: string, ref: string, reason: string): CriterionRow {
-  const row = getCriterion(taskId, ref);
-  if (!row) throw new CriteriaError('unknown_ref', `critère inconnu : ${ref}`);
-  const reasonClean = String(reason ?? '').trim();
-  if (!reasonClean) throw new CriteriaError('invalid', 'une raison est requise pour une proposition de retrait');
-  if (row.remove_proposed_at != null && row.remove_reason === reasonClean) return row;
-  db.query(`UPDATE criteria SET remove_proposed_at = ?, remove_reason = ?, updated_at = ? WHERE task_id = ? AND ref = ?`)
-    .run(Date.now(), reasonClean.slice(0, 500), Date.now(), taskId, row.ref);
-  logEvent(taskId, 'criteria', `${row.ref} : retrait proposé par le vérificateur : ${reasonClean.slice(0, 120)}`,
-    { ref: row.ref, from: row.status, to: row.status, source: 'verifier', removal_proposed: true });
-  return getCriterion(taskId, row.ref)!;
-}
-
-/** Liste des refs « à valider » (le vérificateur n'a rien à juger quand elle est vide). */
-export function pendingValidation(taskId: string): CriterionRow[] {
-  return listCriteria(taskId).filter(r => r.status === 'to_validate');
-}
-
-/**
- * Message à pousser à l'agent quand son verdict est « done » mais que les
- * critères ne suivent pas : aucun critère, ou critères restants non validés.
- * Retourne null quand rien ne doit être poussé (critères tous validés).
- */
-export function criteriaPushMessage(rows: CriterionRow[]): string | null {
-  const counts = criteriaCounts(rows);
-  if (!counts.total) {
-    return "Il n'y a aucun critère d'acceptation pour cette tâche : définis-en avec criteria_add, puis soumets tes preuves avec criteria_to_validate.";
-  }
-  const remaining = rows.filter(r => r.status !== 'validated');
-  if (!remaining.length) return null;
-  return `Critères non validés : ${remaining.map(r => `${r.ref} (${statusLabel(r.status)})`).join(', ')} : soumets tes preuves avec criteria_to_validate.`;
-}
-
-/** Signature de l'état critères : le dédoublonnage du vérificateur s'appuie dessus. */
-export function criteriaSignature(taskId: string): string {
-  return listCriteria(taskId)
-    .map(r => `${r.ref}|${r.status}|${r.version}|${r.updated_at}|${r.remove_proposed_at ?? 0}`)
-    .join(';');
-}

@@ -4,6 +4,9 @@
  * de données est redirigé avant l'import de state.mts (imports dynamiques :
  * les imports statiques seraient hissés AVANT l'affectation d'env) et on
  * refuse toute écriture si la base liée n'est pas une base de test.
+ *
+ * Flux 2026-11-12 : l'agent juge lui-même (criteria_set_status) ; plus de
+ * transitions vérificateur.
  */
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -24,9 +27,9 @@ if (!boundFile.includes('criteria-test-')) {
 
 import { describe, expect, test } from 'bun:test';
 const {
-  CriteriaError, addCriterion, approveCriterion, criteriaCounts, criteriaSignature,
-  getCriterion, listCriteria, nextRef, rejectCriterion, removeCriterion,
-  submitEvidence, updateCriterion, proposeRemoval,
+  CriteriaError, addCriterion, criteriaCounts,
+  getCriterion, listCriteria, nextRef, removeCriterion,
+  setStatusCriterion, submitEvidence, updateCriterion,
 } = criteria;
 
 const TASK = 'ses_test_criteria';
@@ -77,53 +80,59 @@ describe('criteria : machine à états', () => {
     expect(ok.evidence[0].path).toBe('report.txt');
   });
 
-  test('approve et reject ne partent que de « à valider »', () => {
-    approveCriterion(TASK, 'AC-01', 'tests visibles');
-    expect(getCriterion(TASK, 'AC-01')!.status).toBe('validated');
-    expect(getCriterion(TASK, 'AC-01')!.validated_at).toBeGreaterThan(0);
-    expect(() => approveCriterion(TASK, 'AC-01', 'encore')).toThrow(CriteriaError);
-    expect(() => rejectCriterion(TASK, 'AC-01', 'raison')).toThrow(CriteriaError);
+  test('set_status validated : depuis « à valider », note et horodatage enregistrés', () => {
+    const c = getCriterion(TASK, 'AC-01')!;
+    const ok = setStatusCriterion(TASK, c.ref, 'validated', 'sortie de test vue, 12 pass');
+    expect(ok.status).toBe('validated');
+    expect(ok.review).toContain('12 pass');
+    expect(ok.validated_at).toBeGreaterThan(0);
+    expect(ok.validated_work).toBeTruthy();
+    // un critère déjà validé peut être re-marqué (re-jugement), sans erreur
+    const again = setStatusCriterion(TASK, c.ref, 'validated', 'revérifié');
+    expect(again.status).toBe('validated');
   });
 
-  test('version : chaque preuve ou contenu incrémente ; un jugement sur une autre version est périmé', async () => {
+  test('set_status to_fix : raison obligatoire, depuis n importe quel état vivant', () => {
     const c = getCriterion(TASK, 'AC-02')!;
-    expect(c.version).toBe(0);
-    const after = await submitEvidence(TASK, c.ref, [{ kind: 'command', text: 'bun test : 12 pass' }], projectDir);
-    expect(after.version).toBe(1);
-    // jugement sur la version 0 (périmé) : ignoré, le critère reste « à valider »
-    expect(() => approveCriterion(TASK, c.ref, 'obsolète', 0)).toThrow(/périmé/);
-    expect(() => rejectCriterion(TASK, c.ref, 'obsolète aussi', 0)).toThrow(/périmé/);
-    expect(getCriterion(TASK, c.ref)!.status).toBe('to_validate');
-    // rejet à la bonne version, puis l'agent resoumet (l'ancien jugement ne suit pas)
-    const rejected = rejectCriterion(TASK, c.ref, 'la sortie ne montre pas le bon fichier', 1);
-    expect(rejected.status).toBe('to_fix');
-    const after2 = await submitEvidence(TASK, c.ref, [{ kind: 'command', text: 'bun test : 13 pass' }], projectDir);
-    expect(after2.version).toBe(2);
-    // un jugement visant la version 1 ne touche pas la version 2
-    expect(() => approveCriterion(TASK, c.ref, 'périmé', 1)).toThrow(/périmé/);
-    expect(getCriterion(TASK, c.ref)!.status).toBe('to_validate');
+    // depuis « à faire » : autorisé (l'agent se corrige lui-même)
+    expect(() => setStatusCriterion(TASK, c.ref, 'to_fix', '')).toThrow(CriteriaError);
+    const fixed = setStatusCriterion(TASK, c.ref, 'to_fix', 'la sortie ne montre pas le bon fichier');
+    expect(fixed.status).toBe('to_fix');
+    expect(fixed.review).toContain('bon fichier');
+    expect(fixed.validated_at).toBeNull();
+    // depuis « à corriger », une validation directe repart (re-jugement)
+    const ok = setStatusCriterion(TASK, c.ref, 'validated', 'corrigé et revérifié');
+    expect(ok.status).toBe('validated');
+  });
+
+  test('set_status refuse un statut inconnu et une ref inconnue', () => {
+    expect(() => setStatusCriterion(TASK, 'AC-01', 'todo' as 'validated', 'x')).toThrow(CriteriaError);
+    expect(() => setStatusCriterion(TASK, 'AC-99', 'validated', 'x')).toThrow(CriteriaError);
+  });
+
+  test('version : chaque preuve, jugement ou contenu incrémente', async () => {
+    const c = getCriterion(TASK, 'AC-02')!;
+    // AC-02 est « validé » (test précédent) : un re-jugement « à corriger »
+    // repart, puis une nouvelle preuve se soumet depuis « à corriger »
+    const judged0 = setStatusCriterion(TASK, c.ref, 'to_fix', 'revérification : la preuve ne tient plus');
+    expect(judged0.status).toBe('to_fix');
+    const after = await submitEvidence(TASK, c.ref, [{ kind: 'command', text: 'bun test : 13 pass' }], projectDir);
+    expect(after.status).toBe('to_validate');
+    const v1 = after.version;
+    const judged = setStatusCriterion(TASK, c.ref, 'to_fix', 'raison du re-jugement');
+    expect(judged.version).toBe(v1 + 1);
+    // une nouvelle preuve repart depuis « à corriger »
+    const after2 = await submitEvidence(TASK, c.ref, [{ kind: 'command', text: 'bun test : 14 pass' }], projectDir);
+    expect(after2.version).toBe(v1 + 2);
     // un update de contenu repasse « à faire » et incrémente
     const updated = updateCriterion(TASK, c.ref, { detail: 'nouveau détail plus précis' });
     expect(updated.status).toBe('todo');
-    expect(updated.version).toBe(3);
     expect(updated.evidence).toEqual([]);
     expect(updated.review).toBeNull();
     expect(updated.validated_at).toBeNull();
   });
 
-  test('reject exige une raison et pose « à corriger », puis une nouvelle preuve repart', async () => {
-    const c = getCriterion(TASK, 'AC-02')!;
-    await submitEvidence(TASK, c.ref, [{ kind: 'text', text: 'préuve faible' }], projectDir);
-    expect(() => rejectCriterion(TASK, c.ref, '')).toThrow(CriteriaError);
-    const rejected = rejectCriterion(TASK, c.ref, 'la sortie ne montre pas le bon fichier');
-    expect(rejected.status).toBe('to_fix');
-    expect(rejected.review).toContain('bon fichier');
-    const again = await submitEvidence(TASK, c.ref, [{ kind: 'artifact', text: 'lire report.txt', path: 'report.txt' }], projectDir);
-    expect(again.status).toBe('to_validate');
-    expect(again.review).toBeNull();
-  });
-
-  test('update d\'un critère non « à faire » le repasse « à faire » et invalide la preuve', async () => {
+  test('update d un critère non « à faire » le repasse « à faire » et invalide la preuve', async () => {
     const c = getCriterion(TASK, 'AC-02')!;
     const updated = updateCriterion(TASK, c.ref, { detail: 'nouveau détail plus précis' });
     expect(updated.status).toBe('todo');
@@ -135,7 +144,7 @@ describe('criteria : machine à états', () => {
     expect(updated2.title).toBe('Build passe (retitré)');
   });
 
-  test('remove supprime la ligne ; la ref n\'est jamais réattribuée', () => {
+  test('remove supprime la ligne ; la ref n est jamais réattribuée', () => {
     removeCriterion(TASK, 'AC-01');
     expect(getCriterion(TASK, 'AC-01')).toBeNull();
     // suppression DOUCE : l'historique reste lisible (includeRemoved)
@@ -150,23 +159,6 @@ describe('criteria : machine à états', () => {
     expect(nextRef(TASK)).toBe('AC-05');
   });
 
-  test('proposition de retrait du vérificateur : le critère reste en place', () => {
-    const before = listCriteria(TASK).length;
-    const c = getCriterion(TASK, 'AC-04')!;
-    const proposed = proposeRemoval(TASK, c.ref, 'doublon de AC-02');
-    expect(proposed.status).toBe(c.status);           // aucun changement d'état
-    expect(proposed.remove_proposed_at).toBeGreaterThan(0);
-    expect(proposed.remove_reason).toBe('doublon de AC-02');
-    expect(listCriteria(TASK).length).toBe(before);   // rien n'est supprimé
-    // idempotente à raison identique (updated_at inchangé)
-    const again = proposeRemoval(TASK, c.ref, 'doublon de AC-02');
-    expect(again.updated_at).toBe(proposed.updated_at);
-    // un contenu modifié efface la proposition
-    const updated = updateCriterion(TASK, c.ref, { detail: 'détail affiné' });
-    expect(updated.remove_proposed_at).toBeNull();
-    expect(updated.remove_reason).toBeNull();
-  });
-
   test('plafond : porte sur les critères NON validés ; un validé libère une place', async () => {
     const before = listCriteria(TASK).length;
     try {
@@ -176,7 +168,7 @@ describe('criteria : machine à états', () => {
       // une validation repasse la place : le critère validé est de l'histoire
       const first = listCriteria(TASK)[0];
       await submitEvidence(TASK, first.ref, [{ kind: 'command', text: 'sortie de test du plafond' }], projectDir);
-      approveCriterion(TASK, first.ref, 'validé pour le test');
+      setStatusCriterion(TASK, first.ref, 'validated', 'validé pour le test');
       const added = addCriterion(TASK, { title: 'Critère après validation', methods: ['text'] });
       expect(added.status).toBe('todo');
     } finally {
@@ -184,13 +176,5 @@ describe('criteria : machine à états', () => {
       for (const r of listCriteria(TASK).slice(4)) removeCriterion(TASK, r.ref);
     }
     expect(listCriteria(TASK).length).toBe(4);
-  });
-
-  test('signature : change à chaque transition, stable sinon', async () => {
-    const s1 = criteriaSignature(TASK);
-    const c = getCriterion(TASK, 'AC-04')!;   // « Critère suivant », en « à faire »
-    await submitEvidence(TASK, c.ref, [{ kind: 'text', text: 'ok' }], projectDir);
-    expect(criteriaSignature(TASK)).not.toBe(s1);
-    expect(criteriaSignature(TASK)).toBe(criteriaSignature(TASK));
   });
 });

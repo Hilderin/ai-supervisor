@@ -1,8 +1,9 @@
 import { create } from 'zustand';
 import {
   abortSupervisor, cancelQueuedSupervisor, fetchSupervisor, newSupervisor,
-  queueSupervisor, revertSupervisor, sendSupervisor, updateSupervisorMode,
+  queueSupervisor, revertSupervisor, sendSupervisor, takeQueuedSupervisor, updateSupervisorMode,
 } from '../lib/api';
+import type { TakenQueueItem } from '../lib/api';
 import type { ComposerAttachment } from '../lib/attachments';
 import type { SupervisorState } from '../types';
 
@@ -27,7 +28,11 @@ interface SupervisorStore {
   setAttachments: (next: ComposerAttachment[]) => void;
   clearErrors: () => void;
   refresh: () => Promise<void>;
-  send: (text: string) => Promise<void>;
+  send: (text: string, forcedAttachments?: ComposerAttachment[], opts?: { immediate?: boolean }) => Promise<void>;
+  /** « Envoyer maintenant » : reprend l'item de la file et l'envoie tout de suite. */
+  sendQueued: (itemId: string) => Promise<void>;
+  /** « Modifier » : reprend l'item de la file et le rend au composer. */
+  editQueued: (itemId: string) => Promise<void>;
   removeQueued: (itemId: string) => Promise<void>;
   revert: (messageId: string, restoreText?: string) => Promise<void>;
   newConversation: () => Promise<void>;
@@ -70,15 +75,20 @@ export const useSupervisorStore = create<SupervisorStore>((set, get) => ({
     }
   },
 
-  send: async (text) => {
+  send: async (text, forcedAttachments, opts) => {
     const value = text.trim();
-    const attachments = get().attachments;
+    const attachments = forcedAttachments ?? get().attachments;
     if ((!value && !attachments.length) || get().modeUpdating) return;
     const label = value || 'Pièce jointe';
     const before = get().state;
+    // une question du tool `question` attend une réponse : l'envoi la REMPLACE.
+    // Le message part tout de suite (le daemon annule la question), jamais en
+    // file : elle ne serait livrée qu'à la fin d'un tour bloqué sur la question.
+    // « Envoyer maintenant » depuis la file force aussi le chemin immédiat.
+    const waiting = (before?.pendingForms?.length ?? 0) > 0;
     // pendant un tour (ou juste après un envoi), le message part en file :
     // OpenChamber le livrera dès que la session redevient idle
-    if (get().sending || before?.status === 'busy') {
+    if (!opts?.immediate && (get().sending || (before?.status === 'busy' && !waiting))) {
       const temp = before
         ? {
             ...before,
@@ -127,6 +137,45 @@ export const useSupervisorStore = create<SupervisorStore>((set, get) => ({
         draft: value,
         attachments,
       });
+    }
+  },
+
+  sendQueued: async (itemId) => {
+    if (get().sending) return;
+    let taken: TakenQueueItem;
+    try {
+      taken = await takeQueuedSupervisor(itemId);
+    } catch {
+      set({ sendError: 'Envoi du message en attente impossible. Le superviseur ne répond pas.' });
+      return;
+    }
+    // la reprise OpenChamber a déjà retiré l'item de la file : on l'ôte de la
+    // liste locale en attendant le prochain poll (état lu AU MOMENT du set :
+    // un poll plus frais pendant l'attente ne doit pas être écrasé)
+    const cur = get().state;
+    set({
+      state: cur ? { ...cur, queued: (cur.queued ?? []).filter((item) => item.id !== itemId) } : cur,
+      sendError: null,
+    });
+    // envoi immédiat : le daemon livre en steer, et annule une question en
+    // attente le cas échéant
+    await get().send(taken.text, taken.attachments, { immediate: true });
+  },
+
+  editQueued: async (itemId) => {
+    try {
+      const taken = await takeQueuedSupervisor(itemId);
+      // état lu AU MOMENT du set : un poll plus frais pendant l'attente ne
+      // doit pas être écrasé par l'instantané d'avant l'attente
+      const cur = get().state;
+      set({
+        draft: taken.text,
+        attachments: taken.attachments,
+        sendError: null,
+        state: cur ? { ...cur, queued: (cur.queued ?? []).filter((item) => item.id !== itemId) } : cur,
+      });
+    } catch {
+      set({ sendError: 'Reprise du message impossible. Le superviseur ne répond pas.' });
     }
   },
 

@@ -109,7 +109,7 @@ function Evidence({ sessionId, evidence, criterionRef, onOpen }: EvidenceProps) 
   );
 }
 
-/** Ligne d'un critère : ref, titre, badge d'état, preuve soumise, commentaire du vérificateur. */
+/** Ligne d'un critère : ref, titre, badge d'état, preuve soumise, note de jugement. */
 export function CriterionRow({
   sessionId,
   criterion,
@@ -151,16 +151,11 @@ export function CriterionRow({
       />
       {criterion.status === 'to_fix' && criterion.review ? (
         <div className="mt-[4px] text-[11.5px] leading-[1.4] text-attend">
-          Vérificateur : preuve refusée : {criterion.review}
+          Preuve refusée : {criterion.review}
         </div>
       ) : criterion.status === 'validated' && criterion.review ? (
         <div className="mt-[4px] text-[11.5px] leading-[1.4] text-green">
-          Vérificateur : preuve acceptée : {criterion.review}
-        </div>
-      ) : null}
-      {criterion.remove_proposed_at != null ? (
-        <div className="mt-[4px] text-[11.5px] leading-[1.4] text-attend">
-          Suppression proposée par le vérificateur : {criterion.remove_reason}
+          Preuve acceptée : {criterion.review}
         </div>
       ) : null}
     </li>
@@ -169,9 +164,10 @@ export function CriterionRow({
 
 /**
  * Section « Critères » du panneau de détail, sous le plan : ref, titre, badge
- * d'état, preuve soumise et dernier commentaire du vérificateur. La liste se
- * charge à la demande (la flotte ne transporte que les comptes) et se recharge
- * quand la tâche bouge. Une tâche sans critère n'affiche pas la section.
+ * d'état, preuve soumise et note de jugement (l'agent juge lui-même, la note
+ * dit ce qu'il a vérifié). La liste se charge à la demande (la flotte ne
+ * transporte que les comptes) et se recharge quand la tâche bouge. Une tâche
+ * sans critère n'affiche pas la section.
  */
 export function CriteriaSection({ sessionId, state, refreshKey, counts }: Props) {
   const [open, setOpen] = useState(() => manualPref.get(sessionId) ?? criteriaDefaultOpen(state));

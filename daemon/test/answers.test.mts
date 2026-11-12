@@ -25,7 +25,7 @@ if (!boundFile.includes('answers-test-')) {
 
 describe('isTaskSession', () => {
   test('le chat de supervision n\'est jamais une tâche', () => {
-    state.setSupervisorSession({ ocSessionId: 'ses_sup', agent: 'superviseur-orchestrateur-x', version: 1, title: 'Superviseur' });
+    state.setSupervisorSession({ ocSessionId: 'ses_sup', agent: 'superviseur-orchestrateur-x', title: 'Superviseur' });
     expect(isTaskSession('ses_sup')).toBe(false);
   });
 

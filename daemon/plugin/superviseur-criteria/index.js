@@ -2,25 +2,26 @@
  * SuperviseurCriteria
  * -----------------------------------------------------------------------------
  * Plugin OpenCode v2 chargé globalement (comme superviseur-task) : il expose à
- * l'agent principal d'une tâche du Superviseur les outils des critères
- * d'acceptation :
+ * l'agent d'une tâche du Superviseur les outils des critères d'acceptation :
  *
+ *   - `criteria_list`         lire la liste complète (lecture, ne déclenche rien)
  *   - `criteria_add`          créer un critère (titre, détail, au moins une méthode)
  *   - `criteria_remove`       retirer un critère (la ref n'est jamais réattribuée)
  *   - `criteria_update`       modifier titre/détail/méthodes : un critère non
  *                             « à faire » repasse « à faire » (preuve invalidée)
  *   - `criteria_to_validate`  soumettre une preuve : « à faire » ou « à corriger »
  *                             devient « à valider »
- *   - `criteria_list`         lire la liste complète (lecture, ne déclenche rien)
+ *   - `criteria_set_status`   juger : « validé » ou « à corriger » (raison)
  *
- * AUCUN tool d'approbation ou de refus : ces transitions appartiennent au
- * vérificateur (sous-agent) via le daemon. Le statut d'un critère n'est jamais
- * modifiable directement : uniquement via ces transitions.
+ * L'agent est SON PROPRE juge (plus de sous-agent vérificateur) : les
+ * instructions d'usage honnête vivent dans les descriptions des tools. Le
+ * propriétaire lit la liste, les preuves et les notes : une validation à tort
+ * se voit.
  *
  * Sans logique métier : l'appel part vers le daemon Superviseur
  * (POST /api/criteria/:name), qui valide la session (une tâche connue, jamais
- * le chat de supervision ni un compagnon), applique la machine à états et
- * répond avec la liste à jour.
+ * le chat de supervision), applique la machine à états et répond avec la liste
+ * à jour.
  *
  * Dependence-free ESM, chargé tel quel : mêmes conventions que superviseur-task
  * (ctx.tool.transform, codemode: false).
@@ -33,11 +34,12 @@ const METHODS =
 
 const REFERENCE = [
   "Critères d'acceptation de la tâche (AC-01, AC-02, ...) : chaque critère porte un titre, un détail, au moins une méthode de validation et un statut.",
-  "États : à faire, à valider (preuve soumise), à corriger (rejet avec justification), validé (preuve acceptée).",
-  "Le statut n'est jamais modifiable directement : `criteria_to_validate` soumet une preuve, et seul le vérificateur (via le Superviseur) valide ou rejette.",
-  "Les validations et rejets te sont notifiés dans la conversation : applique les corrections demandées puis resoumets une preuve.",
+  "États : à faire, à valider (preuve soumise), à corriger (raison enregistrée), validé.",
+  "Tu es le seul juge : il n'y a PAS de vérificateur extérieur. Tu soumets une preuve réelle avec criteria_to_validate, puis tu juges avec criteria_set_status.",
+  "Honnêteté obligatoire : ne marque « validé » qu'après une vérification RÉELLE (test passé constaté, fichier ouvert, rendu contrôlé). Le propriétaire lit la liste, les preuves et tes notes : une validation à tort se voit et détruit la confiance.",
   "Les méthodes de validation possibles : " + METHODS + ".",
   "Une preuve à chemin (screenshot, code_excerpt, artifact) doit pointer vers un fichier existant du projet (chemin relatif).",
+  "Le cycle type : criteria_add quand le critère naît ; criteria_to_validate avec la preuve quand tu penses l'avoir atteint ; criteria_set_status « validated » quand tu as vérifié, ou « to_fix » avec la raison si le critère n'est pas atteint (puis corrige et revalide).",
 ].join(" ");
 
 const COMMON = {
@@ -82,7 +84,7 @@ export default {
         name: "criteria_list",
         description: [
           REFERENCE,
-          "Lis la liste courante des critères avec leurs états, preuves et commentaires ; lecture seule, ne déclenche aucune validation.",
+          "Lis la liste courante des critères avec leurs états, preuves et notes ; lecture seule, ne déclenche rien.",
         ].join(" "),
         options: { codemode: false, permission: "criteria_list" },
         input: { type: "object", properties: {}, additionalProperties: false },
@@ -95,7 +97,8 @@ export default {
         name: "criteria_add",
         description: [
           REFERENCE,
-          "Crée un critère : {title, detail?, methods[]} ; il démarre « à faire » au prochain numéro libre et déclenche une revalidation par le vérificateur.",
+          "Crée un critère : {title, detail?, methods[]} ; il démarre « à faire » au prochain numéro libre.",
+          "Détail utile : ce qui prouve exactement le critère (commande à passer, parcours à suivre, ce qu'on doit voir).",
         ].join(" "),
         options: { codemode: false, permission: "criteria_add" },
         input: {
@@ -122,7 +125,7 @@ export default {
         name: "criteria_remove",
         description: [
           REFERENCE,
-          "Retire un critère {ref} ; sa référence n'est jamais réattribuée et le retrait déclenche une revalidation par le vérificateur.",
+          "Retire un critère {ref} ; sa référence n'est jamais réattribuée (l'historique garde le trou).",
         ].join(" "),
         options: { codemode: false, permission: "criteria_remove" },
         input: COMMON,
@@ -135,7 +138,8 @@ export default {
         name: "criteria_update",
         description: [
           REFERENCE,
-          "Modifie {ref, title?, detail?, methods?} : un critère non « à faire » (à valider, à corriger, validé) repasse « à faire », sa preuve est invalidée.",
+          "Modifie {ref, title?, detail?, methods?} : un critère non « à faire » (à valider, à corriger, validé) repasse « à faire », sa preuve et son jugement sont invalidés.",
+          "À utiliser quand le périmètre du critère change, ou quand le propriétaire redéfinit une attente.",
         ].join(" "),
         options: { codemode: false, permission: "criteria_update" },
         input: {
@@ -163,8 +167,9 @@ export default {
         name: "criteria_to_validate",
         description: [
           REFERENCE,
-          "Soumets une preuve {ref, evidence[]} pour passer le critère « à valider » : depuis « à faire » ou « à corriger ». Chaque preuve est un objet {kind, text, path?, start_line?, line_count?} où kind est une des méthodes ; screenshot, code_excerpt et artifact exigent un path de fichier existant du projet, code_excerpt exige start_line et line_count.",
-          "La preuve est examinée par le vérificateur, qui l'approuve (validé) ou la refuse (à corriger, avec sa raison).",
+          "Soumets une preuve {ref, evidence[]} pour passer le critère « à valider » : depuis « à faire » ou « à corriger ».",
+          "Chaque preuve est un objet {kind, text, path?, start_line?, line_count?} : text = ce qui prouve (sortie de test, parcours suivi, commande et sa sortie), path = fichier du projet requis pour screenshot, code_excerpt et artifact (code_excerpt exige aussi start_line et line_count).",
+          "Enchaîne ensuite avec criteria_set_status : la preuve ne se juge pas toute seule.",
         ].join(" "),
         options: { codemode: false, permission: "criteria_to_validate" },
         input: {
@@ -194,6 +199,39 @@ export default {
         },
         async execute(input, context) {
           return call("criteria_to_validate", input, context);
+        },
+      });
+
+      editor.add({
+        name: "criteria_set_status",
+        description: [
+          REFERENCE,
+          "JUGE le critère {ref, status: \"validated\" | \"to_fix\", note} après avoir vérifié sa preuve (criteria_to_validate) ou le travail directement.",
+          "status=\"validated\" : le critère est atteint et vérifié. note = ce que tu as réellement vérifié (test passé, fichier consulté, rendu contrôlé) ; une note vide ne prouve rien.",
+          "status=\"to_fix\" : le critère n'est pas atteint ou la preuve ne tient pas. note = la raison, OBLIGATOIRE : elle guide la correction et reste visible du propriétaire. Corrige puis resoumets une preuve (criteria_to_validate) et re-juge.",
+          "Interdits : valider un critère sans vérification réelle, valider « pour avancer », ou réutiliser une preuve d'un autre critère. En cas de doute : « to_fix » avec la raison.",
+          "« À valider » ne se pose pas ici : il vient de criteria_to_validate (une preuve est exigée).",
+        ].join(" "),
+        options: { codemode: false, permission: "criteria_set_status" },
+        input: {
+          type: "object",
+          properties: {
+            ref: COMMON.properties.ref,
+            status: {
+              type: "string",
+              enum: ["validated", "to_fix"],
+              description: "« validated » = validé après vérification réelle ; « to_fix » = à corriger (note obligatoire).",
+            },
+            note: {
+              type: "string",
+              description: "Jugement : ce qui a été vérifié (validated) ou la raison du refus (to_fix, obligatoire).",
+            },
+          },
+          required: ["ref", "status"],
+          additionalProperties: false,
+        },
+        async execute(input, context) {
+          return call("criteria_set_status", input, context);
         },
       });
     });

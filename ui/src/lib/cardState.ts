@@ -3,18 +3,24 @@ import { isDone, isWaiting } from './fleet';
 import type { Section } from './placement';
 
 /**
- * Quatre états visibles. La section de placement ne sert qu'à la décoration :
- * l'ordre et la hauteur des cartes n'en dépendent jamais.
+ * États visibles (2026-11-12, plus de verdict de compagnon) :
+ * waiting (question/permission), busy, done (déterministe : plan 100 % +
+ * critères tous validés + au repos), warning (au repos, travail incomplet),
+ * error et retry (signaux OpenCode).
+ *
+ * La section de placement (hystérésis EN COURS ↔ TERMINÉ, placement.ts) prime
+ * quand elle est connue : l'état affiché suit la section, sans saut pendant la
+ * stabilisation. L'ordre et la hauteur des cartes n'en dépendent jamais.
  */
-export type CardState = 'waiting' | 'busy' | 'done' | 'idle' | 'error' | 'retry';
+export type CardState = 'waiting' | 'busy' | 'done' | 'warning' | 'error' | 'retry';
 
 export function cardState(row: FleetRow, placement?: Section): CardState {
   if (isWaiting(row)) return 'waiting';
   if (row.issue?.state === 'error' || row.issue?.state === 'retry') return row.issue.state;
   if (row.status === 'busy') return 'busy';
   if (placement === 'done') return 'done';
-  if (placement === 'running' || placement === 'waiting') return 'idle';
-  return isDone(row) ? 'done' : 'idle';
+  if (placement === 'running') return 'warning';
+  return isDone(row) ? 'done' : 'warning';
 }
 
 /** Libellé de l'état ; l'attente distingue une question d'une permission. */
@@ -27,5 +33,5 @@ export function cardStateLabel(
   if (state === 'retry') return 'Nouvel essai';
   if (state === 'busy') return 'travaille';
   if (state === 'done') return 'terminé';
-  return 'fini, à valider';
+  return 'à compléter';
 }

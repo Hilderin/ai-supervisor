@@ -72,7 +72,6 @@ function Panel({ onStats }: { onStats: (s: string) => void }) {
           <TaskInspector
             row={selectedRow}
             state={selectedState}
-            now={Date.now()}
             onClose={() => useFleetStore.getState().setSelected(null)}
             onOpenChamber={() => {}}
           />

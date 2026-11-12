@@ -53,7 +53,7 @@ interface WireModel {
   limit?: { context?: number };
 }
 
-/** Les agents du Superviseur (analyste, vérificateur, versions de l'orchestrateur) ne sont pas des choix. */
+/** Les agents internes du Superviseur (orchestrateur ; ids analyste et vérificateur retirés le 2026-11-12, filtrés par précaution) ne sont pas des choix. */
 function selectableAgent(id: string): boolean {
   if (!id) return false;
   if (id === 'superviseur-verificateur') return false;

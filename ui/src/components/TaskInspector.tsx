@@ -1,11 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { fetchFleet, replyPermission, setSupervision } from '../lib/api';
+import { replyPermission } from '../lib/api';
 import type { CardState } from '../lib/cardState';
 import { cardStateLabel } from '../lib/cardState';
 import { closeQuestionOf, closeTask } from '../lib/closeTask';
 import { cx } from '../lib/cx';
-import { briefRow, dirName } from '../lib/fleet';
-import { isUnsupervised, supervisionActionLabel } from '../lib/supervision';
+import { dirName } from '../lib/fleet';
 import { BTN_GHOST, BTN_PRIMARY } from '../lib/ui';
 import { useFleetStore } from '../store/fleetStore';
 import { useTaskModel } from '../hooks/useTaskModel';
@@ -16,7 +15,7 @@ import { Composer } from './Composer';
 import { AnswersSection } from './AnswersSection';
 import { CriteriaSection } from './CriteriaSection';
 import { DeliveryBlock } from './DeliveryBlock';
-import { OpenChamberIcon, QuestionIcon, SupervisionIcon, SupervisionOffIcon } from './Icons';
+import { OpenChamberIcon, QuestionIcon } from './Icons';
 import { PlanSection } from './PlanSection';
 import { QuestionBox } from './QuestionBox';
 import { TaskModelPopover, taskModelLabel } from './TaskModelPopover';
@@ -24,7 +23,6 @@ import { TaskModelPopover, taskModelLabel } from './TaskModelPopover';
 interface Props {
   row: FleetRow;
   state: CardState;
-  now: number;
   onClose: () => void;
   onOpenChamber: (sessionId: string) => void;
 }
@@ -33,8 +31,12 @@ interface Props {
  * Détail d'une tâche : colonne à droite, redimensionnable depuis App.
  * Le corps défile ; le composer reste collé en bas, comme un chat.
  * La fermeture du panneau et la clôture de la tâche sont deux gestes distincts.
+ *
+ * 2026-11-12 : plus de résumé ni d'attente du verdict (compagnon retiré) ;
+ * la ligne d'état dit l'état déterministe de la carte, et la livraison
+ * (DeliveryBlock) porte le dernier résultat de l'agent.
  */
-export function TaskInspector({ row, state, now, onClose, onOpenChamber }: Props) {
+export function TaskInspector({ row, state, onClose, onOpenChamber }: Props) {
   const closeSession = useFleetStore((s) => s.closeSession);
   const [actionError, setActionError] = useState<string | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -50,28 +52,9 @@ export function TaskInspector({ row, state, now, onClose, onOpenChamber }: Props
   const stateLabel = cardStateLabel(state, waitingKind);
   // même ligne que la carte, en haut du panneau ; rien au repos
   const activity = state === 'busy' ? row.activity : undefined;
-  const brief = row.sup?.resume || briefRow(row, waiting, now);
-  const attend = row.sup?.attend && (waiting || row.sup?.humanSource === 'agent_ask')
-    ? row.sup.attend
-    : '';
   const dir = dirName(row.dir);
 
-  // supervision opt-in : badge dans la ligne d'état et bascule dans l'en-tête,
-  // même endpoint que la carte ; le frame SSE suivant porte le nouvel état
-  const unsupervised = isUnsupervised(row);
-  const supervisionLabel = supervisionActionLabel(row);
-  const toggleSupervision = async () => {
-    setActionError(null);
-    try {
-      await setSupervision(row.id, unsupervised);
-      void fetchFleet().catch(() => undefined);
-    } catch (e) {
-      setActionError(String((e as Error)?.message ?? e));
-    }
-  };
-
   const planSteps = row.plan?.steps ?? [];
-  const progress = row.sup?.progress != null ? Math.max(0, Math.min(100, Number(row.sup.progress))) : null;
   const { info: taskModel, loading: taskModelLoading, error: taskModelError, setInfo: setTaskModel } = useTaskModel(row.id);
 
   useEffect(() => {
@@ -132,21 +115,6 @@ export function TaskInspector({ row, state, now, onClose, onOpenChamber }: Props
         />
         <button
           type="button"
-          data-testid="inspector-supervision-toggle"
-          aria-label={supervisionLabel}
-          title={unsupervised
-            ? 'Activer la supervision (compagnon + vérificateur sur cette conversation)'
-            : 'Désactiver la supervision (les sous-agents sont détachés)'}
-          onClick={() => void toggleSupervision()}
-          className={cx(
-            'flex h-[24px] w-[24px] shrink-0 cursor-pointer items-center justify-center rounded-[6px] bg-transparent',
-            unsupervised ? 'text-muted hover:bg-hover hover:text-text' : 'text-green hover:bg-green-soft',
-          )}
-        >
-          <SupervisionIcon />
-        </button>
-        <button
-          type="button"
           title="Ouvrir dans le mini chat OpenChamber"
           onClick={() => onOpenChamber(row.id)}
           className="flex h-[24px] w-[24px] shrink-0 cursor-pointer items-center justify-center rounded-[6px] bg-transparent text-muted hover:bg-green-soft hover:text-green"
@@ -166,19 +134,9 @@ export function TaskInspector({ row, state, now, onClose, onOpenChamber }: Props
 
       <div className="flex shrink-0 flex-col gap-[7px] border-b border-border px-[14px] pb-[9px] pt-[8px]">
         <div className="flex min-w-0 items-center gap-[8px] text-[11.5px]">
-          <span className={cx('shrink-0 font-semibold', waiting ? 'text-attend' : 'text-muted')}>
+          <span className={cx('shrink-0 font-semibold', waiting || state === 'warning' ? 'text-attend' : 'text-muted')}>
             {stateLabel}
           </span>
-          {unsupervised ? (
-            <span
-              data-testid="inspector-unsupervised"
-              title="Conversation non supervisée : ni compagnon ni vérificateur ; les messages partent sans habillage du superviseur."
-              className="flex shrink-0 items-center gap-[4px] rounded-full border border-border px-[7px] py-[1px] text-[10px] font-semibold text-muted"
-            >
-              <SupervisionOffIcon />
-              Non supervisée
-            </span>
-          ) : null}
           {dir ? <span className="min-w-0 truncate text-muted" title={row.dir}>{dir}</span> : null}
           <span className="flex-1" />
           <span
@@ -213,15 +171,6 @@ export function TaskInspector({ row, state, now, onClose, onOpenChamber }: Props
             ) : null}
           </div>
         ) : null}
-        <div className="rounded-[9px] border border-border bg-render px-[12px] py-[10px]">
-          <div className="mb-[6px] text-[12px] font-semibold text-muted">Résumé</div>
-          <div className="whitespace-pre-wrap text-[13.5px] leading-[1.45] text-text">{brief}</div>
-        </div>
-        {attend ? (
-          <div className="mt-[4px] text-[13px] text-attend">
-            <QuestionIcon /> {attend}
-          </div>
-        ) : null}
 
         {planSteps.length ? (
           <PlanSection
@@ -231,11 +180,7 @@ export function TaskInspector({ row, state, now, onClose, onOpenChamber }: Props
             done={row.plan?.done ?? 0}
             total={row.plan?.total ?? 0}
           />
-        ) : (
-          <div className="mt-[12px] text-[11.5px] text-muted">
-            {progress != null ? `${Math.round(progress)} %` : 'pas de plan'}
-          </div>
-        )}
+        ) : null}
 
         {row.criteria?.total ? (
           <CriteriaSection
@@ -253,7 +198,7 @@ export function TaskInspector({ row, state, now, onClose, onOpenChamber }: Props
 
         <DeliveryBlock
           sessionId={row.id}
-          enabled={state === 'done' || state === 'idle'}
+          enabled={state === 'done' || state === 'warning'}
           done={done}
           defaultExpanded
           refreshKey={`${row.lastUpdateAt ?? 0}:${row.turnStartedAt ?? 0}`}

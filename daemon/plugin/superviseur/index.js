@@ -1,11 +1,15 @@
 /**
- * Outils du chat de supervision. Plugin OpenCode projet-local, chargé dans
- * ~/.superviseur. Il ne contient aucune logique métier : les appels partent
- * vers le daemon Superviseur, qui valide, journalise et agit.
+ * Outils de lecture bornée du chat de supervision. Plugin OpenCode projet-local,
+ * chargé dans ~/.superviseur uniquement : les autres conversations n'ont pas
+ * besoin de ces lectures (elles ont leurs propres tools natifs) et le projet
+ * sélectionné est celui du mode Investigation du chat.
  *
- * Le daemon vérifie que `sessionId` est bien la session de supervision : ces
- * outils ne sont pas des outils de tâche et ne peuvent pas être utilisés depuis
- * une session de travail.
+ * Il ne contient aucune logique métier : les appels partent vers le daemon
+ * Superviseur, qui vérifie que l'appelant est bien la session de supervision,
+ * en mode Investigation, et lit uniquement dans le projet sélectionné.
+ *
+ * Les tools de flotte (list/start/send/close) sont chargés GLOBALEMENT par le
+ * plugin superviseur-fleet : toutes les conversations les ont.
  */
 
 const DAEMON = "http://127.0.0.1:5180";
@@ -34,64 +38,11 @@ async function call(name, input, context) {
   }
 }
 
-const empty = { type: "object", properties: {}, additionalProperties: false };
-
 export default {
   id: "superviseur-tools",
 
   async setup(ctx) {
     await ctx.tool.transform((editor) => {
-      editor.add({
-        name: "list_projects",
-        description:
-          "Liste les projets OpenChamber connus (nom, dossier, identifiant). À utiliser pour résoudre un projet avant start_task.",
-        options: toolOptions("list_projects"),
-        input: empty,
-        execute(input, context) {
-          return call("list_projects", input, context);
-        },
-      });
-
-      editor.add({
-        name: "list_tasks",
-        description:
-          "Liste les tâches de la flotte avec leur état, leur résumé, leur progression et la question en attente. À appeler avant de répondre sur l'état d'une tâche.",
-        options: toolOptions("list_tasks"),
-        input: {
-          type: "object",
-          properties: {
-            section: {
-              type: "string",
-              enum: ["waiting", "running", "done", "all"],
-              description: "Filtre de section. all par défaut.",
-            },
-            include_closed: { type: "boolean", description: "Inclure les tâches fermées." },
-          },
-          additionalProperties: false,
-        },
-        execute(input, context) {
-          return call("list_tasks", input, context);
-        },
-      });
-
-      editor.add({
-        name: "get_task",
-        description:
-          "Détail borné d'une tâche : goal, résumé, prochain, plan/todos, progression, question en attente. Ne renvoie pas le transcript complet.",
-        options: toolOptions("get_task"),
-        input: {
-          type: "object",
-          properties: {
-            task: { type: "string", description: "Identifiant ou titre de la tâche." },
-          },
-          required: ["task"],
-          additionalProperties: false,
-        },
-        execute(input, context) {
-          return call("get_task", input, context);
-        },
-      });
-
       editor.add({
         name: "read_project",
         description:
@@ -144,97 +95,6 @@ export default {
         },
         execute(input, context) {
           return call("grep_project", input, context);
-        },
-      });
-
-      editor.add({
-        name: "start_task",
-        description:
-          "Crée une session de travail top-level dans un projet, avec son goal, ses critères et son brief. Action réelle : appeler seulement quand le global est clair et le projet résolu. Ne crée pas de sous-agent.",
-        options: toolOptions("start_task"),
-        input: {
-          type: "object",
-          properties: {
-            title: { type: "string", description: "Titre court et humain de la tâche." },
-            goal: { type: "string", description: "Résultat attendu, 1 à 3 phrases." },
-            project: { type: "string", description: "Nom, identifiant ou chemin d'un projet connu." },
-            done_criteria: {
-              type: "array",
-              items: { type: "string" },
-              description: "Critères vérifiables de fin, 2 à 5 idéalement.",
-            },
-            constraints: {
-              type: "array",
-              items: { type: "string" },
-              description: "Contraintes de fichiers, techno, style ou délai.",
-            },
-            agent: { type: "string", description: "Profil OpenCode de la session, optionnel." },
-            model: { type: "string", description: "Modèle de la session, optionnel." },
-            context: { type: "string", description: "Contexte, liens ou décisions utiles." },
-          },
-          required: ["title", "goal", "project"],
-          additionalProperties: false,
-        },
-        execute(input, context) {
-          return call("start_task", input, context);
-        },
-      });
-
-      editor.add({
-        name: "send_task",
-        description:
-          "Envoie un texte à une tâche existante, sur ordre explicite. Si une question est en attente, l'annule d'abord puis envoie le texte ; une permission en attente reste sur la carte.",
-        options: toolOptions("send_task"),
-        input: {
-          type: "object",
-          properties: {
-            task: { type: "string", description: "Identifiant ou titre de la tâche." },
-            text: { type: "string", description: "Texte exact à envoyer à l'agent." },
-          },
-          required: ["task", "text"],
-          additionalProperties: false,
-        },
-        execute(input, context) {
-          return call("send_task", input, context);
-        },
-      });
-
-      editor.add({
-        name: "cancel_question",
-        description:
-          "Annule la question en attente d'une tâche. L'agent reprend sans réponse. À utiliser quand l'utilisateur dit explicitement d'annuler ou d'ignorer la question.",
-        options: toolOptions("cancel_question"),
-        input: {
-          type: "object",
-          properties: {
-            task: { type: "string", description: "Identifiant ou titre de la tâche." },
-            message: { type: "string", description: "Raison courte transmise à l'agent, optionnelle." },
-          },
-          required: ["task"],
-          additionalProperties: false,
-        },
-        execute(input, context) {
-          return call("cancel_question", input, context);
-        },
-      });
-
-      editor.add({
-        name: "close_task",
-        description:
-          "Ferme une tâche et la retire de la flotte, sur ordre explicite. Refuse une tâche qui attend une question ou une permission ; `force` seulement si l'utilisateur confirme explicitement l'abandon.",
-        options: toolOptions("close_task"),
-        input: {
-          type: "object",
-          properties: {
-            task: { type: "string", description: "Identifiant ou titre de la tâche." },
-            note: { type: "string", description: "Note de clôture, optionnelle." },
-            force: { type: "boolean", description: "Fermer en abandonnant la question ou la permission en attente." },
-          },
-          required: ["task"],
-          additionalProperties: false,
-        },
-        execute(input, context) {
-          return call("close_task", input, context);
         },
       });
     });

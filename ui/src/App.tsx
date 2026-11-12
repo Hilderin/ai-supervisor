@@ -394,7 +394,6 @@ export default function App() {
             <TaskInspector
               row={selectedRow}
               state={selectedState}
-              now={now}
               onClose={() => setSelected(null)}
               onOpenChamber={openChamber}
             />

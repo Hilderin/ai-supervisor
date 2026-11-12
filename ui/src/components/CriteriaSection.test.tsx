@@ -30,24 +30,26 @@ describe('criteriaDefaultOpen', () => {
     expect(criteriaDefaultOpen('busy')).toBe(true);
     expect(criteriaDefaultOpen('waiting')).toBe(true);
     expect(criteriaDefaultOpen('done')).toBe(false);
-    expect(criteriaDefaultOpen('idle')).toBe(false);
+    expect(criteriaDefaultOpen('warning')).toBe(false);
   });
 });
 
 describe('CriterionRow', () => {
-  test('rend ref, titre, badge d’état, preuve et commentaire du vérificateur', () => {
+  test('rend ref, titre, badge d’état, preuve et note de jugement', () => {
     const html = renderToStaticMarkup(createElement(CriterionRow, { sessionId: 's1', criterion: validated }));
     expect(html).toContain('AC-01');
     expect(html).toContain('Tests passent');
     expect(html).toContain('Validé');
     expect(html).toContain('bun test');
-    expect(html).toContain('Vérificateur : preuve acceptée : La sortie de test est visible.');
+    expect(html).toContain('Preuve acceptée : La sortie de test est visible.');
+    // plus de mention du vérificateur (sous-agent retiré, l'agent juge lui-même)
+    expect(html).not.toContain('Vérificateur');
   });
 
-  test('un critère rejeté affiche « À corriger » et la raison du rejet, libellée claire', () => {
+  test('un critère rejeté affiche « À corriger » et la raison, libellée claire', () => {
     const html = renderToStaticMarkup(createElement(CriterionRow, { sessionId: 's1', criterion: rejected }));
     expect(html).toContain('À corriger');
-    expect(html).toContain('Vérificateur : preuve refusée : La capture ne montre pas l’état final.');
+    expect(html).toContain('Preuve refusée : La capture ne montre pas l’état final.');
   });
 
   test('un extrait de code pointe son fichier et ses lignes', () => {

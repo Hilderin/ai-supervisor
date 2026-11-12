@@ -1,0 +1,51 @@
+Preuves de la vérification sur session réelle : fermeture d'une tâche
+(marquage lu + retrait In work). Instance OpenChamber réelle 2.2.5 sur
+127.0.0.1:57123 ; daemon du Superviseur lancé depuis le source sur
+127.0.0.1:5181 (base SQLite temporaire, dossier temporaire).
+Date : 2026-11-10.
+
+Session de test : ses_e3ac5e696ffe93Te4y84EtwVsf (créée pour l'essai, un tour
+trivial y a été exécuté pour poser time.idle, puis elle a été supprimée).
+
+AVANT la fermeture (GET /api/session/ses_e3ac5e696ffe93Te4y84EtwVsf) :
+  time = { created: 1794310281579, updated: 1794310603072, busy: 1794310599075,
+           idle: 1794310603047 }        (pas de viewed : non lu)
+  metadata.openchamber.work = { openedBy: 'auto', openedAt: 1794310292271, state: 'open' }
+
+Fermeture par le chemin réel du Superviseur :
+  POST http://127.0.0.1:5181/api/fleet/done  { sessionId: 'ses_e3ac5e696ffe93Te4y84EtwVsf' }
+  → 200 { ok: true }
+
+APRÈS la fermeture (GET /api/session/... sur OpenChamber) :
+  time = { created: 1794310281579, updated: 1794310625981, busy: 1794310599075,
+           idle: 1794310603047, viewed: 1794310603047 }   (lu : viewed == idle)
+  metadata.openchamber.work = { openedBy: 'auto', openedAt: 1794310292271,
+           state: 'done', doneAt: 1794310625976 }         (In work retiré)
+
+Journal de la tâche (table task_log du daemon, base temporaire) :
+  done : fermé en abandonnant la question
+  note : OpenChamber : conversation marquée lue (time.viewed)
+  note : OpenChamber : In work retiré
+
+Appels constatés côté OpenChamber (code de la version installée, extraits
+de l'app.asar 2.2.5 : node_modules\@openchamber\web\server\lib\notifications\routes.js
+vers les lignes 326 à 338) :
+  // Whether a session is unread is OpenCode's own state (`time.viewed`, set by
+  // `POST /api/session/:id/view`). These two routes only tell the native push
+  // badge that the user is engaging with the app.
+  app.post('/api/sessions/:id/view', ...)   // badge natif (et attention en 2.4.0)
+
+Endpoint OpenCode (bundle de l'opencode.exe embarqué) :
+  session.view : POST /api/session/:sessionID/view, payload { idle }
+  « View session: Mark the idle transition observed by the viewer as viewed. »
+
+Repo OpenChamber inchangé (avant et après la tâche) :
+  git -C F:\GitHub\openchamber status --porcelain   →  (vide, exit 0)
+  git -C F:\GitHub\openchamber log --oneline -1
+  → bf977d2ed feat(sidebar): chat folders show up on every device connected
+    to the same server (#5214)
+
+Test unitaire : bun test daemon/test/oc-session-close.test.mts → 5 pass / 0 fail
+(chemin nominal 3 appels, pas de time.idle : appel OpenCode sauté, échec
+réseau/404 : résolution sans lever + journalisation, échec partiel, base
+non câblée).

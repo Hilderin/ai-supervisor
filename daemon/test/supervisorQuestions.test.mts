@@ -101,18 +101,19 @@ beforeAll(async () => {
   if (!file.startsWith(root)) throw new Error(`test lié à une base non temporaire : ${file}`);
 
   supervisor.setBase(`http://127.0.0.1:${server.port}`);
-  AGENT = state.orchestratorNameFor(state.getOrchestratorVersion());
+  AGENT = state.ORCHESTRATOR_AGENT;
   state.setSupervisorSession({
     ocSessionId: SESSION,
     agent: AGENT,
-    version: state.getOrchestratorVersion(),
     title: 'Superviseur',
   });
 });
 
 afterAll(async () => {
   server?.stop(true);
-  await rm(root, { recursive: true, force: true });
+  // Windows garde parfois le dossier temp verrouillé (base SQLite) : le
+  // nettoyage est best-effort, l'échec ne doit pas marquer le test en échec
+  try { await rm(root, { recursive: true, force: true, maxRetries: 5 }); } catch { /* dossier verrouillé */ }
 });
 
 describe('GET /api/supervisor : questions du tool question', () => {

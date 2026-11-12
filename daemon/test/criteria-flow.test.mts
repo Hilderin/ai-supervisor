@@ -1,8 +1,8 @@
 /**
- * Flux vérificateur : parsing du JSON, application des actions par le daemon
- * (machine à états), lignes de notification. Base SQLite temporaire (imports
- * dynamiques après l'env, garde-fou comme criteria.test.mts), aucun réseau
- * (notifyMainAgent n'est pas appelé ici).
+ * Dispatch des tools criteria côté daemon (runCriteriaTool, criteria-tools.mts)
+ * sur une base SQLite temporaire (imports dynamiques après l'env, garde-fou
+ * comme criteria.test.mts). Flux 2026-11-12 : plus de vérificateur, l'agent
+ * juge lui-même avec criteria_set_status.
  */
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -11,7 +11,7 @@ import { join } from 'node:path';
 process.env.SUPERVISEUR_DATA_DIR = mkdtempSync(join(tmpdir(), 'criteria-flow-test-'));
 const state = await import('../src/state.mts');
 const criteria = await import('../src/criteria.mts');
-const verifier = await import('../src/verifier.mts');
+const tools = await import('../src/criteria-tools.mts');
 
 // garde-fou anti-catastrophe (comme criteria.test.mts)
 const boundFile = (state.db as unknown as { query: Function }).query('pragma database_list').all()
@@ -22,143 +22,85 @@ if (!boundFile.includes('criteria-flow-test-')) {
 }
 
 import { describe, expect, test } from 'bun:test';
-const { addCriterion, getCriterion, listCriteria, submitEvidence } = criteria;
-const { applyVerifierActions, parseVerifierJson, transitionLines } = verifier;
+const { addCriterion, getCriterion, listCriteria } = criteria;
 
 const TASK = 'ses_test_flow';
 
-async function pending(ref: string, evidence: Array<Record<string, unknown>> = [{ kind: 'command', text: 'bun test : pass' }]) {
-  await submitEvidence(TASK, ref, evidence);
+/** Le gating isTaskSession exige une tâche connue : un brief suffit. */
+state.putTaskBrief(TASK, { title: 'Tâche de test', goal: 'g', doneCriteria: [], constraints: [], projectDir: '/p' });
+
+function run(name: string, args: Record<string, unknown> = {}, sessionId = TASK) {
+  return tools.runCriteriaTool(name, sessionId, args);
 }
 
-describe('vérificateur : application du JSON par le daemon', () => {
-  test('parse tolérant : JSON noyé dans du texte, ou rien', () => {
-    expect(parseVerifierJson('Voici :\n```json\n{"review":"ok","actions":[]}\n```')).toEqual({ review: 'ok', actions: [] });
-    expect(parseVerifierJson('pas de json')).toBeNull();
-    expect(parseVerifierJson('[1,2]')).toBeNull();
-    expect(parseVerifierJson('{"review":"issues"}')).toEqual({ review: 'issues' });
+describe('criteria tools : dispatch daemon', () => {
+  test('un appel hors tâche est refusé (not_task), chat de supervision inclus', async () => {
+    const out = await run('criteria_list', {}, 'ses_inconnu');
+    expect(out.ok).toBe(false);
+    expect(out.error).toBe('not_task');
   });
 
-  test('approve et reject appliqués, lignes de notification structurées', async () => {
-    addCriterion(TASK, { title: 'A', methods: ['unit_test'] });
-    addCriterion(TASK, { title: 'B', methods: ['unit_test'] });
-    addCriterion(TASK, { title: 'C', methods: ['unit_test'] });
-    await pending('AC-01');
-    await pending('AC-02');
-    const json: VerifierJson = {
-      review: 'issues',
-      notes: 'deux preuves jugées',
-      actions: [
-        { op: 'approve', ref: 'AC-01', submission_version: 1, comment: 'la sortie de test passe' },
-        { op: 'reject', ref: 'AC-02', submission_version: 1, reason: 'la sortie ne montre pas le bon fichier' },
-      ],
-    };
-    const applied = applyVerifierActions(TASK, json, '{"commit":"abc123","at":1}');
-    expect(getCriterion(TASK, 'AC-01')!.status).toBe('validated');
-    expect(getCriterion(TASK, 'AC-01')!.validated_at).toBeGreaterThan(0);
-    // version du travail examinée, enregistrée AVEC la validation (AC-17)
-    expect(getCriterion(TASK, 'AC-01')!.validated_work).toBe('{"commit":"abc123","at":1}');
+  test('add, list, to_validate, set_status : le flux complet passe par le dispatch', async () => {
+    const added = await run('criteria_add', { title: 'Tests passent', methods: ['unit_test'] });
+    expect(added.ok).toBe(true);
+    const list1 = await run('criteria_list');
+    expect(list1.ok).toBe(true);
+    expect((list1 as { counts: { total: number } }).counts.total).toBe(1);
+
+    const submitted = await run('criteria_to_validate', {
+      ref: 'AC-01',
+      evidence: [{ kind: 'command', text: 'bun test : 12 pass' }],
+    });
+    expect(submitted.ok).toBe(true);
+    expect(getCriterion(TASK, 'AC-01')!.status).toBe('to_validate');
+
+    // statut invalide : refus AVANT toute écriture
+    const bad = await run('criteria_set_status', { ref: 'AC-01', status: 'to_validate', note: 'x' });
+    expect(bad.ok).toBe(false);
+    expect(bad.error).toBe('invalid_status');
+    expect(getCriterion(TASK, 'AC-01')!.status).toBe('to_validate');
+
+    const validated = await run('criteria_set_status', { ref: 'AC-01', status: 'validated', note: 'sortie de test vue' });
+    expect(validated.ok).toBe(true);
+    const c = getCriterion(TASK, 'AC-01')!;
+    expect(c.status).toBe('validated');
+    expect(c.review).toContain('sortie de test');
+    expect(c.validated_at).toBeGreaterThan(0);
+  });
+
+  test('set_status to_fix exige une raison ; l erreur machine remonte à l agent', async () => {
+    const added = await run('criteria_add', { title: 'Build passe', methods: ['command'] });
+    expect(added.ok).toBe(true);
+    const noReason = await run('criteria_set_status', { ref: 'AC-02', status: 'to_fix', note: '' });
+    expect(noReason.ok).toBe(false);
+    expect(noReason.error).toBe('invalid');
+    const fixed = await run('criteria_set_status', { ref: 'AC-02', status: 'to_fix', note: 'build rouge : import manquant' });
+    expect(fixed.ok).toBe(true);
     expect(getCriterion(TASK, 'AC-02')!.status).toBe('to_fix');
-    expect(transitionLines(applied)).toEqual([
-      'AC-01 validé : la sortie de test passe',
-      'AC-02 à corriger : la sortie ne montre pas le bon fichier',
-    ]);
+    // la réponse porte toujours la liste à jour (l'agent lit l'état réel)
+    expect((fixed as { counts: { toFix: number } }).counts.toFix).toBe(1);
   });
 
-  test('un jugement sur une version périmée est ignoré (l agent a changé la preuve pendant la phase)', async () => {
-    await pending('AC-03');   // version 1
-    const applied = applyVerifierActions(TASK, {
-      review: 'ok',
-      actions: [{ op: 'approve', ref: 'AC-03', submission_version: 0, comment: 'obsolète' }],
-    });
-    expect(applied).toEqual([]);
-    expect(getCriterion(TASK, 'AC-03')!.status).toBe('to_validate');
-    // le même jugement à la bonne version est appliqué
-    const applied2 = applyVerifierActions(TASK, {
-      review: 'ok',
-      actions: [{ op: 'approve', ref: 'AC-03', submission_version: 1, comment: 'à jour' }],
-    });
-    expect(getCriterion(TASK, 'AC-03')!.status).toBe('validated');
-    expect(transitionLines(applied2)[0]).toBe('AC-03 validé : à jour');
+  test('ref inconnue : erreur structurée, liste rendue', async () => {
+    const out = await run('criteria_set_status', { ref: 'AC-99', status: 'validated', note: 'x' });
+    expect(out.ok).toBe(false);
+    expect(out.error).toBe('unknown_ref');
+    expect(Array.isArray((out as { criteria: unknown[] }).criteria)).toBe(true);
   });
 
-  test('approve sur un critère non « à valider » : ignoré, sans casser les suivantes', async () => {
-    const before = listCriteria(TASK).map(r => r.status);
-    const applied = applyVerifierActions(TASK, {
-      review: 'ok',
-      actions: [
-        { op: 'approve', ref: 'AC-01' },   // déjà validé : ignoré
-        { op: 'reject', ref: 'AC-ZZZ', reason: 'inconnu' },  // ref inconnu : ignoré
-        { op: 'unknown', ref: 'AC-03' },   // op inconnu : ignoré
-      ],
-    });
-    expect(applied).toEqual([]);
-    expect(listCriteria(TASK).map(r => r.status)).toEqual(before);
+  test('tool inconnu refusé', async () => {
+    const out = await run('criteria_approve', { ref: 'AC-01' });
+    expect(out.ok).toBe(false);
+    expect(out.error).toBe('unknown_tool');
   });
 
-  test('add, update et remove-aproposition appliqués ; add alloue la prochaine ref libre', async () => {
-    const refsBefore = listCriteria(TASK).length;
-    const applied = applyVerifierActions(TASK, {
-      review: 'issues',
-      actions: [
-        { op: 'add', title: 'Aucune régression du build UI', detail: 'build passe après chaque lot', methods: ['unit_test'], reason: 'le plan touche l\'UI' },
-        { op: 'update', ref: 'AC-03', detail: 'détail précisé avec la commande', reason: 'détail trop vague' },
-        { op: 'remove', ref: 'AC-03', reason: 'doublon de AC-02' },
-      ],
-    });
-    // remove du vérificateur : une PROPOSITION, le critère reste en place
-    expect(listCriteria(TASK).length).toBe(refsBefore + 1);
-    const added = listCriteria(TASK).at(-1)!;
-    expect(added.ref).toBe('AC-04');
-    expect(added.status).toBe('todo');
-    expect(added.methods).toEqual(['unit_test']);
-    expect(applied.map(t => t.op)).toEqual(['add', 'update', 'remove']);
-    expect(transitionLines(applied)[1]).toContain('AC-03 modifié');
-    expect(transitionLines(applied)[2]).toContain('AC-03 : retrait proposé');
-    const c3 = getCriterion(TASK, 'AC-03')!;
-    expect(c3.remove_proposed_at).toBeGreaterThan(0);
-    expect(c3.remove_reason).toBe('doublon de AC-02');
-    expect(c3.status).toBe('todo');   // pas de changement d'état sur une proposition
-  });
-
-  test('update d\'un critère validé le repasse « à faire » (cohérence des états)', async () => {
-    await pending('AC-04');
-    applyVerifierActions(TASK, { review: 'ok', actions: [{ op: 'approve', ref: 'AC-04', submission_version: 1 }] });
-    expect(getCriterion(TASK, 'AC-04')!.status).toBe('validated');
-    applyVerifierActions(TASK, { review: 'ok', actions: [{ op: 'update', ref: 'AC-04', title: 'Retitré' }] });
-    expect(getCriterion(TASK, 'AC-04')!.status).toBe('todo');
-    expect(getCriterion(TASK, 'AC-04')!.evidence).toEqual([]);
-  });
-
-  test('plafond d\'actions : au plus 12', async () => {
-    const actions = Array.from({ length: 40 }, (_, i) => ({ op: 'unknown', ref: `AC-${i}` }));
-    const applied = applyVerifierActions(TASK, { review: 'ok', actions });
-    expect(applied).toEqual([]);
-  });
-
-  test('P0 : submission_version absente : l action est REFUSÉE, jamais appliquée à la version courante', async () => {
-    addCriterion(TASK, { title: 'Sans version', methods: ['unit_test'] });
-    await pending('AC-05');   // version 1, à valider
-    // un jugement forgé sur une ANCIENNE phase, sans version : le daemon ne
-    // doit PAS le replier sur la version courante
-    const applied = applyVerifierActions(TASK, {
-      review: 'ok',
-      actions: [{ op: 'approve', ref: 'AC-05', comment: 'jugement sans version' }],
-    });
-    expect(applied).toEqual([]);
-    expect(getCriterion(TASK, 'AC-05')!.status).toBe('to_validate');
-    expect(getCriterion(TASK, 'AC-05')!.validated_at).toBeNull();
-    // même garde pour reject sans version
-    const applied2 = applyVerifierActions(TASK, {
-      review: 'issues',
-      actions: [{ op: 'reject', ref: 'AC-05', reason: 'sans version' }],
-    });
-    expect(applied2).toEqual([]);
-    expect(getCriterion(TASK, 'AC-05')!.status).toBe('to_validate');
-    // la compatibilité interne (fonction directe sans version) reste valable :
-    // c'est le chemin test, jamais le JSON du LLM
-    const internal = await import('../src/criteria.mts');
-    internal.approveCriterion(TASK, 'AC-05', 'compatibilité interne');
-    expect(getCriterion(TASK, 'AC-05')!.status).toBe('validated');
+  test('la liste de la tâche reste isolée des autres tâches', async () => {
+    // une deuxième tâche (même base) ne voit pas les critères de TASK
+    const OTHER = 'ses_test_flow_other';
+    state.putTaskBrief(OTHER, { title: 'Autre tâche', goal: 'g', doneCriteria: [], constraints: [], projectDir: '/p' });
+    addCriterion(OTHER, { title: 'Autre tâche', methods: ['text'] });
+    const out = await run('criteria_list', {}, OTHER);
+    expect((out as { counts: { total: number } }).counts.total).toBe(1);
+    expect(listCriteria(TASK).length).toBeGreaterThan(1);
   });
 });

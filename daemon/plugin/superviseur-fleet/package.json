@@ -1,0 +1,8 @@
+{
+  "name": "superviseur-fleet",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Tools de flotte du Superviseur, disponibles à tous les agents (daemon Superviseur)",
+  "exports": "./index.js"
+}

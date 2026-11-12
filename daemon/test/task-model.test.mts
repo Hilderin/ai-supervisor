@@ -77,6 +77,8 @@ beforeAll(async () => {
 
 afterAll(async () => {
   server?.stop(true);
+  // la base SQLite ouverte verrouille le dossier sous Windows (EBUSY au rm)
+  try { state.db.close(); } catch { /* déjà fermée */ }
   await rm(root, { recursive: true, force: true });
 });
 

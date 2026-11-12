@@ -10,19 +10,16 @@ import { currentFleet, openchamberUrl, pollOnce, type Fleet } from './fleet.mts'
 import { ackAnswers, AnswerError, listAnswers, recordAnswer, unreadAnswerCounts } from './answers.mts';
 import { getDelivery } from './delivery.mts';
 import { readSessionAsset } from './assets.mts';
-import { companionSessionOf, detachCompanion } from './companion.mts';
 import { openChamberMiniChatUrl } from './openchamber-link.mts';
 import { getSupervisorSession, logEvent, upsertTaskState, getTaskState, reopenTaskState } from './state.mts';
-import { applySupervisionToggle, ownerPromptFor } from './supervision.mts';
-import { abortSupervisor, applySupervisorChatConfig, cancelQueuedSupervisor, getSupervisorState, newSupervisorConversation, queueSupervisor, revertSupervisor, sendSupervisor, SUPERVISOR_DIR } from './supervisor.mts';
+import { abortSupervisor, applySupervisorChatConfig, cancelQueuedSupervisor, getSupervisorState, newSupervisorConversation, queueSupervisor, revertSupervisor, sendSupervisor, takeQueuedSupervisor, SUPERVISOR_DIR } from './supervisor.mts';
 import { getSupervisorConfig, saveSupervisorConfig } from './prefs.mts';
-import { applyCompanionModelPref } from './companion.mts';
 import { getTaskModelInfo, setTaskModel } from './task-model.mts';
 import { cancelPendingForms, configureSupervisorMode, pendingFor, runTool, supervisorProjects } from './tools.mts';
 import { runCriteriaTool } from './criteria-tools.mts';
-import { runVerifierTool } from './verifier-tools.mts';
 import { criteriaCounts, listCriteria } from './criteria.mts';
 import { toPromptFiles } from './attachments.mts';
+import { markTaskSessionRead } from './oc-session.mts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 // le build Vite (bun run build:ui) ; le daemon ne sert que des fichiers produits
@@ -129,23 +126,19 @@ async function handleApi(req: http.IncomingMessage, res: http.ServerResponse, ur
     return;
   }
   if (path === '/api/supervisor/config' && req.method === 'POST') {
-    // enregistre, puis applique À CHAUD : agent/modèle du chat sur la session
-    // vivante, modèle du compagnon aux conversations d'analyse existantes
+    // enregistre, puis applique À CHAUD : agent et modèle du chat sur la
+    // session vivante (plus de modèle compagnon : les sous-agents sont retirés)
     const body = await readBody(req);
     try {
       const saved = await saveSupervisorConfig(body);
-      const [applied, companions] = await Promise.all([
-        applySupervisorChatConfig().catch((e) => ({
-          sessionId: null, agent: null, model: null, applied: false, error: String(e),
-        })),
-        applyCompanionModelPref().catch(() => ({ updated: 0, failed: 0 })),
-      ]);
+      const applied = await applySupervisorChatConfig().catch((e) => ({
+        sessionId: null, agent: null, model: null, applied: false, error: String(e),
+      }));
       json(res, 200, {
         ok: true,
         config: await getSupervisorConfig(),
         warnings: saved.warnings,
         applied,
-        companions,
       });
     } catch (e) {
       json(res, 502, { ok: false, error: String(e) });
@@ -209,6 +202,17 @@ async function handleApi(req: http.IncomingMessage, res: http.ServerResponse, ur
     }
     return;
   }
+  if (path === '/api/supervisor/queue/take' && req.method === 'POST') {
+    // Reprendre un message de la file (geste OpenChamber « Modifier » et
+    // « Envoyer maintenant ») : l'item quitte la file, contenu complet renvoyé.
+    const body = await readBody(req);
+    try {
+      json(res, 200, await takeQueuedSupervisor(String(body.itemId ?? '')));
+    } catch (e) {
+      json(res, 502, { error: String(e) });
+    }
+    return;
+  }
   if (path === '/api/supervisor/revert' && req.method === 'POST') {
     const body = await readBody(req);
     try {
@@ -257,19 +261,11 @@ async function handleApi(req: http.IncomingMessage, res: http.ServerResponse, ur
   }
   if (path.startsWith('/api/criteria/') && req.method === 'POST') {
     // tools criteria de l'agent principal (plugin superviseur-criteria) : hors
-    // /api/tools (réservée au chat) ; la machine à états est dans criteria.mts
+    // /api/tools ; la machine à états est dans criteria.mts, le jugement
+    // (criteria_set_status) appartient à l'agent lui-même
     const name = path.slice('/api/criteria/'.length);
     const body = await readBody(req);
     const result = await runCriteriaTool(name, String(body.sessionId ?? ''), (body.args ?? {}) as Record<string, unknown>);
-    json(res, 200, result);
-    return;
-  }
-  if (path.startsWith('/api/verifier/') && req.method === 'POST') {
-    // lectures bornées du vérificateur (plugin superviseur-verifier) : l'appelant
-    // doit être le vérificateur mappé de la tâche
-    const name = path.slice('/api/verifier/'.length);
-    const body = await readBody(req);
-    const result = await runVerifierTool(name, String(body.sessionId ?? ''), (body.args ?? {}) as Record<string, unknown>);
     json(res, 200, result);
     return;
   }
@@ -301,26 +297,6 @@ async function handleApi(req: http.IncomingMessage, res: http.ServerResponse, ur
     }
     const result = await setTaskModel(sessionId, body.model == null ? '' : String(body.model));
     json(res, result.ok ? 200 : 400, result);
-    return;
-  }
-  if (path === '/api/fleet/supervision' && req.method === 'POST') {
-    // bascule de supervision d'une conversation existante (supervision opt-in,
-    // docs/analyses/mvp1/supervision-bascule.md) : le choix est persisté en BD,
-    // la flotte le relit à la prochaine frame ; aucun redémarrage de session.
-    const body = await readBody(req);
-    const sessionId = String(body.sessionId ?? '').trim();
-    const supervised = body.supervised === true;
-    if (!sessionId) { json(res, 400, { error: 'sessionId requis' }); return; }
-    const supervisorId = getSupervisorSession()?.oc_session_id;
-    const row = currentFleet().rows.find(r => r.id === sessionId);
-    if (sessionId === supervisorId || row?.dir === SUPERVISOR_DIR) {
-      json(res, 400, { error: 'not_task' });
-      return;
-    }
-    if (!row) { json(res, 404, { error: 'session inconnue' }); return; }
-    const out = await applySupervisionToggle(sessionId, supervised);
-    void pollOnce();   // la prochaine flotte porte le nouvel état (SSE en 500 ms)
-    json(res, 200, out);
     return;
   }
   if (path === '/api/fleet/criteria' && req.method === 'GET') {
@@ -444,13 +420,11 @@ async function handleApi(req: http.IncomingMessage, res: http.ServerResponse, ur
       const promptText = text || 'Voir la pièce jointe.';
       logEvent(sessionId, 'note', '→ prompt : ' + promptText.slice(0, 120)
         + (files.length ? ` (+${files.length} fichier${files.length > 1 ? 's' : ''})` : ''));
-      // encadrement du propriétaire SEULEMENT si la conversation est supervisée
-      // (supervision opt-in) : une conversation non supervisée reçoit le texte
-      // TEL QUEL ; le texte brut reste dans le journal au-dessus
+      // le texte part tel quel (encadrement OWNER_WRAP retiré, 2026-11-12)
       const out = await relay(`/api/session/${sessionId}/prompt`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          text: ownerPromptFor(sessionId, promptText),
+          text: promptText,
           delivery: body.delivery ?? 'steer',
           ...(files.length ? { files } : {}),
         }),
@@ -501,7 +475,10 @@ async function handleApi(req: http.IncomingMessage, res: http.ServerResponse, ur
     // Fermer = retirer du Superviseur. PAS d'archivage : une activité future dans
     // OpenChamber (nouveau prompt) remet la carte dans la flotte (ouverture à la volée).
     upsertTaskState(sessionId, { closedAt: Date.now(), closure: 'terminé' });
-    logEvent(sessionId, 'done', note ? 'fermé : ' + note.slice(0, 80) : pending ? 'fermé en abandonnant la question' : 'fermé du Superviseur');
+    logEvent(sessionId, 'done', note ? 'fermé : ' + note.slice(0, 80) : pending.forms.length ? 'fermé en abandonnant la question' : pending.permissions ? 'fermé en abandonnant une permission' : 'fermé du Superviseur');
+    // Geste OpenChamber best-effort (lu + In work retiré) : la fermeture est
+    // déjà effective en base, un échec ne fait qu'ajouter une ligne au journal.
+    await markTaskSessionRead(sessionId);
     json(res, 200, { ok: true });
     return;
   }

@@ -20,15 +20,13 @@ const model = (providerID: string, modelID: string, name: string, providerName: 
 });
 
 const config: SupervisorConfig = {
-  prefs: { chatModel: null, chatAgent: null, taskModel: null, companionModel: null },
+  prefs: { chatModel: null, chatAgent: null, taskModel: null },
   defaults: {
     chatAgent: null,
     chatAgentLabel: 'Orchestrateur (recommandé)',
     chatModel: 'openai/gpt-fast',
     taskModel: null,
     taskModelLabel: 'Défaut de la session',
-    companionModel: null,
-    companionModelLabel: 'Défaut OpenChamber',
   },
   models: [
     model('openai', 'gpt-fast', 'GPT Fast', 'OpenAI'),
@@ -77,7 +75,7 @@ describe('libellés', () => {
 });
 
 describe('ConfigFields', () => {
-  test('les trois modèles et l’agent sont des réglages distincts', () => {
+  test('l agent du chat et les deux modèles sont des réglages distincts', () => {
     const html = renderToStaticMarkup(createElement(ConfigFields, {
       config,
       values: prefsToValues(config),
@@ -87,11 +85,12 @@ describe('ConfigFields', () => {
     expect(html).toContain('data-testid="config-agent"');
     expect(html).toContain('data-testid="config-chat-model"');
     expect(html).toContain('data-testid="config-task-model"');
-    expect(html).toContain('data-testid="config-companion-model"');
+    // le modèle du compagnon a disparu avec les sous-agents (2026-11-12)
+    expect(html).not.toContain('config-companion-model');
+    expect(html).not.toContain('Compagnon');
     expect(html).toContain('Orchestrateur (recommandé)');
     expect(html).toContain('Défaut (GPT Fast)');
     expect(html).toContain('Défaut de la session');
-    expect(html).toContain('Défaut OpenChamber');
     expect(html).toContain('GPT Strong');
     expect(html).toContain('<optgroup label="OpenAI">');
   });
