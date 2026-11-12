@@ -140,6 +140,15 @@ CREATE TABLE IF NOT EXISTS fleet_seen (
   last_update_at INTEGER,            -- dernière activité connue (statut)
   updated_at INTEGER NOT NULL
 );
+-- Dernier plan connu par session (repli du lecteur de plan, plan.mts) : le
+-- cache mémoire du plan est invalidé à chaque événement message.* et la
+-- fenêtre de lecture est bornée, le dernier planwrite peut donc sortir de la
+-- fenêtre au milieu d'un tour. Ce repli doit survivre au redémarrage du daemon.
+CREATE TABLE IF NOT EXISTS plan_known (
+  session_id TEXT PRIMARY KEY,
+  items TEXT NOT NULL,               -- JSON PlanItem[] (plan.mts)
+  at INTEGER NOT NULL                -- epoch ms du dernier plan connu
+);
 `);
 // objectif courant : une nouvelle consigne change l'objectif, pas seulement le tour
 try { db.exec('ALTER TABLE task_state ADD COLUMN objective TEXT'); } catch { /* colonne déjà présente */ }
@@ -485,6 +494,9 @@ export function migrateTaskSession(oldId: string, newId: string) {
     db.query('UPDATE task_answer SET session_id = ? WHERE session_id = ?').run(newId, oldId);
     // les critères suivent la tâche (refs et états conservés)
     db.query('UPDATE criteria SET task_id = ? WHERE task_id = ?').run(newId, oldId);
+    // le dernier plan connu suit la tâche : la reprise l'affiche tant que le
+    // nouvel agent n'a pas écrit le sien
+    db.query('UPDATE plan_known SET session_id = ? WHERE session_id = ?').run(newId, oldId);
     // le registre suit la tâche : la session de reprise devient la nouvelle
     db.query('UPDATE task_resume SET session_id = ?, session_since = NULL, last_seen_at = NULL WHERE session_id = ?')
       .run(newId, oldId);

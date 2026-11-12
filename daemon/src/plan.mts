@@ -12,7 +12,17 @@
  *
  * Le cache évite de relire 60 messages à chaque tick de flotte. Il est indexé
  * par session et invalidé par les événements `message.*` / fin de tour.
+ *
+ * Leçon du 2026-11-12 (ses_e2fa0f250ffefiYkSzP55eg4ks) : le dernier planwrite
+ * sortait de la fenêtre de lecture dès que le tour dépassait 80 messages, et
+ * le repli « dernier plan connu » lisait un cache que events.mts vient de
+ * vider à chaque événement message.* : plan à zéro au milieu du tour, sans
+ * retour tant que l'agent ne refaisait pas un planwrite. Deux garde-fous :
+ * fenêtre portée au plafond de l'API (200 messages) et repli lastKnown
+ * (mémoire + table plan_known) que invalidatePlan ne touche jamais.
  */
+import { db } from './state.mts';
+
 export type PlanItemStatus = 'pending' | 'in_progress' | 'completed';
 export type PlanItemPriority = 'high' | 'medium' | 'low';
 
@@ -60,7 +70,10 @@ interface WireMessage {
 const STATUSES = new Set<PlanItemStatus>(['pending', 'in_progress', 'completed']);
 const PRIORITIES = new Set<PlanItemPriority>(['high', 'medium', 'low']);
 const CACHE_TTL_MS = 5_000;
-const MAX_MESSAGES = 80;
+/** Plafond du listing OpenChamber (au-delà : « Expected a value less than or
+ *  equal to 200 »). Une fenêtre plus courte faisait sortir le dernier
+ *  planwrite du plan des tours longs (leçon du 2026-11-12). */
+const MAX_MESSAGES = 200;
 
 let base = '';
 export function setBase(b: string) {
@@ -69,6 +82,56 @@ export function setBase(b: string) {
 
 const cache = new Map<string, { at: number; lastUpdateAt: number; value: PlanSnapshot }>();
 const inFlight = new Map<string, Promise<PlanSnapshot>>();
+
+/**
+ * Dernier plan connu par session, HORS cache TTL : invalidatePlan vide le cache
+ * à chaque événement message.* (events.mts), il ne peut donc pas servir de
+ * repli pendant un tour actif, exactement quand le planwrite sort de la
+ * fenêtre de lecture. Persisté dans plan_known (state.mts) pour survivre au
+ * redémarrage du daemon. Un plan ne disparaît jamais de lui-même : il n'est
+ * remplacé que par un planwrite/planupdate, donc le dernier connu EST le plan
+ * courant tant que la fenêtre ne le montre plus.
+ */
+const lastKnown = new Map<string, PlanSnapshot>();
+const PLAN_KNOWN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** Mémorise (et persiste) un plan fraîchement lu dans la fenêtre. */
+function rememberPlan(sessionId: string, snap: PlanSnapshot): void {
+  if (!snap.total) return;
+  const previous = lastKnown.get(sessionId);
+  if (previous && JSON.stringify(previous.items) === JSON.stringify(snap.items)) {
+    lastKnown.set(sessionId, snap); // contenu inchangé : pas de réécriture de la base
+    return;
+  }
+  lastKnown.set(sessionId, snap);
+  try {
+    db.run(
+      'INSERT INTO plan_known (session_id, items, at) VALUES (?, ?, ?)'
+      + ' ON CONFLICT(session_id) DO UPDATE SET items = excluded.items, at = excluded.at',
+      [sessionId, JSON.stringify(snap.items), Date.now()],
+    );
+    db.run('DELETE FROM plan_known WHERE at < ?', [Date.now() - PLAN_KNOWN_TTL_MS]);
+  } catch { /* la mémoire suffit si la base refuse */ }
+}
+
+/** Dernier plan connu : mémoire, puis table plan_known. */
+function recallPlan(sessionId: string): PlanSnapshot | undefined {
+  const memory = lastKnown.get(sessionId);
+  if (memory) return memory;
+  try {
+    const row = db.query('SELECT items, at FROM plan_known WHERE session_id = ?').get(sessionId) as
+      | { items: string; at: number }
+      | null;
+    if (!row) return undefined;
+    const items = normalizePlanItems(JSON.parse(row.items));
+    if (!items.length) return undefined;
+    const snap = snapshotOf(items, row.at);
+    lastKnown.set(sessionId, snap);
+    return snap;
+  } catch {
+    return undefined;
+  }
+}
 
 const PLAN_TOOLS = new Set(['planwrite', 'planupdate']);
 /** sessions créées avant le renommage todo* → plan-* : tool parts anciens */
@@ -123,31 +186,24 @@ function itemsOfPart(part: WirePart): PlanItem[] {
   return normalizePlanItems(raw);
 }
 
-interface PlanExtraction {
-  found: boolean;
-  items: PlanItem[];
-}
-
 /** Dernier `planwrite` d'une fenêtre de messages, quel que soit l'ordre d'entrée. */
-function findPlanItems(messages: WireMessage[]): PlanExtraction {
+function findPlanItems(messages: WireMessage[]): PlanItem[] {
   const ordered = messages
     .map((message, index) => ({ message, index, at: message.time?.created ?? index }))
     .sort((a, b) => a.at - b.at);
-  let found = false;
   let last: PlanItem[] = [];
   for (const { message } of ordered) {
     const parts = Array.isArray(message.content) ? message.content : [];
     for (const part of parts) {
       if (part?.type !== 'tool' || !isPlanTool(part.tool ?? part.name)) continue;
-      found = true;
       last = itemsOfPart(part);
     }
   }
-  return { found, items: last };
+  return last;
 }
 
 export function extractPlanItems(messages: WireMessage[]): PlanItem[] {
-  return findPlanItems(messages).items;
+  return findPlanItems(messages);
 }
 
 export function emptySnapshot(): PlanSnapshot {
@@ -186,14 +242,20 @@ async function fetchSnapshot(sessionId: string): Promise<PlanSnapshot> {
     });
     if (!res.ok) throw new Error(`message → ${res.status}`);
     const body = await res.json() as { data?: WireMessage[] };
-    const extracted = findPlanItems(body.data ?? []);
-    // Dernier planwrite sorti de la fenêtre de 80 messages : garder le dernier
-    // plan connu plutôt que de faire clignoter la carte à zéro.
-    if (!extracted.found) {
-      const previous = cache.get(sessionId)?.value;
-      if (previous?.total) return { ...previous, at: Date.now() };
+    const items = findPlanItems(body.data ?? []);
+    if (items.length) {
+      const snap = snapshotOf(items);
+      rememberPlan(sessionId, snap);
+      return snap;
     }
-    return snapshotOf(extracted.items);
+    // Dernier planwrite sorti de la fenêtre de lecture : garder le dernier plan
+    // connu plutôt que de faire clignoter la carte à zéro. Le repli lit
+    // lastKnown (mémoire puis base) et JAMAIS le cache TTL : events.mts
+    // l'invalide à chaque message du tour, il était donc toujours vide au
+    // moment du repli (plan disparu de ses_e2fa0f2, leçon du 2026-11-12).
+    const remembered = recallPlan(sessionId);
+    if (remembered?.total) return { ...remembered, at: Date.now() };
+    return snapshotOf([]);
   } finally {
     clearTimeout(t);
   }
@@ -219,14 +281,22 @@ export function getPlanSnapshot(sessionId: string, lastUpdateAt?: number, force 
       cache.set(sessionId, { at: Date.now(), lastUpdateAt: lastUpdateAt ?? 0, value });
       return value;
     })
-    .catch(() => hit?.value ?? emptySnapshot())
+    .catch(() => {
+      // instance injoignable ou lecture avortée : dernier plan connu (mémoire
+      // puis base), jamais un plan à zéro à cause d'un accident réseau
+      const remembered = recallPlan(sessionId);
+      if (remembered?.total) return remembered;
+      return hit?.value ?? emptySnapshot();
+    })
     .finally(() => inFlight.delete(sessionId));
   inFlight.set(sessionId, p);
   return p;
 }
 
-/** Pour les tests : vide le cache et les requêtes en vol. */
+/** Pour les tests : vide le cache, le repli mémoire et les requêtes en vol.
+ *  (La table plan_known, elle, survit : c'est le but.) */
 export function resetPlanCache() {
   cache.clear();
+  lastKnown.clear();
   inFlight.clear();
 }
