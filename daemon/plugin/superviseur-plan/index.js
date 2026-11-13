@@ -118,6 +118,26 @@ export default {
   async setup(ctx) {
     const key = (sessionID) => STORAGE_PREFIX + sessionID
 
+    /**
+     * One mutation at a time per session: parallel tool calls (several
+     * planupdates in one turn) would otherwise read-modify-write concurrently
+     * and the last writer would erase the others (seen 2026-11-13 on the
+     * criteria plugin: parallel adds left only the last two). The plugin runs
+     * in a single process: a promise queue per session is enough; the entry
+     * is dropped once the settled queue is no longer ours (no leak).
+     */
+    const queues = new Map()
+    const serialize = (sessionID, fn) => {
+      const prev = queues.get(sessionID) ?? Promise.resolve()
+      const run = prev.then(fn, fn)
+      const settled = run.catch(() => {})
+      queues.set(sessionID, settled)
+      void settled.then(() => {
+        if (queues.get(sessionID) === settled) queues.delete(sessionID)
+      })
+      return run
+    }
+
     /** Read the list for one session from the plugin's durable storage. */
     const read = async (sessionID) => normalize(await ctx.storage.get(key(sessionID)))
 
@@ -218,11 +238,15 @@ export default {
           additionalProperties: false,
         },
         async execute(input, context) {
-          const todos = normalize(input && input.items)
-          await write(context.sessionID, todos)
-          // `metadata` travels with the tool result, so a client can render the
-          // list structurally instead of parsing the text content.
-          return { content: render(todos), metadata: { todos } }
+          // sérialisé : planwrite et planupdate parallèles composent dans
+          // l'ordre d'arrivée au lieu de s'écraser
+          return serialize(context.sessionID, async () => {
+            const todos = normalize(input && input.items)
+            await write(context.sessionID, todos)
+            // `metadata` travels with the tool result, so a client can render the
+            // list structurally instead of parsing the text content.
+            return { content: render(todos), metadata: { todos } }
+          })
         },
       })
 
@@ -243,23 +267,25 @@ export default {
           additionalProperties: false,
         },
         async execute(input, context) {
-          const todos = await read(context.sessionID)
-          if (todos.length === 0) {
-            return {
-              content: "no plan in this session: create it first with `planwrite`.",
-              metadata: { todos, ok: false },
+          return serialize(context.sessionID, async () => {
+            const todos = await read(context.sessionID)
+            if (todos.length === 0) {
+              return {
+                content: "no plan in this session: create it first with `planwrite`.",
+                metadata: { todos, ok: false },
+              }
             }
-          }
-          const applied = applyUpdates(todos, input && input.updates)
-          if (applied.errors.length > 0) {
-            // nothing is written, the current list is shown next to the errors
-            return {
-              content: ["Nothing applied.", ...applied.errors, "Current list:", render(todos)].join("\n"),
-              metadata: { todos, ok: false, errors: applied.errors },
+            const applied = applyUpdates(todos, input && input.updates)
+            if (applied.errors.length > 0) {
+              // nothing is written, the current list is shown next to the errors
+              return {
+                content: ["Nothing applied.", ...applied.errors, "Current list:", render(todos)].join("\n"),
+                metadata: { todos, ok: false, errors: applied.errors },
+              }
             }
-          }
-          await write(context.sessionID, applied.todos)
-          return { content: render(applied.todos), metadata: { todos: applied.todos } }
+            await write(context.sessionID, applied.todos)
+            return { content: render(applied.todos), metadata: { todos: applied.todos } }
+          })
         },
       })
 

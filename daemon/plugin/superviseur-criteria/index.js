@@ -81,23 +81,47 @@ export default {
   async setup(ctx) {
     const key = (sessionID) => STORAGE_PREFIX + sessionID;
 
+    /**
+     * Une seule écriture à la fois par session : des tool calls lancés en
+     * parallèle (plusieurs criteria_add dans un même tour) lisent-modifient-
+     * écrivent sinon en concurrence et le dernier écrivain écrase les autres
+     * (constaté le 2026-11-13 : des criteria_add parallèles ont réduit la
+     * liste aux deux derniers). Le plugin tourne dans un seul process : une
+     * file de promesses par session suffit ; l'entrée est retirée quand la
+     * queue retombée au repos n'est plus la nôtre (pas de fuite).
+     */
+    const queues = new Map();
+    const serialize = (sessionID, fn) => {
+      const prev = queues.get(sessionID) ?? Promise.resolve();
+      const run = prev.then(fn, fn);
+      const settled = run.catch(() => {});
+      queues.set(sessionID, settled);
+      void settled.then(() => {
+        if (queues.get(sessionID) === settled) queues.delete(sessionID);
+      });
+      return run;
+    };
+
     /** État du critère pour une session, coercé en forme propre. */
     const read = async (sessionID) => normalizeState(await ctx.storage.get(key(sessionID)));
 
-    /** Exécute un changement d'état puis persiste ; renvoie la vue complète. */
-    const apply = async (sessionID, mutation) => {
-      const state = await read(sessionID);
-      try {
-        const row = await mutation(state);
-        await ctx.storage.set(key(sessionID), state);
-        const view = criteriaView(state);
-        return { content: JSON.stringify(view, null, 2), metadata: view };
-      } catch (error) {
-        if (!(error instanceof CriteriaError)) throw error;
-        const data = { ok: false, error: error.code, message: error.message, criteria: listCriteria(state) };
-        return { content: JSON.stringify(data, null, 2), metadata: data };
-      }
-    };
+    /** Exécute un changement d'état puis persiste ; renvoie la vue complète.
+     *  Sérialisé par session : le read-modify-write est atomique face aux
+     *  appels parallèles. */
+    const apply = (sessionID, mutation) =>
+      serialize(sessionID, async () => {
+        const state = await read(sessionID);
+        try {
+          const row = await mutation(state);
+          await ctx.storage.set(key(sessionID), state);
+          const view = criteriaView(state);
+          return { content: JSON.stringify(view, null, 2), metadata: view };
+        } catch (error) {
+          if (!(error instanceof CriteriaError)) throw error;
+          const data = { ok: false, error: error.code, message: error.message, criteria: listCriteria(state) };
+          return { content: JSON.stringify(data, null, 2), metadata: data };
+        }
+      });
 
     await ctx.tool.transform((editor) => {
       editor.add({
@@ -282,10 +306,14 @@ export default {
           additionalProperties: false,
         },
         async execute(input, context) {
-          const state = importCriteria(input?.criteria);
-          await ctx.storage.set(key(context.sessionID), state);
-          const view = criteriaView(state);
-          return { content: JSON.stringify(view, null, 2), metadata: view };
+          // sérialisé : un import qui remplace l'état pendant une mutation
+          // parallèle écraserait son résultat
+          return serialize(context.sessionID, async () => {
+            const state = importCriteria(input?.criteria);
+            await ctx.storage.set(key(context.sessionID), state);
+            const view = criteriaView(state);
+            return { content: JSON.stringify(view, null, 2), metadata: view };
+          });
         },
       });
     });
