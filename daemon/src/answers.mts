@@ -1,17 +1,24 @@
 /**
  * Réponses des tâches au propriétaire (tool `answer`).
  *
- * Une tâche peut envoyer une réponse visible dans le Superviseur :
- * `recordAnswer` la stocke en base (table task_answer), la flotte expose le
- * compteur de réponses non lues de chaque carte, et le panel de détails lit la
- * liste complète. `read_at` passe par « Got it » : la réponse cachée reste
- * consultable dans le journal réaffichable.
+ * Migration « réponses natives session » (décision du propriétaire,
+ * 2026-11-13, même pattern que les critères) : la réponse vit dans le tool
+ * part de la session (metadata {ok, at, text, question} rendu par le plugin
+ * superviseur-task, AUCUN appel daemon). Ce module MOISSONNE ces tool parts
+ * dans la table `task_answer` (dédoublonnés par `part_key`) : la table reste
+ * le store des lecteurs (compteur de non-lues, panel de détails, « Got it »,
+ * migration de session), et l'historique des réponses survit à la destruction
+ * de la session (la reprise moissonne l'ancienne session avant de la remplacer).
  *
- * Le tool appelant est identifié côté daemon : un sessionId qui n'est pas une
- * tâche connue est refusé (not_task), chat de supervision inclus.
+ * Le daemon n'est plus écrivain de la réponse elle-même : il est lecteur,
+ * avec écriture miroir à la lecture (comme criteria_known). La garde
+ * `isTaskSession` disparaît avec l'ancien flux : une session hors flotte qui
+ * répondrait n'afficherait ses réponses nulle part.
+ *
+ * La réponse cachée reste consultable dans le journal réaffichable (`read_at`
+ * passe par « Got it »).
  */
-import { db, getSupervisorSession, getTaskBrief, getTaskResume, getTaskState, logEvent } from './state.mts';
-import { currentFleet } from './fleet.mts';
+import { db, logEvent } from './state.mts';
 
 export interface AnswerRow {
   id: number;
@@ -25,50 +32,135 @@ export interface AnswerRow {
 const MAX_TEXT = 8000;
 const MAX_QUESTION = 500;
 
-/** Le sessionId est-il une tâche (top-level) connue du Superviseur ? */
-export function isTaskSession(sessionId: string): boolean {
-  if (!sessionId) return false;
-  const supervisorId = getSupervisorSession()?.oc_session_id;
-  if (supervisorId && sessionId === supervisorId) return false;
-  // une session de travail a un brief, un état ou une ligne de reprise ; une
-  // tâche ouverte par la flotte en est déjà au moins au premier poll
-  if (getTaskBrief(sessionId)) return true;
-  if (getTaskState(sessionId)) return true;
-  if (getTaskResume(sessionId)) return true;
-  return currentFleet().rows.some((r) => r.id === sessionId);
+const CACHE_TTL_MS = 5_000;
+/** Plafond du listing OpenChamber (au-delà : refus) : même fenêtre que les
+ *  lecteurs de plan et de critères. */
+const MAX_MESSAGES = 200;
+
+interface WirePart {
+  type?: string;
+  tool?: string;
+  name?: string;
+  state?: {
+    status?: string;
+    metadata?: Record<string, unknown>;
+  };
 }
 
-export class AnswerError extends Error {
-  status: number;
-  constructor(message: string, status = 400) {
-    super(message);
-    this.status = status;
+interface WireMessage {
+  id?: string;
+  type?: string;
+  time?: { created?: number };
+  content?: WirePart[];
+}
+
+interface AnswerDraft {
+  partKey: string;
+  at: number;
+  text: string;
+  question: string | null;
+}
+
+let base = '';
+export function setBase(b: string) {
+  base = b.replace(/\/$/, '');
+}
+
+/** Réponses nouvelles format d'un tool part (metadata {ok, at, text, question}). */
+function answersOfPart(part: WirePart, sessionId: string, messageKey: string, partIndex: number): AnswerDraft[] {
+  if (part?.type !== 'tool' || String(part.tool ?? part.name ?? '').trim().toLowerCase() !== 'answer') return [];
+  const meta = (part.state?.metadata ?? {}) as Record<string, unknown>;
+  const text = String(meta.text ?? '').trim();
+  if (!text) return []; // ancien format (réponse daemon) ou partiel : ignoré
+  const at = Number(meta.at) || Date.now();
+  const question = meta.question != null ? String(meta.question).trim().slice(0, MAX_QUESTION) || null : null;
+  return [{
+    partKey: `${sessionId}:${messageKey}:${partIndex}`,
+    at,
+    text: text.slice(0, MAX_TEXT),
+    question,
+  }];
+}
+
+/** Toutes les réponses d'une fenêtre de messages, ordonnées comme le fil. */
+export function extractAnswers(messages: WireMessage[], sessionId: string): AnswerDraft[] {
+  const out: AnswerDraft[] = [];
+  for (const message of messages) {
+    const parts = Array.isArray(message.content) ? message.content : [];
+    const messageKey = String(message.id ?? `t${message.time?.created ?? 0}`);
+    parts.forEach((part, index) => {
+      const draft = answersOfPart(part, sessionId, messageKey, index)[0];
+      if (draft) out.push(draft);
+    });
+  }
+  return out.sort((a, b) => a.at - b.at);
+}
+
+/* --- Cache de moissonnage --- */
+
+const cache = new Map<string, { at: number; lastUpdateAt: number }>();
+const inFlight = new Map<string, Promise<void>>();
+
+export function invalidateAnswers(sessionId?: string) {
+  if (sessionId) cache.delete(sessionId);
+  else cache.clear();
+}
+
+async function fetchAndStore(sessionId: string): Promise<void> {
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), 8000);
+  try {
+    const res = await fetch(`${base}/api/session/${sessionId}/message?limit=${MAX_MESSAGES}&order=desc`, {
+      signal: ctl.signal,
+    });
+    if (!res.ok) throw new Error(`message → ${res.status}`);
+    const body = await res.json() as { data?: WireMessage[] };
+    for (const draft of extractAnswers(body.data ?? [], sessionId)) {
+      const changes = db.query(
+        'INSERT OR IGNORE INTO task_answer (session_id, at, text, question, read_at, part_key) VALUES (?,?,?,?,NULL,?)',
+      ).run(sessionId, draft.at, draft.text, draft.question, draft.partKey).changes;
+      // journal : une seule fois, à la première moisson de la réponse
+      if (changes) {
+        logEvent(sessionId, 'reply', `a répondu au propriétaire : ${draft.text.slice(0, 120)}`, {
+          question: draft.question,
+        });
+      }
+    }
+  } finally {
+    clearTimeout(t);
   }
 }
 
 /**
- * Enregistre une réponse du tool `answer`. La question rattachée est un
- * rappel textuel : le formulaire (question tool) vit côté OpenChamber et peut
- * disparaître, la réponse reste lisible sans lui.
+ * Moissonne les tool parts `answer` de la session dans task_answer. Idempotent
+ * (part_key unique) ; `lastUpdateAt` vient de la flotte : tant qu'il ne bouge
+ * pas, le moissonnage est sauté. Un échec réseau ne perd rien : la table garde
+ * l'état déjà moissonné.
  */
-export function recordAnswer(sessionId: string, text: unknown, question?: unknown): AnswerRow {
-  if (!isTaskSession(sessionId)) {
-    throw new AnswerError('not_task : le tool answer est réservé aux sessions de tâche', 403);
-  }
-  const clean = String(text ?? '').trim();
-  if (!clean) throw new AnswerError('texte requis : une réponse vide ne se lit nulle part');
-  const attached = String(question ?? '').trim().slice(0, MAX_QUESTION) || null;
-  const body = clean.slice(0, MAX_TEXT);
-  const at = Date.now();
-  const out = db.query(
-    'INSERT INTO task_answer (session_id, at, text, question, read_at) VALUES (?,?,?,?,NULL) RETURNING id, session_id, at, text, question, read_at',
-  ).get(sessionId, at, body, attached) as AnswerRow;
-  logEvent(sessionId, 'reply', `a répondu au propriétaire : ${body.slice(0, 120)}`, {
-    answerId: out.id,
-    question: attached,
-  });
-  return out;
+export async function harvestAnswers(sessionId: string, lastUpdateAt?: number): Promise<void> {
+  if (!sessionId) return;
+  const hit = cache.get(sessionId);
+  const now = Date.now();
+  if (hit && lastUpdateAt != null && hit.lastUpdateAt === lastUpdateAt && now - hit.at < 30_000) return;
+  if (hit && now - hit.at < CACHE_TTL_MS) return;
+
+  const pending = inFlight.get(sessionId);
+  if (pending) return pending;
+
+  const p = fetchAndStore(sessionId)
+    .then(() => {
+      cache.set(sessionId, { at: Date.now(), lastUpdateAt: lastUpdateAt ?? 0 });
+    })
+    .catch(() => {
+      // instance injoignable : la table garde l'état déjà moissonné, la
+      // prochaine frame retentera
+    })
+    .finally(() => inFlight.delete(sessionId));
+  inFlight.set(sessionId, p);
+  return p;
 }
+
+/* --- Lecteurs (table) --- */
 
 /** Compteur de réponses non lues par tâche (une seule requête, appelé par frame de flotte). */
 export function unreadAnswerCounts(): Map<string, number> {
@@ -78,12 +170,18 @@ export function unreadAnswerCounts(): Map<string, number> {
   return new Map(rows.map((r) => [r.session_id, r.c]));
 }
 
-/** Toutes les réponses d'une tâche, les plus anciennes d'abord. */
+/** Toutes les réponses d'une tâche, les plus anciennes d'abord (table). */
 export function listAnswers(sessionId: string): AnswerRow[] {
   if (!sessionId) return [];
   return db.query(
     'SELECT id, session_id, at, text, question, read_at FROM task_answer WHERE session_id = ? ORDER BY at ASC, id ASC',
   ).all(sessionId) as AnswerRow[];
+}
+
+/** Réponses à jour : moissonnage puis lecture (panel de détails). */
+export async function getAnswers(sessionId: string): Promise<AnswerRow[]> {
+  await harvestAnswers(sessionId);
+  return listAnswers(sessionId);
 }
 
 /**

@@ -20,6 +20,8 @@ import {
 } from './state.mts';
 import { defaultModelRef, findModel } from './models.mts';
 import { getPlanSnapshot, planStepsOf } from './plan.mts';
+import { criteriaForResume, getCriteriaSnapshot } from './criteria.mts';
+import { harvestAnswers } from './answers.mts';
 
 let base = '';
 export function setBase(b: string) { base = b.replace(/\/$/, ''); }
@@ -108,6 +110,12 @@ export function composeResumePrompt(p: {
   constraints: string[];
   project: string;
   plan?: Array<{ step?: string; done?: boolean }>;
+  criteria?: Array<{
+    ref: string; title: string; detail?: string | null; methods: string[];
+    status: string; evidence?: unknown[]; review?: string | null; review_at?: number | null;
+    created_at?: number; updated_at?: number; version?: number;
+    validated_at?: number | null; validated_work?: string | null; removed_at?: number | null;
+  }>;
   summary?: string;
   next?: string;
   progressDone?: number;
@@ -129,6 +137,25 @@ export function composeResumePrompt(p: {
   if (p.plan?.length) {
     lines.push('', 'Plan connu (rétablis-le avec `planwrite` avant de continuer) :');
     for (const step of p.plan) lines.push(`- ${step.done ? '(fait) ' : '(à refaire si besoin) '}${step.step ?? ''}`.trim());
+  }
+  if (p.criteria?.length) {
+    // la liste COMPLETE (preuves et jugements compris) : criteria_import
+    // restaure l'état exact, pas un raccourci
+    const rows = p.criteria.slice(0, 40).map(c => ({
+      ref: c.ref, title: c.title, detail: c.detail ?? undefined, methods: c.methods,
+      status: c.status, evidence: c.evidence ?? [], review: c.review ?? undefined,
+      review_at: c.review_at ?? undefined, created_at: c.created_at, updated_at: c.updated_at,
+      version: c.version ?? 0, validated_at: c.validated_at ?? undefined,
+      validated_work: c.validated_work ?? undefined, removed_at: c.removed_at ?? undefined,
+    }));
+    lines.push(
+      '',
+      'Critères d\'acceptation connus de la session perdue (rétablis-les avant de continuer) :',
+      'appelle `criteria_import` avec ce JSON EXACT dans le champ criteria, sans le retoucher :',
+      '```json',
+      JSON.stringify(rows),
+      '```',
+    );
   }
   if (p.next) lines.push('', `Prochaine étape suggérée : ${p.next}`);
   lines.push(
@@ -360,12 +387,21 @@ async function restartTask(row: NonNullable<ReturnType<typeof getTaskResume>>, m
   // n'est plus stocké en base depuis le retrait du compagnon)
   const snap = await getPlanSnapshot(row.session_id);
   const plan = planStepsOf(snap).map(s => ({ step: s.step, done: s.done }));
+  // les critères vivent dans la session perdue (plugin superviseur-criteria) :
+  // lecture fraîche des tool parts, repli sur le miroir criteria_known ; la
+  // session pouvant être détruite, le miroir est la seule source fiable
+  await getCriteriaSnapshot(row.session_id, undefined, true).catch(() => null);
+  const criteria = criteriaForResume(row.session_id);
+  // les réponses au propriétaire aussi : moissonnage de l'ancienne session
+  // AVANT sa disparition, l'historique reste visible dans le détail
+  await harvestAnswers(row.session_id).catch(() => undefined);
   const prompt = composeResumePrompt({
     goal,
     doneCriteria: parseList(brief?.done_criteria),
     constraints: parseList(brief?.constraints),
     project: brief?.project_dir ?? row.project_dir ?? '',
     plan,
+    criteria,
     summary: lastSummaryOf(row.session_id),
     progressDone: plan.filter(p => p.done).length,
   });

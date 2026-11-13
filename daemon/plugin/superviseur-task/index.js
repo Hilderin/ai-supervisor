@@ -1,25 +1,27 @@
 /**
  * SuperviseurTask
  * -----------------------------------------------------------------------------
- * Plugin OpenCode v2 chargé globalement (comme superviseur-todolist) : il n'expose
- * qu'un outil, `answer`, disponible dans les sessions de tâche du Superviseur.
+ * Plugin OpenCode v2 chargé globalement : il n'expose qu'un outil, `answer`,
+ * disponible dans les sessions de tâche du Superviseur.
  *
  * `answer` envoie une réponse au propriétaire humain : elle s'affiche dans le
  * panel de détails de la carte du Superviseur, sous le plan. `question` en
  * option rattache la réponse à une question préalablement posée.
  *
- * Sans logique métier : l'appel part vers le daemon Superviseur
- * (POST /api/task/answer), qui valide la session (une tâche top-level connue,
- * jamais le chat de supervision), journalise et stocke.
+ * Migration « réponses natives session » (décision du propriétaire, 2026-11-13,
+ * même pattern que superviseur-criteria) : AUCUN appel au daemon. La réponse
+ * vit dans le tool part de la session (metadata {ok, at, text, question}) :
+ * l'agent peut répondre même quand le Superviseur est fermé, rien n'est perdu.
+ * Le daemon LIT ces tool parts (harvest, daemon/src/answers.mts) pour la flotte
+ * (compteur de non-lues) et le panel de détails ; l'état de lecture (« Got it »)
+ * reste daemon, c'est un état du propriétaire.
  *
  * Le bilan final de la tâche reste une réponse dans la session OpenChamber :
  * il ne passe PAS par `answer`.
  *
- * Dependence-free ESM, chargé tel quel : mêmes conventions que le plugin
- * superviseur-todolist (ctx.tool.transform, codemode: false).
+ * Dependence-free ESM, chargé tel quel : mêmes conventions que
+ * superviseur-plan (ctx.tool.transform, codemode: false).
  */
-
-const DAEMON = process.env.SUPERVISEUR_DAEMON ?? "http://127.0.0.1:5180";
 
 const DESCRIPTION = [
   "Envoie une réponse au propriétaire dans le Superviseur, visible dans le panel de détails de la tâche.",
@@ -32,6 +34,9 @@ const DESCRIPTION = [
   "`question` est optionnel : s'il est présent, il rattache la réponse à la question concernée.",
   "Ce tool n'est pas pour le bilan final : il continue de s'écrire en dernier message de la session.",
 ].join(" ");
+
+const MAX_TEXT = 8000;
+const MAX_QUESTION = 500;
 
 export default {
   id: "superviseur-task",
@@ -58,29 +63,17 @@ export default {
           required: ["text"],
           additionalProperties: false,
         },
-        async execute(input, context) {
-          try {
-            const res = await fetch(`${DAEMON}/api/task/answer`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                sessionId: context?.sessionID ?? "",
-                directory: context?.directory ?? "",
-                args: { text: input?.text, question: input?.question },
-              }),
-            });
-            const data = (await res.json().catch(() => null)) ?? { ok: false, error: `réponse illisible (${res.status})` };
-            if (!res.ok) {
-              data.error = data?.error ?? `envoi refusé (${res.status})`;
-            }
-            return {
-              content: JSON.stringify(data, null, 2),
-              metadata: data && typeof data === "object" ? data : { ok: false },
-            };
-          } catch (error) {
-            const data = { ok: false, error: String(error?.message ?? error) };
-            return { content: JSON.stringify(data), metadata: data };
+        async execute(input) {
+          const body = String(input?.text ?? "").trim().slice(0, MAX_TEXT);
+          if (!body) {
+            const data = { ok: false, error: "invalid", message: "texte requis : une réponse vide ne se lit nulle part" };
+            return { content: JSON.stringify(data, null, 2), metadata: data };
           }
+          const attached = String(input?.question ?? "").trim().slice(0, MAX_QUESTION) || null;
+          // la réponse vit dans le tool part (session) : le daemon la lit
+          // (harvest) pour la flotte et le panel de détails
+          const data = { ok: true, at: Date.now(), text: body, question: attached };
+          return { content: JSON.stringify(data, null, 2), metadata: data };
         },
       });
     });

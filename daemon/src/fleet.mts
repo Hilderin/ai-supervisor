@@ -19,7 +19,8 @@ import { setBase as setResumeBase, resumeTick } from './resume.mts';
 import { forgetFleetSeen, getSupervisorSession, listFleetSeen, upsertFleetSeen } from './state.mts';
 import { SUPERVISOR_DIR } from './supervisor.mts';
 import { getPlanSnapshot } from './plan.mts';
-import { criteriaCounts, listCriteria, type CriteriaCounts } from './criteria.mts';
+import { criteriaCounts, readCriteria, type CriteriaCounts } from './criteria.mts';
+import { harvestAnswers } from './answers.mts';
 import { activityOf, activityTracker, type LiveActivity } from './activity.mts';
 import { SessionIssueTracker, type SessionIssue } from './session-issues.mts';
 const sessionIssues = new SessionIssueTracker();
@@ -268,12 +269,24 @@ async function enrichPlanProgress(fleet: Fleet): Promise<void> {
   }
 }
 
-/** Comptes critères par carte : enrichis avec le plan, jamais dans une frame
- *  intermédiaire (même garde anti-flicker que enrichPlanProgress). */
-function enrichCriteriaCounts(fleet: Fleet): void {
+/** Comptes critères par carte : lus du tool part de la session (l'état vit dans
+ *  le plugin superviseur-criteria depuis la migration 2026-11-13). Enrichis avec
+ *  le plan, jamais dans une frame intermédiaire (même garde anti-flicker que
+ *  enrichPlanProgress). */
+async function enrichCriteriaCounts(fleet: Fleet): Promise<void> {
   for (const row of fleet.rows) {
-    const counts = criteriaCounts(listCriteria(row.id));
+    const rows = await readCriteria(row.id, row.lastUpdateAt);
+    const counts = criteriaCounts(rows);
     if (counts.total > 0) row.criteria = counts;
+  }
+}
+
+/** Réponses au propriétaire : moissonnage des tool parts `answer` dans la
+ *  table (réponses natives session, 2026-11-13), AVANT que enrichedFleet lise
+ *  les compteurs de non-lues. Même garde anti-flicker que le plan. */
+async function enrichAnswers(fleet: Fleet): Promise<void> {
+  for (const row of fleet.rows) {
+    await harvestAnswers(row.id, row.lastUpdateAt);
   }
 }
 
@@ -319,7 +332,8 @@ async function runPoll(): Promise<void> {
     persistFleetSeen(fleet);
     await restoreFleetRows(fleet, status, sessionsIndex);
     await enrichPlanProgress(fleet);
-    enrichCriteriaCounts(fleet);
+    await enrichCriteriaCounts(fleet);
+    await enrichAnswers(fleet);
     await enrichActivity(fleet);
     cachedFleet = fleet;
     lastGood = Date.now();

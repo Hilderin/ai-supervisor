@@ -7,7 +7,7 @@ import { readFile } from 'node:fs/promises';
 import { dirname, extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { currentFleet, openchamberUrl, pollOnce, type Fleet } from './fleet.mts';
-import { ackAnswers, AnswerError, listAnswers, recordAnswer, unreadAnswerCounts } from './answers.mts';
+import { ackAnswers, getAnswers, unreadAnswerCounts } from './answers.mts';
 import { getDelivery } from './delivery.mts';
 import { readSessionAsset } from './assets.mts';
 import { openChamberMiniChatUrl } from './openchamber-link.mts';
@@ -16,8 +16,7 @@ import { abortSupervisor, applySupervisorChatConfig, cancelQueuedSupervisor, get
 import { getSupervisorConfig, saveSupervisorConfig } from './prefs.mts';
 import { getTaskModelInfo, setTaskModel } from './task-model.mts';
 import { cancelPendingForms, configureSupervisorMode, pendingFor, runTool, supervisorProjects } from './tools.mts';
-import { runCriteriaTool } from './criteria-tools.mts';
-import { criteriaCounts, listCriteria } from './criteria.mts';
+import { criteriaCounts, readCriteria } from './criteria.mts';
 import { toPromptFiles } from './attachments.mts';
 import { markTaskSessionRead } from './oc-session.mts';
 
@@ -243,32 +242,6 @@ async function handleApi(req: http.IncomingMessage, res: http.ServerResponse, ur
     json(res, 200, result);
     return;
   }
-  if (path === '/api/task/answer' && req.method === 'POST') {
-    // tool `answer` des sessions de tâche (plugin superviseur-task) : la route
-    // n'est PAS sous /api/tools (réservée au chat de supervision) ; le garde
-    // isTaskSession rejette compagnon et chat.
-    const body = await readBody(req);
-    const sessionId = String(body.sessionId ?? '');
-    const args = (body.args ?? {}) as Record<string, unknown>;
-    try {
-      const answer = recordAnswer(sessionId, args.text, args.question);
-      json(res, 200, { ok: true, taskId: sessionId, answerId: answer.id, at: answer.at });
-    } catch (e) {
-      const err = e as AnswerError;
-      json(res, err instanceof AnswerError ? err.status : 500, { ok: false, error: err.message });
-    }
-    return;
-  }
-  if (path.startsWith('/api/criteria/') && req.method === 'POST') {
-    // tools criteria de l'agent principal (plugin superviseur-criteria) : hors
-    // /api/tools ; la machine à états est dans criteria.mts, le jugement
-    // (criteria_set_status) appartient à l'agent lui-même
-    const name = path.slice('/api/criteria/'.length);
-    const body = await readBody(req);
-    const result = await runCriteriaTool(name, String(body.sessionId ?? ''), (body.args ?? {}) as Record<string, unknown>);
-    json(res, 200, result);
-    return;
-  }
   if (path === '/api/fleet/model' && req.method === 'GET') {
     // modèle de la tâche, à la demande : la flotte ne transporte pas la liste
     // des modèles ; le panneau de détail l'affiche et le change ici
@@ -301,18 +274,22 @@ async function handleApi(req: http.IncomingMessage, res: http.ServerResponse, ur
   }
   if (path === '/api/fleet/criteria' && req.method === 'GET') {
     // liste détaillée des critères d'une tâche, à la demande (la flotte ne
-    // transporte que les comptes) ; rechargée quand lastUpdateAt change
+    // transporte que les comptes) ; rechargée quand lastUpdateAt change.
+    // L'état vit dans la session (plugin superviseur-criteria) : lecture des
+    // tool parts par criteria.mts, repli criteria_known.
     const sessionId = (url.searchParams.get('sessionId') ?? '').trim();
     if (!sessionId) { json(res, 400, { error: 'sessionId requis' }); return; }
-    const rows = listCriteria(sessionId);
+    const rows = await readCriteria(sessionId);
     json(res, 200, { sessionId, criteria: rows, counts: criteriaCounts(rows) });
     return;
   }
   if (path === '/api/fleet/answers' && req.method === 'GET') {
     // panel de détails : toutes les réponses de la tâche, lues et non lues.
+    // Réponses natives session (2026-11-13) : moissonnage des tool parts `answer`
+    // puis lecture de la table (historique pré-migration compris).
     const sessionId = (url.searchParams.get('sessionId') ?? '').trim();
     if (!sessionId) { json(res, 400, { error: 'sessionId requis' }); return; }
-    json(res, 200, { sessionId, answers: listAnswers(sessionId) });
+    json(res, 200, { sessionId, answers: await getAnswers(sessionId) });
     return;
   }
   if (path === '/api/fleet/answers/ack' && req.method === 'POST') {

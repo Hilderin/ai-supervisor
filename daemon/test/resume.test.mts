@@ -107,6 +107,7 @@ describe('prompt de reprise', () => {
       constraints: ['ne rien casser'],
       project: 'proj',
       plan: [{ step: 'Étape 1', done: true }, { step: 'Étape 2', done: false }],
+      criteria: [{ ref: 'AC-01', title: 'Tests passent', methods: ['unit_test'], status: 'validated' }],
       summary: 'résumé précédent',
     });
     expect(p).toContain('Objectif : Livrer X');
@@ -115,6 +116,10 @@ describe('prompt de reprise', () => {
     expect(p).toContain('(à refaire si besoin) Étape 2');
     expect(p).toContain('session précédente');
     expect(p).toContain('résumé précédent');
+    // les critères partent en JSON complet pour criteria_import
+    expect(p).toContain('criteria_import');
+    expect(p).toContain('"ref":"AC-01"');
+    expect(p).toContain('"status":"validated"');
   });
 });
 

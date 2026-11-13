@@ -5,10 +5,12 @@
  */
 import { deliveryEventRelevant, invalidateDelivery } from './delivery.mts';
 import { invalidatePlan } from './plan.mts';
+import { invalidateCriteria } from './criteria.mts';
+import { invalidateAnswers } from './answers.mts';
 
 export interface EventFrame { type?: string; data?: Record<string, unknown> }
 
-/** invalide la livraison et le plan concernés par la frame SSE */
+/** invalide la livraison, le plan, les critères et les réponses concernés par la frame SSE */
 export function ingestEvent(frame: EventFrame): void {
   const type = String(frame.type ?? '');
   const data = frame.data ?? {};
@@ -18,5 +20,7 @@ export function ingestEvent(frame: EventFrame): void {
   if (deliveryEventRelevant(type)) invalidateDelivery(sid || undefined);
   if (/^message\./.test(type) || /^session\.(text\.|step\.ended$|idle$)/.test(type)) {
     invalidatePlan(sid || undefined);
+    invalidateCriteria(sid || undefined);
+    invalidateAnswers(sid || undefined);
   }
 }

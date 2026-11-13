@@ -1,7 +1,7 @@
 /**
  * SuperviseurCriteria
  * -----------------------------------------------------------------------------
- * Plugin OpenCode v2 chargé globalement (comme superviseur-task) : il expose à
+ * Plugin OpenCode v2 chargé globalement (comme superviseur-plan) : il expose à
  * l'agent d'une tâche du Superviseur les outils des critères d'acceptation :
  *
  *   - `criteria_list`         lire la liste complète (lecture, ne déclenche rien)
@@ -12,22 +12,39 @@
  *   - `criteria_to_validate`  soumettre une preuve : « à faire » ou « à corriger »
  *                             devient « à valider »
  *   - `criteria_set_status`   juger : « validé » ou « à corriger » (raison)
+ *   - `criteria_import`       remplacer la liste entière (reprise automatique :
+ *                             le daemon réinjecte le dernier état connu de la
+ *                             tâche perdue dans la session neuve)
+ *
+ * Migration « critères natifs session » (décision du propriétaire, 2026-11-13) :
+ * la machine à états vit DANS le plugin (state.js), l'état dans le storage du
+ * plugin (`ctx.storage`, clé `session/<sessionID>`, mêmes conventions que
+ * superviseur-plan). AUCUN appel au daemon : les outils marchent même quand le
+ * Superviseur est fermé. Le daemon LIT la liste (metadata de chaque résultat,
+ * forme {ok, criteria, counts}) dans les tool parts de la session pour la
+ * flotte et le détail de la carte.
  *
  * L'agent est SON PROPRE juge (plus de sous-agent vérificateur) : les
  * instructions d'usage honnête vivent dans les descriptions des tools. Le
  * propriétaire lit la liste, les preuves et les notes : une validation à tort
  * se voit.
  *
- * Sans logique métier : l'appel part vers le daemon Superviseur
- * (POST /api/criteria/:name), qui valide la session (une tâche connue, jamais
- * le chat de supervision), applique la machine à états et répond avec la liste
- * à jour.
- *
- * Dependence-free ESM, chargé tel quel : mêmes conventions que superviseur-task
+ * Dependence-free ESM (node:fs, node:path, node:child_process seulement),
+ * chargé tel quel : mêmes conventions que superviseur-plan
  * (ctx.tool.transform, codemode: false).
  */
 
-const DAEMON = process.env.SUPERVISEUR_DAEMON ?? "http://127.0.0.1:5180";
+import {
+  CriteriaError, addCriterion, criteriaView, importCriteria, listCriteria,
+  normalizeState, removeCriterion, setStatusCriterion, statusLabel,
+  submitEvidence, updateCriterion,
+} from './state.js';
+
+/** Storage keys are namespaced per session inside the plugin's own store. */
+const STORAGE_PREFIX = "session/";
+
+/** Upper bound on the criteria rendered into the model context, to bound tokens. */
+const MAX_INJECTED = 24;
 
 const METHODS =
   "unit_test, e2e, browser_nav, screenshot, human, text, code_excerpt, artifact, command, diff, doc";
@@ -54,28 +71,31 @@ const COMMON = {
   additionalProperties: false,
 };
 
+/** Rendu compact de la liste pour l'injection de contexte (survit à la compaction). */
+const render = (rows) =>
+  rows.map((c) => `- ${c.ref} (${statusLabel(c.status)}) ${c.title}`).join("\n");
+
 export default {
   id: "superviseur-criteria",
 
   async setup(ctx) {
-    /** Appel daemon commun : la route applique la machine à états et répond. */
-    const call = async (name, input, context) => {
+    const key = (sessionID) => STORAGE_PREFIX + sessionID;
+
+    /** État du critère pour une session, coercé en forme propre. */
+    const read = async (sessionID) => normalizeState(await ctx.storage.get(key(sessionID)));
+
+    /** Exécute un changement d'état puis persiste ; renvoie la vue complète. */
+    const apply = async (sessionID, mutation) => {
+      const state = await read(sessionID);
       try {
-        const res = await fetch(`${DAEMON}/api/criteria/${name}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            sessionId: context?.sessionID ?? "",
-            directory: context?.directory ?? "",
-            args: input ?? {},
-          }),
-        });
-        const data = (await res.json().catch(() => null)) ?? { ok: false, error: `réponse illisible (${res.status})` };
-        if (!res.ok) data.error = data?.error ?? `appel refusé (${res.status})`;
-        return { content: JSON.stringify(data, null, 2), metadata: data };
+        const row = await mutation(state);
+        await ctx.storage.set(key(sessionID), state);
+        const view = criteriaView(state);
+        return { content: JSON.stringify(view, null, 2), metadata: view };
       } catch (error) {
-        const data = { ok: false, error: String(error?.message ?? error) };
-        return { content: JSON.stringify(data), metadata: data };
+        if (!(error instanceof CriteriaError)) throw error;
+        const data = { ok: false, error: error.code, message: error.message, criteria: listCriteria(state) };
+        return { content: JSON.stringify(data, null, 2), metadata: data };
       }
     };
 
@@ -89,7 +109,9 @@ export default {
         options: { codemode: false, permission: "criteria_list" },
         input: { type: "object", properties: {}, additionalProperties: false },
         async execute(input, context) {
-          return call("criteria_list", {}, context);
+          const state = await read(context.sessionID);
+          const view = criteriaView(state);
+          return { content: JSON.stringify(view, null, 2), metadata: view };
         },
       });
 
@@ -117,7 +139,7 @@ export default {
           additionalProperties: false,
         },
         async execute(input, context) {
-          return call("criteria_add", input, context);
+          return apply(context.sessionID, async (state) => addCriterion(state, input ?? {}));
         },
       });
 
@@ -130,7 +152,7 @@ export default {
         options: { codemode: false, permission: "criteria_remove" },
         input: COMMON,
         async execute(input, context) {
-          return call("criteria_remove", input, context);
+          return apply(context.sessionID, async (state) => removeCriterion(state, input?.ref));
         },
       });
 
@@ -159,7 +181,7 @@ export default {
           additionalProperties: false,
         },
         async execute(input, context) {
-          return call("criteria_update", input, context);
+          return apply(context.sessionID, async (state) => updateCriterion(state, input?.ref, input ?? {}));
         },
       });
 
@@ -198,7 +220,9 @@ export default {
           additionalProperties: false,
         },
         async execute(input, context) {
-          return call("criteria_to_validate", input, context);
+          const projectDir = context?.directory ?? "";
+          return apply(context.sessionID, async (state) =>
+            submitEvidence(state, input?.ref, input?.evidence, projectDir || undefined));
         },
       });
 
@@ -207,8 +231,8 @@ export default {
         description: [
           REFERENCE,
           "JUGE le critère {ref, status: \"validated\" | \"to_fix\", note} après avoir vérifié sa preuve (criteria_to_validate) ou le travail directement.",
-          "status=\"validated\" : le critère est atteint et vérifié. note = ce que tu as réellement vérifié (test passé, fichier consulté, rendu contrôlé) ; une note vide ne prouve rien.",
-          "status=\"to_fix\" : le critère n'est pas atteint ou la preuve ne tient pas. note = la raison, OBLIGATOIRE : elle guide la correction et reste visible du propriétaire. Corrige puis resoumets une preuve (criteria_to_validate) et re-juge.",
+          'status="validated" : le critère est atteint et vérifié. note = ce que tu as réellement vérifié (test passé, fichier consulté, rendu contrôlé) ; une note vide ne prouve rien.',
+          'status="to_fix" : le critère n\'est pas atteint ou la preuve ne tient pas. note = la raison, OBLIGATOIRE : elle guide la correction et reste visible du propriétaire. Corrige puis resoumets une preuve (criteria_to_validate) et re-juge.',
           "Interdits : valider un critère sans vérification réelle, valider « pour avancer », ou réutiliser une preuve d'un autre critère. En cas de doute : « to_fix » avec la raison.",
           "« À valider » ne se pose pas ici : il vient de criteria_to_validate (une preuve est exigée).",
         ].join(" "),
@@ -231,8 +255,64 @@ export default {
           additionalProperties: false,
         },
         async execute(input, context) {
-          return call("criteria_set_status", input, context);
+          const projectDir = context?.directory ?? "";
+          return apply(context.sessionID, async (state) =>
+            setStatusCriterion(state, input?.ref, input?.status, input?.note, projectDir || undefined));
         },
+      });
+
+      editor.add({
+        name: "criteria_import",
+        description: [
+          "Remplace la liste complète des critères de la session par celle fournie {criteria: [...]}.",
+          "Usage borné : la reprise automatique d'une tâche (le message de reprise porte la liste connue de la session précédente).",
+          "Ne l'utilise QUE sur instruction explicite du message de reprise : un import remplace l'état courant, preuves et jugements compris.",
+        ].join(" "),
+        options: { codemode: false, permission: "criteria_import" },
+        input: {
+          type: "object",
+          properties: {
+            criteria: {
+              type: "array",
+              description: "La liste complète à installer (critères avec ref, title, methods, status, evidence...).",
+              items: { type: "object" },
+            },
+          },
+          required: ["criteria"],
+          additionalProperties: false,
+        },
+        async execute(input, context) {
+          const state = importCriteria(input?.criteria);
+          await ctx.storage.set(key(context.sessionID), state);
+          const view = criteriaView(state);
+          return { content: JSON.stringify(view, null, 2), metadata: view };
+        },
+      });
+    });
+
+    // Réinjection compacte avant chaque requête modèle : la liste survit à la
+    // compaction (même mécanisme que superviseur-plan). Ligne par critère,
+    // plafonnée : le détail complet reste dans criteria_list.
+    await ctx.session.hook("context", async (event) => {
+      const state = await read(event.sessionID);
+      const rows = listCriteria(state);
+      if (rows.length === 0) return;
+
+      const shown = rows.slice(0, MAX_INJECTED);
+      const remaining = rows.length - shown.length;
+      const done = rows.filter((c) => c.status === "validated").length;
+
+      event.system.push({
+        type: "text",
+        text: [
+          "<criteria_list>",
+          `Critères d'acceptation : ${done}/${rows.length} validés. Détail et preuves : criteria_list.`,
+          render(shown),
+          remaining > 0 ? `... et ${remaining} autres` : "",
+          "</criteria_list>",
+        ]
+          .filter(Boolean)
+          .join("\n"),
       });
     });
   },

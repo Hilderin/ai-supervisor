@@ -529,3 +529,61 @@ Fichiers :
 - tests : `daemon/test/criteria.test.mts`, `daemon/test/criteria-flow.test.mts`, `daemon/test/plan.test.mts`, `ui/src/components/CriteriaSection.test.tsx` ;
 
 Déploiement noté : la config globale OpenCode (`~/.config/opencode/opencode.jsonc`) référence les plugins `superviseur-plan`, `superviseur-criteria` et `superviseur-verifier` ; un redémarrage d'OpenCode et du daemon est nécessaire au passage en production.
+
+## 13. Migration « critères natifs session » (réalisée le 2026-11-13)
+
+> Cette section est l'état ACTUEL. Les sections 0 à 12 décrivent l'historique
+> (y compris le vérificateur, retiré le 2026-11-12 : voir
+> `simplification-sous-agents.md`) et restent valables pour les transitions,
+> les méthodes et les preuves.
+
+Décision du propriétaire (2026-11-13) : les critères ne dépendent plus du
+daemon, ils vivent dans la session comme le plan. Motivation : le plan
+(`superviseur-plan`) marche daemon fermé, les critères non ; l'agent doit
+pouvoir relire et faire progresser ses critères même quand le Superviseur est
+fermé.
+
+Ce qui change :
+
+- La machine à états vit DANS le plugin : `daemon/plugin/superviseur-criteria/state.js`
+  (module pur, testé sans base ni OpenCode), l'état dans le storage du plugin
+  (`ctx.storage`, clé `session/<sessionID>`), mêmes conventions que
+  superviseur-plan. AUCUN appel réseau : la route `POST /api/criteria/:name`
+  et `criteria-tools.mts` sont supprimées.
+- Chaque tool criteria rend la liste complète dans le metadata de son résultat
+  (`{ok, criteria, counts}`) : le daemon LIT ce metadata dans les tool parts
+  des messages (`daemon/src/criteria.mts` réécrit en lecteur), exactement comme
+  `plan.mts` lit `planwrite`. Cache + invalidation sur `message.*` (events.mts),
+  repli « dernier état connu » en mémoire + table `criteria_known` (miroir du
+  lecteur, même logique que `plan_known`), journal des transitions en diff
+  contre le miroir (une première lecture ne journalise rien).
+- La garde `isTaskSession` disparaît : le plugin est ungated (comme le plan) ;
+  l'orchestrateur garde ses tools criteria désactivés dans son frontmatter
+  (verrouillé par `criteriaGuidance.test.mts`).
+- Compteur de refs : plus de `criteria_seq` en base ; la prochaine ref est
+  `max(refs connues, retraits compris) + 1` calculée dans le plugin. Un
+  `criteria_import` continue au-delà du max importé.
+- Reprise automatique : le lecteur réinjecte les critères dans la session
+  neuve. `restartTask` lit l'état (lecture fraîche des tool parts, repli
+  miroir `criteria_known`, repli final archive `criteria` pour les tâches
+  pré-migration), puis `composeResumePrompt` embarque la liste complète en
+  JSON et ordonne `criteria_import` (l'agent installe, le daemon ne peut pas
+  écrire dans le storage d'une session). `criteria_known` ne suit PAS la
+  migration de session : la reprise lit l'ANCIEN id. Entre la reprise et le
+  premier `criteria_import`, la carte affiche 0 critère (fenêtre de quelques
+  secondes).
+- L'ancienne table `criteria` devient une archive (plus écrite), repli de
+  `criteriaForResume`. Les outils et leurs sémantiques (transitions, plafond
+  de 12 non validés, preuves, suppression douce) sont INCHANGÉS pour l'agent ;
+  le prompt de création de tâche (`composePrompt`) reste inchangé.
+- Tests : `daemon/test/criteria-state.test.mts` (machine du plugin, sans base),
+  `daemon/test/criteria-reader.test.mts` (lecteur daemon), `criteria.test.mts`
+  et `criteria-flow.test.mts` supprimés avec la machine daemon. Les textes
+  figés de `criteriaGuidance.test.mts` sont conservés à l'identique.
+
+Le même pattern est appliqué le jour même au tool `answer`
+(`superviseur-task`) : la réponse vit dans le tool part (`{ok, at, text,
+question}`, aucun appel daemon, route `POST /api/task/answer` supprimée), le
+daemon la MOISSONNE dans `task_answer` (dédoublonnage `part_key`, l'état de
+lecture « Got it » reste daemon). La reprise moissonne l'ancienne session
+avant `migrateTaskSession`. Voir la section `Tool answer` de `AGENTS.md`.

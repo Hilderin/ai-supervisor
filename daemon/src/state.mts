@@ -97,13 +97,15 @@ CREATE TABLE IF NOT EXISTS task_answer (
   at INTEGER NOT NULL,               -- epoch ms
   text TEXT NOT NULL,                -- réponse de l'agent (tronquée)
   question TEXT,                     -- rattachement optionnel à une question posée
-  read_at INTEGER                    -- epoch ms de lecture (« Got it »), NULL = non lue
-);
+  read_at INTEGER,                   -- epoch ms de lecture (« Got it »), NULL = non lue
+  part_key TEXT                      -- clé de dédoublonnage du moissonnage tool part
+);                                  -- (réponses natives session, 2026-11-13) ; NULL = ligne pré-migration
 CREATE INDEX IF NOT EXISTS idx_task_answer_session ON task_answer(session_id, at);
--- Critères d'acceptation d'une tâche (spec : docs/analyses/mvp1/criteres-acceptation.md).
--- Le statut n'est jamais écrit directement : uniquement via les transitions de
--- daemon/src/criteria.mts (tools criteria de l'agent, dont criteria_set_status
--- pour le jugement).
+-- Critères d'acceptation : ANCIENNE table (machine à états côté daemon).
+-- Depuis la migration « critères natifs session » (2026-11-13), l'état vit
+-- dans le storage du plugin superviseur-criteria et le daemon le LIT dans les
+-- tool parts (daemon/src/criteria.mts). Cette table reste en archive : repli
+-- de criteriaForResume pour les tâches créées avant la migration.
 CREATE TABLE IF NOT EXISTS criteria (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   task_id TEXT NOT NULL,             -- suit la tâche migrée (migrateTaskSession)
@@ -149,6 +151,16 @@ CREATE TABLE IF NOT EXISTS plan_known (
   items TEXT NOT NULL,               -- JSON PlanItem[] (plan.mts)
   at INTEGER NOT NULL                -- epoch ms du dernier plan connu
 );
+-- Derniers critères connus par session (repli du lecteur, criteria.mts) : même
+-- logique que plan_known. Sert aussi à la reprise automatique : la session
+-- perdue pouvant être détruite, le miroir est la seule source fiable pour
+-- réinjecter les critères dans la session neuve (criteria_import). La clé ne
+-- suit PAS la migration de session : la reprise lit l'ancien id puis sème.
+CREATE TABLE IF NOT EXISTS criteria_known (
+  session_id TEXT PRIMARY KEY,
+  criteria TEXT NOT NULL,            -- JSON CriterionRow[] (criteria.mts)
+  at INTEGER NOT NULL                -- epoch ms du dernier état connu
+);
 `);
 // objectif courant : une nouvelle consigne change l'objectif, pas seulement le tour
 try { db.exec('ALTER TABLE task_state ADD COLUMN objective TEXT'); } catch { /* colonne déjà présente */ }
@@ -156,6 +168,9 @@ try { db.exec('ALTER TABLE task_state ADD COLUMN objective_version INTEGER'); } 
 try { db.exec('ALTER TABLE task_state ADD COLUMN last_user_id TEXT'); } catch { /* colonne déjà présente */ }
 // compteur des refs de critères (AC-01, AC-02, ...) : un retrait ne libère pas son numéro
 try { db.exec('ALTER TABLE task_state ADD COLUMN criteria_seq INTEGER'); } catch { /* colonne déjà présente */ }
+// clé de dédoublonnage du moissonnage des réponses (tool part `answer`, réponses natives session)
+try { db.exec('ALTER TABLE task_answer ADD COLUMN part_key TEXT'); } catch { /* colonne déjà présente */ }
+try { db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_task_answer_part ON task_answer(part_key) WHERE part_key IS NOT NULL'); } catch { /* index déjà présent */ }
 // colonnes critères (version de contenu, staleness, suppression douce)
 try { db.exec('ALTER TABLE criteria ADD COLUMN version INTEGER NOT NULL DEFAULT 0'); } catch { /* colonne déjà présente */ }
 try { db.exec('ALTER TABLE criteria ADD COLUMN validated_at INTEGER'); } catch { /* colonne déjà présente */ }
@@ -492,8 +507,10 @@ export function migrateTaskSession(oldId: string, newId: string) {
     // les réponses au propriétaire suivent la tâche : elles restent visibles
     // dans le détail (rien ne dit qu'elles ont déjà été lues)
     db.query('UPDATE task_answer SET session_id = ? WHERE session_id = ?').run(newId, oldId);
-    // les critères suivent la tâche (refs et états conservés)
-    db.query('UPDATE criteria SET task_id = ? WHERE task_id = ?').run(newId, oldId);
+    // les critères ne suivent PAS : ils vivent dans la session (plugin
+    // superviseur-criteria) et criteria_known est lu par l'ANCIEN id pour
+    // réinjecter la liste dans la session neuve (criteria_import, resume.mts).
+    // L'archive `criteria` (pré-migration) reste sur l'ancien id.
     // le dernier plan connu suit la tâche : la reprise l'affiche tant que le
     // nouvel agent n'a pas écrit le sien
     db.query('UPDATE plan_known SET session_id = ? WHERE session_id = ?').run(newId, oldId);
