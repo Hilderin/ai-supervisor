@@ -182,12 +182,15 @@ describe('états terminé et à compléter (déterministes)', () => {
     expect(html).toContain('>Terminé</button>');
   });
 
-  test('à compléter : triangle d avertissement, détail des manques, action Détail', () => {
+  test('à compléter : triangle d avertissement, détail des manques, action Terminé', () => {
     const html = renderCard(row({ plan: plan(2, 4), criteria: crit(1, 2) }));
     expect(html).toContain('à compléter');
     expect(html).toContain('Plan : 2/4 étapes');
     expect(html).toContain('Critères : 1/2 validés');
-    expect(html).toContain('>Détail</button>');
+    // retour du propriétaire (2026-11-14) : le pied clôt la tâche au lieu
+    // d'ouvrir le détail ; ouvrir le détail reste le clic sur la carte
+    expect(html).toContain('>Terminé</button>');
+    expect(html).not.toContain('>Détail</button>');
     // plus d'étoile violette
     expect(html).not.toContain('text-review');
     expect(html).not.toContain('M5 0.2 6.59 2.82');
@@ -197,7 +200,8 @@ describe('états terminé et à compléter (déterministes)', () => {
     const html = renderCard(row());
     expect(html).toContain('à compléter');
     expect(html).toContain('Pas de plan posé');
-    expect(html).toContain('Aucun critère défini');
+    // sans critère défini, ce n'est plus un manque (2026-11-14)
+    expect(html).not.toContain('Aucun critère défini');
   });
 });
 

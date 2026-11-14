@@ -43,6 +43,11 @@ Sans verdict, la carte est TERMINÉE quand, et seulement quand :
 - le plan est posé et à 100 % (`planwrite`) ;
 - tous les critères définis sont validés.
 
+> Amendement du 2026-11-14 (retour du propriétaire) : les critères sont
+> facultatifs. Sans critère défini, le plan à 100 % suffit (`criteriaSatisfied`
+> de `ui/src/lib/fleet.ts`) ; des critères définis doivent tous être validés.
+> Voir [chat-superviseur.md](chat-superviseur.md) section 18.4.
+
 Au repos sans ça (plan incomplet, absent, ou critères non validés), la carte
 passe en **warning** (« à compléter ») : icône triangle orange et détail des
 manques (étapes, critères). L'étoile mauve de « fini, à valider » disparaît.

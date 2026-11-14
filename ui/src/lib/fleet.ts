@@ -9,21 +9,33 @@ export function planComplete(row: FleetRow): boolean {
   return !!plan && plan.total > 0 && plan.done >= plan.total;
 }
 
-/** Tous les critères définis sont-ils validés ? (aucun critère = non, le travail n'est pas cadré) */
+/** Tous les critères définis sont-ils validés ? (aucun critère = non, aucun jugement) */
 export function criteriaAllValidated(row: FleetRow): boolean {
   const crit = row.criteria;
   return !!crit && crit.total > 0 && crit.validated >= crit.total;
 }
 
 /**
- * Terminé est DÉTERMINISTE (2026-11-12, plus de compagnon) : le travail LLM
- * est arrêté, rien n'attend l'humain, le plan est à 100 % et tous les critères
- * sont validés. Un tour relancé (busy) reste en cours, quoi qu'il arrive.
+ * Les critères bloquent-ils la fin ? Sans critère défini, NON : le plan fait
+ * foi (décision du 2026-11-14, une tâche sans critère se termine quand tous ses
+ * todos sont complétés). Des critères définis doivent tous être validés.
+ */
+export function criteriaSatisfied(row: FleetRow): boolean {
+  const crit = row.criteria;
+  if (!crit || crit.total === 0) return true;
+  return crit.validated >= crit.total;
+}
+
+/**
+ * Terminé est DÉTERMINISTE (2026-11-12, plus de compagnon ; amendé le
+ * 2026-11-14) : le travail LLM est arrêté, rien n'attend l'humain, le plan est à
+ * 100 % et les critères, s'il y en a, sont tous validés. Un tour relancé (busy)
+ * reste en cours, quoi qu'il arrive.
  */
 export function isDone(row: FleetRow): boolean {
   if (row.status === 'busy') return false;
   if (isWaiting(row)) return false;
-  return planComplete(row) && criteriaAllValidated(row);
+  return planComplete(row) && criteriaSatisfied(row);
 }
 
 /** Au repos mais pas terminé proprement : plan incomplet, absent, ou critères non validés. */

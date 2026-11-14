@@ -13,6 +13,7 @@ import { ActivityLine } from './ActivityLine';
 import { CardStateIcon } from './CardStateIcon';
 import { Composer } from './Composer';
 import { AnswersSection } from './AnswersSection';
+import { RendersSection } from './RendersSection';
 import { CriteriaSection } from './CriteriaSection';
 import { DeliveryBlock } from './DeliveryBlock';
 import { OpenChamberIcon, QuestionIcon } from './Icons';
@@ -194,6 +195,11 @@ export function TaskInspector({ row, state, onClose, onOpenChamber }: Props) {
         <AnswersSection
           sessionId={row.id}
           refreshKey={`${row.lastUpdateAt ?? 0}:${row.unreadAnswers ?? 0}`}
+        />
+
+        <RendersSection
+          sessionId={row.id}
+          refreshKey={`${row.lastUpdateAt ?? 0}:${row.unreadRenders ?? 0}`}
         />
 
         <DeliveryBlock

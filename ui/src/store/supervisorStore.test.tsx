@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { ComposerActions, CleanChatButton, MessageMeta, SentTaskBlock } from '../components/SupervisorChat';
+import { ComposerActions, MessageMeta, NewConversationButton, SentTaskBlock } from '../components/SupervisorChat';
 import type { Fleet, SupervisorState } from '../types';
 import { useSupervisorStore } from './supervisorStore';
 
@@ -127,10 +127,10 @@ describe('supervisorStore : envoi direct, file et actions', () => {
   });
 });
 
-describe('CleanChatButton : sens explicite', () => {
+describe('NewConversationButton : sens explicite', () => {
   const render = (busy = false, creating = false) =>
     renderToStaticMarkup(
-      <CleanChatButton
+      <NewConversationButton
         busy={busy}
         creating={creating}
         disabled={busy || creating}
@@ -138,11 +138,11 @@ describe('CleanChatButton : sens explicite', () => {
       />,
     );
 
-  test('affiche l’icône seule, avec un libellé accessible explicite', () => {
+  test('affiche son libellé, avec une infobulle qui rassure sur l’ancienne conversation', () => {
     const out = render();
-    expect(out).toContain('aria-label="Nettoyer le chat"');
-    expect(out).toContain('ancienne conversation reste dans OpenChamber');
-    expect(out).not.toContain('>Nettoyer<');
+    expect(out).toContain('Nouvelle conversation');
+    expect(out).toContain('ancienne reste dans OpenChamber');
+    expect(out).toContain('data-testid="supervisor-new"');
   });
 
   test('pendant un tour, l’infobulle explique l’attente', () => {

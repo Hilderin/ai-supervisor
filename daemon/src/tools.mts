@@ -19,7 +19,7 @@ import {
   armTaskResume, getTaskState, getTaskBrief, getSupervisorMode, listTaskBriefs, logEvent,
   putTaskBrief, reviveTaskResume, setSupervisorMode, upsertTaskState,
 } from './state.mts';
-import { isSupervisorBusy, isSupervisorSession, SUPERVISOR_DIR } from './supervisor.mts';
+import { announceSupervisorMode, isSupervisorBusy, isSupervisorSession, SUPERVISOR_DIR } from './supervisor.mts';
 import { taskModelRef } from './prefs.mts';
 import { findModel } from './models.mts';
 import { markTaskSessionRead } from './oc-session.mts';
@@ -176,6 +176,10 @@ export async function configureSupervisorMode(mode: unknown, projectDirectory: u
   const current = getSupervisorMode();
   const directory = selected?.directory ?? current.projectDir;
   setSupervisorMode(mode, directory);
+  // le mode vit dans les instructions durables de la session, pas dans le
+  // message du propriétaire : on l'y réannonce tout de suite (le serveur le
+  // rend au modèle au pas suivant). Un échec ne défait pas le changement.
+  await announceSupervisorMode();
   return { ok: true, mode, projectDirectory: directory };
 }
 

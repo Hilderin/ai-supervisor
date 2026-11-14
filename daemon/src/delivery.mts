@@ -151,8 +151,21 @@ function titleFromHtml(html: string): string {
     || 'Rendu de l’agent').slice(0, 120);
 }
 
-/** La page d'un appel `openchamber_render` terminé, ou null. */
-export function renderOf(part: WirePart): DeliveryRender | null {
+/** Contenu d'un appel `openchamber_render` terminé : page HTML ou source openui-lang. */
+export interface RenderPartHit {
+  kind: 'html' | 'ui';
+  title: string;
+  content: string;
+}
+
+/**
+ * Contenu d'un appel `openchamber_render` terminé, ou null. Source unique de
+ * vérité de la reconnaissance du tool : la livraison n'en garde que la page
+ * HTML, le moissonnage des rendus (renders.mts) capture aussi les pages en
+ * langage ui (le panel de détails les affiche en source, le chat ne les dessine
+ * pas).
+ */
+export function renderContentOf(part: WirePart): RenderPartHit | null {
   if (part?.type !== 'tool') return null;
   const st = part.state;
   if (!st || st.status !== 'completed') return null;
@@ -161,16 +174,25 @@ export function renderOf(part: WirePart): DeliveryRender | null {
   // éventuelle forme générique du tool (openchamber + action)
   if (!isRenderTool(part.tool ?? part.name) && input.action !== 'render.page') return null;
   const params = asRecord(input.parameters) ?? {};
-  const html = String(params.html ?? input.html ?? '');
-  const ui = String(params.ui ?? input.ui ?? '');
-  // Une page en langage ui n'est pas du HTML : l'UI du Superviseur ne la dessine
-  // pas encore (le texte final de l'agent reste la livraison).
-  if (ui.trim() || !html.trim() || html.length > MAX_HTML) return null;
   const meta = asRecord(st.metadata) ?? {};
   const oc = asRecord(meta.openchamber);
   if (oc && oc.ok === false) return null;
-  const title = String(params.title ?? input.title ?? '').trim() || titleFromHtml(html);
-  return { html, title };
+  const title = String(params.title ?? input.title ?? '').trim();
+  const html = String(params.html ?? input.html ?? '');
+  if (html.trim() && html.length <= MAX_HTML) {
+    return { kind: 'html', title: (title || titleFromHtml(html)).slice(0, 120), content: html };
+  }
+  const ui = String(params.ui ?? input.ui ?? '');
+  if (ui.trim() && ui.length <= MAX_HTML) {
+    return { kind: 'ui', title: (title || 'Rendu de l’agent').slice(0, 120), content: ui };
+  }
+  return null;
+}
+
+/** La page HTML d'un appel `openchamber_render` terminé, ou null. */
+export function renderOf(part: WirePart): DeliveryRender | null {
+  const hit = renderContentOf(part);
+  return hit && hit.kind === 'html' ? { html: hit.content, title: hit.title } : null;
 }
 
 /**

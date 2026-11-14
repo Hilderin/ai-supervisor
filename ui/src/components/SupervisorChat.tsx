@@ -9,7 +9,7 @@ import { ChatMarkdown } from './ChatMarkdown';
 import { ComposerInput } from './ComposerInput';
 import { ConfigPopover } from './ConfigPopover';
 import { QuestionBox } from './QuestionBox';
-import { BroomIcon, CopyIcon, OpenChamberIcon, PanelLeftIcon, PencilIcon, RevertIcon, SendIcon, StopIcon } from './Icons';
+import { CopyIcon, OpenChamberIcon, PanelLeftIcon, PencilIcon, PlusIcon, RevertIcon, SendIcon, StopIcon } from './Icons';
 
 interface Props {
   onCollapse: () => void;
@@ -108,8 +108,10 @@ export function ComposerActions({
   );
 }
 
-/** Bouton « Nettoyer » : vide le chat, l'ancienne conversation reste dans OpenChamber. */
-export function CleanChatButton({
+/** Bouton « Nouvelle conversation » : ouvre une conversation neuve, la
+ *  précédente reste dans OpenChamber (même geste que l'ancien balai, rendu
+ *  visible au-dessus de la zone de saisie, 2026-11-14). */
+export function NewConversationButton({
   busy,
   creating,
   disabled,
@@ -124,19 +126,20 @@ export function CleanChatButton({
     <button
       type="button"
       data-testid="supervisor-new"
-      aria-label="Nettoyer le chat"
+      aria-label="Nouvelle conversation"
       title={
         busy
           ? 'Attends la fin du tour'
           : creating
-            ? 'Nettoyage…'
-            : "Nettoyer le chat (l'ancienne conversation reste dans OpenChamber)"
+            ? 'Nouvelle conversation…'
+            : "Nouvelle conversation (l'ancienne reste dans OpenChamber)"
       }
       disabled={disabled}
       onClick={onClick}
-      className="flex h-[22px] w-[22px] shrink-0 cursor-pointer items-center justify-center rounded-[6px] bg-transparent text-muted hover:bg-green-soft hover:text-green disabled:cursor-default disabled:opacity-40"
+      className="flex h-[24px] shrink-0 cursor-pointer items-center gap-[5px] rounded-[7px] border border-border bg-white px-[9px] text-[11.5px] font-semibold text-muted hover:bg-green-soft hover:text-green disabled:cursor-default disabled:opacity-40"
     >
-      <BroomIcon />
+      <PlusIcon />
+      Nouvelle conversation
     </button>
   );
 }
@@ -322,8 +325,8 @@ export function SupervisorChat({ onCollapse, onOpenMiniChat }: Props) {
     el.scrollTop = el.scrollHeight;
   }, [messages.length, busy, stick]);
 
-  // après « Nettoyer », remettre le curseur dans le champ dès que la nouvelle
-  // session est prête (le textarea est désactivé pendant `creating`)
+  // après « Nouvelle conversation », remettre le curseur dans le champ dès que
+  // la nouvelle session est prête (le textarea est désactivé pendant `creating`)
   useEffect(() => {
     if (!focusAfterClean.current || creating) return;
     focusAfterClean.current = false;
@@ -411,12 +414,6 @@ export function SupervisorChat({ onCollapse, onOpenMiniChat }: Props) {
           </div>
         </div>
         <ConfigPopover />
-        <CleanChatButton
-          busy={busy}
-          creating={creating}
-          disabled={sending || busy || creating || reverting}
-          onClick={clean}
-        />
         <button
           type="button"
           data-testid="supervisor-collapse"
@@ -580,6 +577,17 @@ export function SupervisorChat({ onCollapse, onOpenMiniChat }: Props) {
           <span className="h-[3px] w-[34px] rounded-full bg-[#d5dad5] opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100" />
         </div>
         <div className="px-[13px] pb-[10px]">
+          {/* action principale au-dessus de la saisie : la précédente
+              conversation reste dans OpenChamber (design retenu le 2026-11-14,
+              l'ancien balai de l'en-tête avait trop peu de présence) */}
+          <div className="mb-[6px] flex justify-end">
+            <NewConversationButton
+              busy={busy}
+              creating={creating}
+              disabled={sending || busy || creating || reverting}
+              onClick={clean}
+            />
+          </div>
           {queued.length ? (
             <div
               data-testid="supervisor-queue"
@@ -633,7 +641,7 @@ export function SupervisorChat({ onCollapse, onOpenMiniChat }: Props) {
             disabled={creating}
             placeholder={
               creating
-                ? 'Nettoyage…'
+                ? 'Nouvelle conversation…'
                 : busy
                   ? waiting
                     ? 'Envoyer annulera la question et partira tout de suite…'

@@ -1,4 +1,4 @@
-import type { Criterion, CriteriaCounts, Delivery, Fleet, SupervisorConfig, SupervisorConfigWarning, SupervisorProject, SupervisorState, TaskAnswer, TaskModelInfo, TaskModelSaveResult } from '../types';
+import type { Criterion, CriteriaCounts, Delivery, Fleet, SearchResponse, SupervisorConfig, SupervisorConfigWarning, SupervisorProject, SupervisorState, TaskAnswer, TaskModelInfo, TaskModelSaveResult, TaskRender } from '../types';
 import type { ComposerAttachment } from './attachments';
 
 async function post(path: string, body: unknown): Promise<void> {
@@ -162,6 +162,18 @@ export async function closeConversation(sessionId: string, force = false): Promi
   await post('/api/fleet/done', { sessionId, force });
 }
 
+/** Recherche des conversations : titres + messages (index OpenChamber). */
+export async function searchConversations(query: string, signal?: AbortSignal): Promise<SearchResponse> {
+  const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`, { cache: 'no-store', signal });
+  if (!res.ok) throw new Error(String(res.status));
+  return (await res.json()) as SearchResponse;
+}
+
+/** Remet dans le tableau une carte fermée en « Terminé ». */
+export async function restoreConversation(sessionId: string): Promise<void> {
+  await post('/api/fleet/restore', { sessionId });
+}
+
 /** Réponses au propriétaire de cette tâche (lues et non lues), les plus anciennes d'abord. */
 export async function fetchAnswers(sessionId: string, signal?: AbortSignal): Promise<TaskAnswer[]> {
   const res = await fetch(`/api/fleet/answers?sessionId=${encodeURIComponent(sessionId)}`, {
@@ -176,6 +188,22 @@ export async function fetchAnswers(sessionId: string, signal?: AbortSignal): Pro
 /** « Got it » : marque lues les réponses (toutes par défaut, sinon les ids donnés). */
 export async function ackAnswers(sessionId: string, ids?: number[]): Promise<void> {
   await post('/api/fleet/answers/ack', { sessionId, ids });
+}
+
+/** Rendus OpenChamber de cette tâche (vus et non vus), les plus anciens d'abord. */
+export async function fetchRenders(sessionId: string, signal?: AbortSignal): Promise<TaskRender[]> {
+  const res = await fetch(`/api/fleet/renders?sessionId=${encodeURIComponent(sessionId)}`, {
+    cache: 'no-store',
+    signal,
+  });
+  if (!res.ok) throw new Error(String(res.status));
+  const body = (await res.json()) as { renders?: TaskRender[] };
+  return body.renders ?? [];
+}
+
+/** « Vu » : marque vus les rendus (tous par défaut, sinon les ids donnés). */
+export async function ackRenders(sessionId: string, ids?: number[]): Promise<void> {
+  await post('/api/fleet/renders/ack', { sessionId, ids });
 }
 
 /** Annule un formulaire en attente : l'agent reprend sans réponse. */

@@ -13,6 +13,8 @@ import { setBase as setTaskModelBase } from './task-model.mts';
 import { setBase as setOcSessionBase } from './oc-session.mts';
 import { setBase as setCriteriaBase } from './criteria.mts';
 import { setBase as setAnswersBase } from './answers.mts';
+import { setBase as setRendersBase } from './renders.mts';
+import { setBase as setSearchBase } from './search.mts';
 import { startServer } from './server.mts';
 import { db } from './state.mts';
 
@@ -22,7 +24,7 @@ async function main() {
   // TOUS les lecteurs à base OpenChamber : un module oublié ici fait des
   // fetch d'URL relative qui jettent en silence (criteria du 2026-11-13 :
   // flotte à « aucun critère » alors que le tool part portait la liste).
-  setBase(base); setDeliveryBase(base); setPlanBase(base); setSupervisorBase(base); setActivityBase(base); setModelsBase(base); setTaskModelBase(base); setOcSessionBase(base); setCriteriaBase(base); setAnswersBase(base);
+  setBase(base); setDeliveryBase(base); setPlanBase(base); setSupervisorBase(base); setActivityBase(base); setModelsBase(base); setTaskModelBase(base); setOcSessionBase(base); setCriteriaBase(base); setAnswersBase(base); setRendersBase(base); setSearchBase(base);
   ensureSupervisorWorkspace();
   console.log(`[superviseur] OpenChamber découvert sur 127.0.0.1:${port}`);
   try {

@@ -8,6 +8,7 @@ import { dirname, extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { currentFleet, openchamberUrl, pollOnce, type Fleet } from './fleet.mts';
 import { ackAnswers, getAnswers, unreadAnswerCounts } from './answers.mts';
+import { ackRenders, getRenders, unreadRenderCounts } from './renders.mts';
 import { getDelivery } from './delivery.mts';
 import { readSessionAsset } from './assets.mts';
 import { openChamberMiniChatUrl } from './openchamber-link.mts';
@@ -19,6 +20,7 @@ import { cancelPendingForms, configureSupervisorMode, pendingFor, runTool, super
 import { criteriaCounts, readCriteria } from './criteria.mts';
 import { toPromptFiles } from './attachments.mts';
 import { markTaskSessionRead } from './oc-session.mts';
+import { restoreConversation, searchConversations } from './search.mts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 // le build Vite (bun run build:ui) ; le daemon ne sert que des fichiers produits
@@ -83,23 +85,29 @@ function enrichedFleet(): Fleet {
   // (jamais dans buildFleet : la flotte brute vient d'OpenChamber, la table
   // task_answer nous appartient)
   const unread = unreadAnswerCounts();
+  // idem pour les rendus OpenChamber non vus (table task_render)
+  const unreadRenders = unreadRenderCounts();
   return {
     ...fleet,
     rows: fleet.rows.flatMap((r) => {
       if (supervisorId && r.id === supervisorId) return [];
       if (r.dir === SUPERVISOR_DIR) return [];
       const st = getTaskState(r.id) as { closed_at?: number } | null;
+      const counters = {
+        unreadAnswers: unread.get(r.id) ?? 0,
+        unreadRenders: unreadRenders.get(r.id) ?? 0,
+      };
       if (st?.closed_at) {
         // activité postérieure à la fermeture ? (nouveau prompt dans OpenChamber, ou
         // un tool answer livré après clôture) → réouverture
         const last = Math.max(r.lastUpdateAt ?? 0, r.busy ?? 0);
         if (last > (st.closed_at ?? 0)) {
           reopenTaskState(r.id);
-          return [{ ...r, task: getTaskState(r.id), unreadAnswers: unread.get(r.id) ?? 0 }];
+          return [{ ...r, task: getTaskState(r.id), ...counters }];
         }
         return [];
       }
-      return [{ ...r, task: st, unreadAnswers: unread.get(r.id) ?? 0 }];
+      return [{ ...r, task: st, ...counters }];
     }),
   };
 }
@@ -301,6 +309,23 @@ async function handleApi(req: http.IncomingMessage, res: http.ServerResponse, ur
     json(res, 200, { ok: true, acked });
     return;
   }
+  if (path === '/api/fleet/renders' && req.method === 'GET') {
+    // panel de détails : tous les rendus OpenChamber de la tâche, vus et non vus.
+    // Moissonnage des tool parts `openchamber_render` puis lecture de la table.
+    const sessionId = (url.searchParams.get('sessionId') ?? '').trim();
+    if (!sessionId) { json(res, 400, { error: 'sessionId requis' }); return; }
+    json(res, 200, { sessionId, renders: await getRenders(sessionId) });
+    return;
+  }
+  if (path === '/api/fleet/renders/ack' && req.method === 'POST') {
+    const body = await readBody(req);
+    const sessionId = String(body.sessionId ?? '');
+    if (!sessionId) { json(res, 400, { error: 'sessionId requis' }); return; }
+    const ids = Array.isArray(body.ids) ? body.ids.map((n) => Number(n)) : undefined;
+    const acked = ackRenders(sessionId, ids);
+    json(res, 200, { ok: true, acked });
+    return;
+  }
   if (path === '/api/fleet/delivery' && req.method === 'GET') {
     // à la demande : la flotte (GET + SSE) ne transporte pas les messages.
     const sessionId = (url.searchParams.get('sessionId') ?? '').trim();
@@ -457,6 +482,29 @@ async function handleApi(req: http.IncomingMessage, res: http.ServerResponse, ur
     // déjà effective en base, un échec ne fait qu'ajouter une ligne au journal.
     await markTaskSessionRead(sessionId);
     json(res, 200, { ok: true });
+    return;
+  }
+  if (path === '/api/search' && req.method === 'GET') {
+    // recherche des conversations : titres (catalogue) + messages (index OpenChamber)
+    const answer = await searchConversations(url.searchParams.get('q') ?? '');
+    json(res, 200, { ...answer, query: url.searchParams.get('q') ?? '' });
+    return;
+  }
+  if (path === '/api/fleet/restore' && req.method === 'POST') {
+    // remettre dans le tableau une carte fermée en « Terminé »
+    const body = await readBody(req);
+    const sessionId = String(body.sessionId ?? '').trim();
+    if (!sessionId) { json(res, 400, { error: 'sessionId requis' }); return; }
+    const restored = restoreConversation(sessionId);
+    if (!restored.ok) {
+      json(res, 404, {
+        error: restored.error ?? 'restore_failed',
+        message: 'la conversation n’existe plus dans OpenChamber',
+      });
+      return;
+    }
+    logEvent('supervisor', 'note', `carte restaurée depuis la recherche : ${sessionId.slice(-6)}`);
+    json(res, 200, { ok: true, sessionId });
     return;
   }
   if (path === '/api/fleet/stream' && req.method === 'GET') {

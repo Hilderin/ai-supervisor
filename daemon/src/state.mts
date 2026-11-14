@@ -101,6 +101,22 @@ CREATE TABLE IF NOT EXISTS task_answer (
   part_key TEXT                      -- clé de dédoublonnage du moissonnage tool part
 );                                  -- (réponses natives session, 2026-11-13) ; NULL = ligne pré-migration
 CREATE INDEX IF NOT EXISTS idx_task_answer_session ON task_answer(session_id, at);
+-- Rendus OpenChamber produits par une tâche (tool « openchamber_render ») :
+-- une ligne par appel, capturée par le moissonnage (renders.mts) et relue dans
+-- le panel de détails ; read_at vaut NULL tant que le propriétaire ne l'a pas
+-- marqué vu (compteur de la carte).
+CREATE TABLE IF NOT EXISTS task_render (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id TEXT NOT NULL,          -- task_id, suit la tâche une fois migrée
+  at INTEGER NOT NULL,               -- epoch ms du message porteur du rendu
+  title TEXT,                        -- titre déclaré, ou tiré de la page
+  kind TEXT NOT NULL,                -- 'html' (page) ou 'ui' (source openui-lang)
+  content TEXT NOT NULL,             -- page HTML ou source openui-lang (bornée)
+  read_at INTEGER,                   -- epoch ms du « Vu », NULL = non vu
+  part_key TEXT                      -- clé de dédoublonnage du moissonnage
+);
+CREATE INDEX IF NOT EXISTS idx_task_render_session ON task_render(session_id, at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_task_render_part ON task_render(part_key) WHERE part_key IS NOT NULL;
 -- Critères d'acceptation : ANCIENNE table (machine à états côté daemon).
 -- Depuis la migration « critères natifs session » (2026-11-13), l'état vit
 -- dans le storage du plugin superviseur-criteria et le daemon le LIT dans les
@@ -259,6 +275,16 @@ export function upsertTaskState(sessionId: string, patch: {
 
 export function getTaskState(sessionId: string) {
   return db.query('SELECT * FROM task_state WHERE session_id = ?').get(sessionId) ?? null;
+}
+
+/**
+ * Identifiants des cartes fermées (retirées du tableau) : la recherche les
+ * marque « fermée » et propose de restaurer, sans une lecture par session.
+ */
+export function closedTaskIds(): Set<string> {
+  const rows = db.query('SELECT session_id FROM task_state WHERE closed_at IS NOT NULL').all() as
+    Array<{ session_id: string }>;
+  return new Set(rows.map((row) => row.session_id));
 }
 
 export interface SupervisorSessionRow {
@@ -507,6 +533,9 @@ export function migrateTaskSession(oldId: string, newId: string) {
     // les réponses au propriétaire suivent la tâche : elles restent visibles
     // dans le détail (rien ne dit qu'elles ont déjà été lues)
     db.query('UPDATE task_answer SET session_id = ? WHERE session_id = ?').run(newId, oldId);
+    // les rendus OpenChamber suivent aussi : le moissonnage de l'ancienne
+    // session a tourné avant la migration (resume.mts)
+    db.query('UPDATE task_render SET session_id = ? WHERE session_id = ?').run(newId, oldId);
     // les critères ne suivent PAS : ils vivent dans la session (plugin
     // superviseur-criteria) et criteria_known est lu par l'ANCIEN id pour
     // réinjecter la liste dans la session neuve (criteria_import, resume.mts).

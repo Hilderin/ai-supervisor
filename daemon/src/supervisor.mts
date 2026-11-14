@@ -8,17 +8,22 @@
  */
 import { copyFileSync, existsSync, mkdirSync, symlinkSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   ensureOrchestratorDefinition, getSupervisorMode, getSupervisorSession,
   logEvent, setSupervisorSession,
 } from './state.mts';
 import { messageText } from './messages.mts';
+import {
+  MODE_INSTRUCTION_KEY, modeInstruction, outgoingSupervisorText, stripOwnerWrap,
+} from './supervisor-mode.mts';
 import { pendingQuestionsOf, supervisorStatusOf, type SupervisorPendingForm } from './supervisor-forms.mts';
 import { toPromptFiles, toQueueAttachments } from './attachments.mts';
 import { defaultModelRef, modelLabel, modelPayload } from './models.mts';
 import { chatAgentRef, chatModelRef } from './prefs.mts';
+import { isGenericSupervisorTitle, supervisorTitle } from './supervisor-title.mts';
+import { markSessionRead } from './oc-session.mts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 export const SUPERVISOR_DIR = process.env.SUPERVISEUR_HOME ?? join(homedir(), '.superviseur');
@@ -175,6 +180,36 @@ async function jpost(path: string, body: unknown, timeoutMs = 15000) {
   } finally { clearTimeout(t); }
 }
 
+/**
+ * `PUT` d'une instruction durable de session. OpenChamber répond 204 sans
+ * corps : le succès se juge sur le statut, pas sur un JSON.
+ */
+async function jput(path: string, body: unknown, timeoutMs = 15000) {
+  return jwrite('PUT', path, body, timeoutMs);
+}
+
+/** `PATCH` d'une session (titre, par exemple) : même contrat que `jput`. */
+async function jpatch(path: string, body: unknown, timeoutMs = 15000) {
+  return jwrite('PATCH', path, body, timeoutMs);
+}
+
+async function jwrite(method: 'PUT' | 'PATCH', path: string, body: unknown, timeoutMs = 15000) {
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${base}${path}`, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: ctl.signal,
+    });
+    const text = await res.text();
+    let data: unknown = null;
+    try { data = text ? JSON.parse(text) : null; } catch { data = { raw: text }; }
+    return { status: res.status, ok: res.ok, data };
+  } finally { clearTimeout(t); }
+}
+
 async function jdel(path: string, timeoutMs = 10000) {
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), timeoutMs);
@@ -241,6 +276,110 @@ async function switchSessionAgent(id: string, agent: string): Promise<boolean> {
     return false;
   }
 }
+
+/**
+ * Instruction de mode déjà posée, par session : la session porte un état
+ * durable, on ne réécrit que si le mode ou le projet change (le poll de état
+ * appelle `ensureSupervisorSession` en continu).
+ */
+const appliedMode = new Map<string, string>();
+let lastModeFailure = '';
+
+/**
+ * Pose le mode actif dans les instructions durables de la session : le serveur
+ * le rend au modèle comme message système au pas suivant. C'est le SEUL canal
+ * du mode (le message du propriétaire n'est plus préfixé, 2026-11-14).
+ */
+async function applyModeInstruction(id: string): Promise<void> {
+  const setting = getSupervisorMode();
+  const project = setting.mode === 'investigation' && setting.projectDir
+    ? { name: basename(setting.projectDir), directory: setting.projectDir }
+    : null;
+  const instruction = modeInstruction(setting.mode, project);
+  if (appliedMode.get(id) === instruction) return;
+  try {
+    const out = await jput(
+      `/api/experimental/session/${encodeURIComponent(id)}/instructions/entries/${MODE_INSTRUCTION_KEY}`,
+      { value: instruction },
+    );
+    if (!out.ok) {
+      const key = `${id}:${out.status}`;
+      if (lastModeFailure !== key) {
+        lastModeFailure = key;
+        logEvent('supervisor', 'note', `instruction de mode refusée (${out.status}) sur #${id.slice(-6)}`);
+      }
+      return;
+    }
+    appliedMode.set(id, instruction);
+    logEvent('supervisor', 'note', `mode ${setting.mode} posé sur #${id.slice(-6)}`);
+  } catch (e) {
+    const key = `${id}:${String(e)}`;
+    if (lastModeFailure !== key) {
+      lastModeFailure = key;
+      logEvent('supervisor', 'note', `instruction de mode impossible sur #${id.slice(-6)} : ${String(e).slice(0, 120)}`);
+    }
+  }
+}
+
+/**
+ * Réannonce le mode à la conversation vivante : appelé au changement de mode
+ * (le serveur annonce le nouveau contenu au pas suivant) et à la création
+ * d'une conversation.
+ */
+export async function announceSupervisorMode(): Promise<void> {
+  const id = getSupervisorSession()?.oc_session_id;
+  if (!id) return;
+  appliedMode.delete(id);
+  await applyModeInstruction(id);
+}
+
+/** Conversations déjà renommées : pas un PATCH par tick de flotte. */
+const datedTitles = new Set<string>();
+
+/**
+ * Nom daté : une conversation neuve s'appelle « Superviseur AAAA-MM-JJ HH:mm »
+ * et une ancienne conversation restée « Superviseur » est renommée une fois,
+ * avec l'heure de SA création. Un nom choisi par le propriétaire reste intact.
+ */
+async function ensureDatedTitle(id: string, meta: SessionMeta): Promise<void> {
+  if (datedTitles.has(id) || !isGenericSupervisorTitle(meta.title)) {
+    datedTitles.add(id);
+    return;
+  }
+  const title = supervisorTitle(meta.time?.created ?? Date.now());
+  const out = await jpatch(`/api/session/${encodeURIComponent(id)}`, { title });
+  if (!out.ok) {
+    logEvent('supervisor', 'note', `renommage de #${id.slice(-6)} impossible (${out.status})`);
+    return;
+  }
+  datedTitles.add(id);
+  const known = getSupervisorSession();
+  if (known?.oc_session_id === id) {
+    setSupervisorSession({ ocSessionId: id, agent: known.agent, title });
+  }
+  logEvent('supervisor', 'note', `conversation #${id.slice(-6)} renommée « ${title} »`);
+}
+
+/**
+ * Fin de tour du chat de supervision : le tour vient de passer de busy à idle,
+ * la réponse est livrée. La conversation est marquée lue dans OpenChamber (le
+ * propriétaire n'a plus à le faire). Le pulse est le poll de flotte du daemon
+ * (3 s), indépendant de l'UI ; le marqueur « In work » n'est pas touché (le
+ * chat le garde à null).
+ */
+let lastTurnStatus: 'idle' | 'busy' | 'unknown' = 'unknown';
+export function notifySupervisorStatus(sessions: Record<string, { status?: string }> | undefined): void {
+  const id = getSupervisorSession()?.oc_session_id;
+  if (!id) return;
+  const raw = sessions?.[id]?.status;
+  const next: 'idle' | 'busy' | 'unknown' = raw === 'busy' ? 'busy' : raw === 'idle' ? 'idle' : 'unknown';
+  const previous = lastTurnStatus;
+  lastTurnStatus = next;
+  if (!(previous === 'busy' && next === 'idle')) return;
+  void markSessionRead(id, 'supervisor').catch(() => undefined);
+}
+
+
 
 /**
  * Une session ouverte par l'API sans prompt n'a ni agent ni modèle (le champ
@@ -325,7 +464,7 @@ async function trustWorkspace(): Promise<void> {
 async function createSupervisorSession(agent: string): Promise<string> {
   ensureSupervisorWorkspace();
   const out = await jpost('/api/openchamber/sessions', {
-    title: 'Superviseur',
+    title: supervisorTitle(),
     directory: SUPERVISOR_DIR,
     agent,
   });
@@ -369,13 +508,16 @@ async function ensureSupervisorSessionOnce(): Promise<{
     agent,
   });
   if (action === 'create' || !knownId) {
+    const title = supervisorTitle();
     const id = await createSupervisorSession(agent);
-    setSupervisorSession({ ocSessionId: id, agent, title: 'Superviseur' });
+    setSupervisorSession({ ocSessionId: id, agent, title });
     logEvent('supervisor', 'note', `session de supervision #${id.slice(-6)} (${agent})`);
+    await applyModeInstruction(id);
     return { id, agent, model: (await sessionMeta(id))?.model ?? null };
   }
   // conversation existante : la sortir du home une fois par processus
   await quietWorkOnce(knownId);
+  if (meta) await ensureDatedTitle(knownId, meta);
   let effectiveAgent = agent;
   if (action === 'switch') {
     const switched = await switchSessionAgent(knownId, agent);
@@ -397,6 +539,8 @@ async function ensureSupervisorSessionOnce(): Promise<{
       ocSessionId: knownId, agent: effectiveAgent, title: known?.title ?? 'Superviseur',
     });
   }
+  // une conversation d'avant le changement de canal reçoit son mode ici
+  await applyModeInstruction(knownId);
   return { id: knownId, agent: effectiveAgent, model: meta?.model ?? null };
 }
 
@@ -504,10 +648,11 @@ async function statusSnapshot(id: string): Promise<StatusSnapshot> {
 
 interface SessionMeta {
   id?: string;
+  title?: string;
   agent?: string;
   model?: { id?: string; providerID?: string; variant?: string };
   location?: { directory?: string };
-  time?: { archived?: number };
+  time?: { archived?: number; created?: number; idle?: number; updated?: number };
 }
 
 async function sessionMeta(id: string): Promise<SessionMeta | null> {
@@ -620,49 +765,12 @@ export async function getSupervisorState(): Promise<SupervisorState> {
 }
 
 /**
- * OWNER_WRAP : encadrement RETIRÉ (2026-11-12). La constante reste définie
- * uniquement pour que `stripOwnerWrap` dépouille les anciens messages encore
- * encadrés dans l'historique. Les nouveaux envois du propriétaire partent
- * tels quels ; les consignes plan/critères/answer vivent dans le prompt
- * initial de la tâche (composePrompt de tools.mts).
+ * Dépouillement de l'historique : `stripOwnerWrap` vit dans `supervisor-mode.mts`
+ * avec les anciens encadrements (OWNER_WRAP, préambules de mode). Rien n'est
+ * ajouté aux nouveaux envois : le mode passe par l'instruction durable de
+ * session (`applyModeInstruction`), le message du propriétaire part tel quel.
  */
-export const OWNER_WRAP =
-  "Nouvelle instruction de l\u2019utilisateur : mets ton plan à jour au besoin ; "
-  + "définis ou mets à jour tes critères d\u2019acceptation (criteria_add, criteria_to_validate : "
-  + "le vérificateur du Superviseur juge tes preuves) ; "
-  + "les réponses pour le propriétaire partent avec le tool `answer` (elles s\u2019affichent dans le Superviseur) :";
-
-const PILOT_WRAP = 'Mode Piloter : tu peux cadrer et lancer des tâches selon tes règles habituelles.';
-const INVESTIGATION_WRAP = 'Mode Investigation : lecture seule du projet sélectionné, sans création de tâche ni modification de fichier.';
-
-export function wrapSupervisorPrompt(text: string, mode: 'pilot' | 'investigation', projectDirectory: string | null): string {
-  if (mode === 'investigation' && projectDirectory) return wrapInvestigationPrompt(text, projectDirectory);
-  return `${PILOT_WRAP}\n\n${text}`;
-}
-
-export function wrapInvestigationPrompt(text: string, projectDirectory: string): string {
-  return `${INVESTIGATION_WRAP}\nProjet sélectionné : ${projectDirectory}\n\n${text}`;
-}
-
-/**
- * Dépouille l'ancien encadrement (OWNER_WRAP, messages d'avant le 2026-11-12)
- * des messages déjà écrits dans l'historique : les conversations d'avant le
- * retrait restent affichées propres. Les nouveaux envois ne sont plus encadrés.
- */
-export function stripOwnerWrap(text: string): string {
-  const clean = String(text ?? '');
-  if (clean.startsWith(INVESTIGATION_WRAP)) {
-    const userText = clean.indexOf('\n\n');
-    return userText >= 0 ? clean.slice(userText + 2).trim() : '';
-  }
-  if (!clean.startsWith(OWNER_WRAP)) return clean;
-  const body = clean.slice(OWNER_WRAP.length).trim();
-  if (body.startsWith(PILOT_WRAP)) {
-    const userText = body.indexOf('\n\n');
-    return userText >= 0 ? body.slice(userText + 2).trim() : '';
-  }
-  return body;
-}
+export { stripOwnerWrap } from './supervisor-mode.mts';
 
 /**
  * Annule les formulaires « question » en attente d'une session : le même geste
@@ -704,8 +812,10 @@ export async function sendSupervisor(text: string, rawAttachments: unknown = [])
     cancelledQuestion = snapshot.forms[0]?.title ?? snapshot.forms[0]?.id;
     logEvent('supervisor', 'note', `question annulée par message : ${cancelledQuestion}`);
   }
-  const mode = getSupervisorMode();
-  const prompt = wrapSupervisorPrompt(clean || 'Voir la pièce jointe.', mode.mode, mode.projectDir);
+  // le mode n'est PAS préfixé : il vit dans l'instruction durable de session
+  // (applyModeInstruction, posée par ensureSupervisorSession). Le texte du
+  // propriétaire part tel quel.
+  const prompt = outgoingSupervisorText(clean);
   // le prompt v2 porte les pièces jointes ; l'agent est déjà sur la session
   // (ensureSupervisorSession le bascule en place), le champ `agent` n'existe
   // pas sur cette route. Le tour peut être busy (reprise d'une question
@@ -738,15 +848,15 @@ export async function queueSupervisor(text: string, rawAttachments: unknown = []
   if (!clean && !attachments.length) return getSupervisorState();
   const { id, agent } = await ensureSupervisorSession();
   await applySessionSetup(id, agent);
-  const mode = getSupervisorMode();
   const sendConfig = await sendConfigOf(id, agent);
   if (!sendConfig) throw new Error('modèle du superviseur introuvable');
-  const wrapped = wrapSupervisorPrompt(clean || 'Voir la pièce jointe.', mode.mode, mode.projectDir);
+  // texte du propriétaire TEL QUEL : le mode vit dans l'instruction durable
+  const outgoing = outgoingSupervisorText(clean);
   const out = await jpost(`/api/message-queue/sessions/${encodeURIComponent(id)}/items`, {
     directory: SUPERVISOR_DIR,
     item: {
-      content: wrapped,
-      text: wrapped,
+      content: outgoing,
+      text: outgoing,
       sendConfig,
       ...(attachments.length ? { attachments } : {}),
     },
@@ -828,9 +938,12 @@ export async function revertSupervisor(messageId: string): Promise<SupervisorSta
 export function newSupervisorConversation(): Promise<SupervisorState> {
   return serializedSupervisor(async () => {
     const agent = (await chatAgentRef()) ?? ensureOrchestratorDefinition();
+    const title = supervisorTitle();
     const id = await createSupervisorSession(agent);
-    setSupervisorSession({ ocSessionId: id, agent, title: 'Superviseur' });
-    logEvent('supervisor', 'note', `nouvelle conversation #${id.slice(-6)}`);
+    setSupervisorSession({ ocSessionId: id, agent, title });
+    logEvent('supervisor', 'note', `nouvelle conversation #${id.slice(-6)} « ${title} »`);
+    // le mode est une instruction durable de la session, posée dès la création
+    await applyModeInstruction(id);
     // session neuve : pas besoin de relire 80 messages ni le statut, elle est vide
     const mode = getSupervisorMode();
     const model = (await sessionMeta(id))?.model ?? null;

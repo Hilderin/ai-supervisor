@@ -22,6 +22,7 @@ import { defaultModelRef, findModel } from './models.mts';
 import { getPlanSnapshot, planStepsOf } from './plan.mts';
 import { criteriaForResume, getCriteriaSnapshot } from './criteria.mts';
 import { harvestAnswers } from './answers.mts';
+import { harvestRenders } from './renders.mts';
 
 let base = '';
 export function setBase(b: string) { base = b.replace(/\/$/, ''); }
@@ -395,6 +396,8 @@ async function restartTask(row: NonNullable<ReturnType<typeof getTaskResume>>, m
   // les réponses au propriétaire aussi : moissonnage de l'ancienne session
   // AVANT sa disparition, l'historique reste visible dans le détail
   await harvestAnswers(row.session_id).catch(() => undefined);
+  // et les rendus OpenChamber, pour la même raison (table task_render)
+  await harvestRenders(row.session_id).catch(() => undefined);
   const prompt = composeResumePrompt({
     goal,
     doneCriteria: parseList(brief?.done_criteria),

@@ -5,6 +5,7 @@ import { cx } from '../lib/cx';
 import { neighborSelection } from '../lib/selection';
 import { useFleetStore, visibleRows } from '../store/fleetStore';
 import type { Fleet } from '../types';
+import { SearchPopover } from './SearchPopover';
 import { SessionCard } from './SessionCard';
 
 interface Props {
@@ -25,6 +26,9 @@ export function FleetBoard({ fleet, now, onOpenChamber }: Props) {
   const selected = useFleetStore((s) => s.selected);
   const setSelected = useFleetStore((s) => s.setSelected);
   const [flashId, setFlashId] = useState<string | null>(null);
+  // carte restaurée depuis la recherche : elle n'est pas encore dans le tableau,
+  // le défilement et le flash attendent son arrivée au frame suivant
+  const [pendingFlash, setPendingFlash] = useState<string | null>(null);
   const nextWaiting = useRef(0);
 
   const rows = visibleRows(fleet, order, closed);
@@ -32,6 +36,12 @@ export function FleetBoard({ fleet, now, onOpenChamber }: Props) {
   // Le détail de droite fournit la marge à droite de la liste quand il est ouvert ;
   // fermé, on ajoute cette marge pour que cartes et compteur ne touchent pas le bord.
   const detailOpen = !!selected && rows.some((row) => row.id === selected);
+
+  const flashCard = (id: string) => {
+    const card = document.querySelector<HTMLElement>(`[data-sid="${id}"]`);
+    card?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    setFlashId(id);
+  };
 
   // Ordre affiché du rendu précédent : il garde la place de la tâche qui vient
   // de disparaître, donc la voisine à retenir.
@@ -61,13 +71,28 @@ export function FleetBoard({ fleet, now, onOpenChamber }: Props) {
     return () => window.clearTimeout(timer);
   }, [flashId]);
 
+  // La carte restaurée est arrivée : on la montre (défilement + flash).
+  useEffect(() => {
+    if (!pendingFlash) return;
+    if (!rows.some((row) => row.id === pendingFlash)) return;
+    const id = pendingFlash;
+    setPendingFlash(null);
+    flashCard(id);
+  }, [rows, pendingFlash]);
+
   const showNextWaiting = () => {
     if (!waiting.length) return;
     const target = waiting[nextWaiting.current % waiting.length];
     nextWaiting.current += 1;
-    const card = document.querySelector<HTMLElement>(`[data-sid="${target.id}"]`);
-    card?.scrollIntoView({ block: 'center', behavior: 'smooth' });
-    setFlashId(target.id);
+    flashCard(target.id);
+  };
+
+  const restoreHandlers = {
+    onRestored: (id: string) => setPendingFlash(id),
+    onReveal: (id: string) => {
+      setSelected(id);
+      flashCard(id);
+    },
   };
 
   return (
@@ -92,13 +117,9 @@ export function FleetBoard({ fleet, now, onOpenChamber }: Props) {
               Suivante
             </button>
           </>
-        ) : (
-          <span className="text-[12.5px] text-muted">Aucune tâche en attente</span>
-        )}
+        ) : null}
         <span className="flex-1" />
-        <span className="shrink-0 text-[11.5px] text-muted">
-          {rows.length} tâche{rows.length > 1 ? 's' : ''}
-        </span>
+        <SearchPopover now={now} {...restoreHandlers} />
       </div>
 
       <div

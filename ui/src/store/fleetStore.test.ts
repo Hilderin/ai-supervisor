@@ -96,6 +96,38 @@ describe('fleetStore.setFleet', () => {
   });
 });
 
+describe('fleetStore.forgetClosed', () => {
+  beforeEach(() => {
+    useFleetStore.setState({
+      fleet: null,
+      placements: {},
+      order: {},
+      nextRank: 1,
+      seenAt: {},
+      orderHydrated: false,
+      selected: null,
+      closed: {},
+      drafts: {},
+      error: null,
+    });
+  });
+
+  test('oublie le marqueur local d’une carte restaurée', () => {
+    useFleetStore.getState().setFleet(fleet(10, [row]));
+    useFleetStore.getState().closeSession('ses_test', 30);
+    expect(useFleetStore.getState().closed.ses_test).toBe(30);
+    useFleetStore.getState().forgetClosed('ses_test');
+    expect(useFleetStore.getState().closed.ses_test).toBeUndefined();
+  });
+
+  test('un identifiant inconnu ne change pas l’état', () => {
+    useFleetStore.getState().closeSession('ses_test', 30);
+    const before = useFleetStore.getState().closed;
+    useFleetStore.getState().forgetClosed('ses_autre');
+    expect(useFleetStore.getState().closed).toBe(before);
+  });
+});
+
 describe('fleetStore : sélection du détail quand la tâche disparaît', () => {
   const a = { ...row, id: 'a' };
   const b = { ...row, id: 'b' };

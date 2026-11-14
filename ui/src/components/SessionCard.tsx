@@ -124,12 +124,21 @@ export function SessionCard({ row, state, selected, flash, now, onOpen, onOpenCh
     };
   }, [menuOpen]);
 
+  // Le pied de carte n'a qu'une action, et elle suit l'état (retour du
+  // propriétaire, 2026-11-14) : « Répondre » quand une demande attend,
+  // « Terminé » quand la carte est terminée OU à compléter (le clic clôt la
+  // tâche), « Détail » sinon (en cours).
   const action =
     state === 'waiting'
-      ? { label: 'Répondre', primary: true, run: onOpen }
-      : state === 'done'
-        ? { label: 'Terminé', primary: true, run: () => void close() }
-        : { label: 'Détail', primary: false, run: onOpen };
+      ? { label: 'Répondre', primary: true, tip: 'Ouvrir la question', run: onOpen }
+      : state === 'done' || state === 'warning'
+        ? {
+            label: 'Terminé',
+            primary: true,
+            tip: 'Terminer la tâche et la retirer de la flotte',
+            run: () => void close(),
+          }
+        : { label: 'Détail', primary: false, tip: 'Ouvrir le détail', run: onOpen };
 
   let detail: ReactNode = null;
   if (state === 'waiting') {
@@ -148,12 +157,12 @@ export function SessionCard({ row, state, selected, flash, now, onOpen, onOpenCh
   } else if (busy) {
     detail = currentStep ? <span>Étape : {currentStep.text}</span> : null;
   } else if (warning) {
-    // ce qui manque, en faits : le plan d'abord, les critères ensuite
+    // ce qui manque, en faits : le plan d'abord, puis les critères NON validés
+    // (sans critère défini, le plan suffit depuis le 2026-11-14)
     const missing: string[] = [];
     if (row.plan && row.plan.done < row.plan.total) missing.push(`Plan : ${row.plan.done}/${row.plan.total} étapes`);
     if (!row.plan) missing.push('Pas de plan posé');
     if (critTotal > 0 && critValidated < critTotal) missing.push(`Critères : ${critValidated}/${critTotal} validés`);
-    if (critTotal === 0) missing.push('Aucun critère défini');
     detail = missing.length ? <span title={missing.join(' · ')}>{missing.join(' · ')}</span> : null;
   }
   // Au repos, pas de bloc de résultat dans la carte : l'aperçu de deux lignes
@@ -314,13 +323,7 @@ export function SessionCard({ row, state, selected, flash, now, onOpen, onOpenCh
         <span className="flex-1" />
         <button
           type="button"
-          title={
-            state === 'done'
-              ? 'Terminer la tâche et la retirer de la flotte'
-              : state === 'waiting'
-                ? 'Ouvrir la question'
-                : 'Ouvrir le détail'
-          }
+          title={action.tip}
           onClick={(e) => {
             e.stopPropagation();
             action.run();

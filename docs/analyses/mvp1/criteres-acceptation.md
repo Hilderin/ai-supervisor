@@ -354,14 +354,28 @@ CREATE TABLE IF NOT EXISTS verifier_map (
 ### 7.2 Panneau de détail : section Critères
 
 - Une section « Critères » dans le panneau de détail, **sous le plan**
-  (PlanSection), avant les réponses au propriétaire : une ligne par critère
-  avec ref (`AC-01`), titre, badge d'état (À faire, À valider, À corriger,
-  Validé), la preuve soumise (texte, chemin et lignes pour `code_excerpt`,
-  image servable via `/api/fleet/asset`) et le jugement du vérificateur,
-  libellé selon l'état : « Vérificateur : preuve refusée : (raison) » en orange
-  pour « À corriger », « Vérificateur : preuve acceptée : (commentaire) » en
-  vert pour « Validé », rien sinon (retour du propriétaire : la ligne orange
-  nue n'expliquait pas son rôle).
+  (PlanSection), avant les réponses au propriétaire.
+- **Compacte (2026-11-14)** : une ligne par critère (ref `AC-01`, titre sur une
+  ligne, badge d'état) ; chaque preuve devient une **chip** dont le texte est le
+  type de preuve (test, capture, code, commande, navigateur, texte…). La chip
+  est verte avec une case cochée quand le critère est validé, grise avec un
+  point quand la preuve est en attente. Le clic ouvre le détail dans une bulle
+  portail (texte complet, chemin et lignes, image, date de dépôt) : le texte
+  n'occupe plus la liste. Les captures restent affichées **sous les chips** et
+  ouvrent la visionneuse du lot (`EvidenceViewer`).
+- Le détail du critère et la note de jugement de l'agent (preuve acceptée ou
+  refusée) passent en **infobulle** du titre et du badge, pour ne pas allonger
+  la ligne.
+- **Popup du critère (2026-11-14)** : le clic sur la ligne ouvre un dialogue
+  large (720 px, 86 vh) et aéré. Il place le **jugement en tête** (« Preuve
+  acceptée » en vert, « Preuve refusée » en orange, avec son texte complet),
+  puis le détail du critère, les méthodes, toutes les preuves structurées en
+  blocs (type, état, date, chemin et lignes, texte complet, image cliquable
+  vers la visionneuse). Il se ferme par la croix, Échap (capture +
+  `stopPropagation`, sinon le panneau de détail se ferme aussi) ou un clic sur
+  le fond, et se déplace au critère précédent ou suivant par boutons et
+  flèches gauche/droite, sans boucler (`neighborCriterionIndex`). Le clavier du
+  popup est suspendu quand la visionneuse de preuves est au-dessus.
 - Comportement d'ouverture identique au plan : **dépliée par défaut tant que
   la tâche est en cours, repliée sinon** (`criteriaDefaultOpen` calqué sur
   `planDefaultOpen`, préférence manuelle de repli/dépli mémorisée par session

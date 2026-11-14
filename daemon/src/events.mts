@@ -7,6 +7,7 @@ import { deliveryEventRelevant, invalidateDelivery } from './delivery.mts';
 import { invalidatePlan } from './plan.mts';
 import { invalidateCriteria } from './criteria.mts';
 import { invalidateAnswers } from './answers.mts';
+import { invalidateRenders } from './renders.mts';
 
 export interface EventFrame { type?: string; data?: Record<string, unknown> }
 
@@ -22,5 +23,6 @@ export function ingestEvent(frame: EventFrame): void {
     invalidatePlan(sid || undefined);
     invalidateCriteria(sid || undefined);
     invalidateAnswers(sid || undefined);
+    invalidateRenders(sid || undefined);
   }
 }

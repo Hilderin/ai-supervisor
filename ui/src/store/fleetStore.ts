@@ -76,6 +76,8 @@ interface FleetState {
   setError: (error: string | null) => void;
   setSelected: (id: string | null) => void;
   closeSession: (id: string, at?: number) => void;
+  /** oublie un marqueur de fermeture local (carte restaurée depuis la recherche) */
+  forgetClosed: (id: string) => void;
   setDraft: (id: string, text: string) => void;
   clearDraft: (id: string) => void;
   setAttachments: (id: string, next: ComposerAttachment[]) => void;
@@ -176,6 +178,13 @@ export const useFleetStore = create<FleetState>((set) => ({
       );
       if (selected !== s.selected) saveSelected(selected);
       return { closed, order, seenAt, selected };
+    }),
+  forgetClosed: (id) =>
+    set((s) => {
+      if (!(id in s.closed)) return s;
+      const closed = { ...s.closed };
+      delete closed[id];
+      return { closed };
     }),
   setDraft: (id, text) =>
     set((s) => ({ drafts: { ...s.drafts, [id]: text } })),

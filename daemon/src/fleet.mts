@@ -17,10 +17,11 @@ export interface OpenchamberSession {
 }
 import { setBase as setResumeBase, resumeTick } from './resume.mts';
 import { forgetFleetSeen, getSupervisorSession, listFleetSeen, upsertFleetSeen } from './state.mts';
-import { SUPERVISOR_DIR } from './supervisor.mts';
+import { SUPERVISOR_DIR, notifySupervisorStatus } from './supervisor.mts';
 import { getPlanSnapshot } from './plan.mts';
 import { criteriaCounts, readCriteria, type CriteriaCounts } from './criteria.mts';
 import { harvestAnswers } from './answers.mts';
+import { harvestRenders } from './renders.mts';
 import { activityOf, activityTracker, type LiveActivity } from './activity.mts';
 import { SessionIssueTracker, type SessionIssue } from './session-issues.mts';
 const sessionIssues = new SessionIssueTracker();
@@ -55,6 +56,8 @@ let lastGood = 0;
 
 export function openchamberUrl(path: string) { return `${base}${path}`; }
 export function currentFleet(): Fleet { return cachedFleet; }
+/** Annuaire complet des sessions (pour la recherche : les cartes fermées n'y sont pas). */
+export function sessionCatalog(): OpenchamberSession[] { return [...sessionsIndex.values()]; }
 export function setBase(b: string) {
   base = b.endsWith('/') ? b.slice(0, -1) : b;
   setResumeBase(base);
@@ -290,6 +293,15 @@ async function enrichAnswers(fleet: Fleet): Promise<void> {
   }
 }
 
+/** Rendus OpenChamber : moissonnage des tool parts `openchamber_render` dans
+ *  task_render (même mécanisme que les réponses), AVANT que enrichedFleet lise
+ *  les compteurs de non-vus. */
+async function enrichRenders(fleet: Fleet): Promise<void> {
+  for (const row of fleet.rows) {
+    await harvestRenders(row.id, row.lastUpdateAt);
+  }
+}
+
 /**
  * Activité courante des cartes busy. Les événements SSE du tour alimentent le
  * tracker sans requête ; `activityOf` ne relit la conversation qu'en secours
@@ -312,6 +324,9 @@ async function runPoll(): Promise<void> {
     if (Array.isArray(sessions?.data)) {
       sessionsIndex = new Map(sessions.data.map(s => [s.id, s]));
     }
+    // fin de tour du chat de supervision : marquer sa conversation lue (pulse
+    // indépendant de l'UI, la session n'est jamais une carte de flotte)
+    notifySupervisorStatus(status.sessions);
     // un id inconnu de l'annuaire ? (fantôme du statut, ou session trop récente pour
     // l'annuaire du cycle — 15 s) on re-tire l'annuaire immédiatement avant de bâtir.
     const unknown = Object.keys(status.sessions ?? {}).some(id => !sessionsIndex.has(id));
@@ -334,6 +349,7 @@ async function runPoll(): Promise<void> {
     await enrichPlanProgress(fleet);
     await enrichCriteriaCounts(fleet);
     await enrichAnswers(fleet);
+    await enrichRenders(fleet);
     await enrichActivity(fleet);
     cachedFleet = fleet;
     lastGood = Date.now();

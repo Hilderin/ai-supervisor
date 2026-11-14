@@ -133,6 +133,8 @@ export interface FleetRow {
   activity?: FleetActivity;
   /** réponses au propriétaire (tool `answer`) pas encore lues (« Got it ») */
   unreadAnswers?: number;
+  /** rendus OpenChamber (tool `openchamber_render`) pas encore marqués vus */
+  unreadRenders?: number;
 }
 
 /** Réponse d'une tâche au propriétaire, `GET /api/fleet/answers?sessionId=…`. */
@@ -141,6 +143,18 @@ export interface TaskAnswer {
   at: number;
   text: string;
   question?: string | null;
+  read_at?: number | null;
+}
+
+/** Rend d'une tâche, `GET /api/fleet/renders?sessionId=…` (tool `openchamber_render`). */
+export interface TaskRender {
+  id: number;
+  at: number;
+  title: string;
+  /** `html` : page affichée dans une iframe sandboxée ; `ui` : source openui-lang */
+  kind: 'html' | 'ui';
+  /** page HTML ou source openui-lang, selon `kind` */
+  content: string;
   read_at?: number | null;
 }
 
@@ -290,4 +304,31 @@ export interface Delivery {
   render?: DeliveryRender;
   truncated?: boolean;
   error?: string;
+}
+
+/** Segment d'un extrait de recherche (surlignage des correspondances). */
+export interface SnippetSegment {
+  text: string;
+  match?: boolean;
+}
+
+/** Une conversation trouvée par la recherche (titre ou message). */
+export interface SearchResult {
+  sessionId: string;
+  title: string;
+  project: string;
+  directory: string;
+  /** dernière activité connue de la conversation */
+  at: number;
+  closed: boolean;
+  titleMatch: boolean;
+  snippet?: SnippetSegment[];
+  role?: string;
+}
+
+/** `GET /api/search?q=.` : titres du catalogue + messages de l'index OpenChamber. */
+export interface SearchResponse {
+  state: 'ok' | 'too_short' | 'unavailable';
+  results: SearchResult[];
+  query?: string;
 }

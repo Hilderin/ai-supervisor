@@ -787,3 +787,63 @@ La campagne de bout en bout et ses preuves sont dans [chat-superviseur-tests.md]
 - [Architecture MVP1](architecture.md) : daemon, SQLite, routes.
 - [Spike d'intégration](spike-integration.md) : constats réels.
 - [UI React](implementation-ui-react.md) : composants et flux existants.
+
+## 18. Évolutions du 2026-11-14 (mode, fin de tour, nommage, cartes)
+
+### 18.1 Le mode n'est plus préfixé au message du propriétaire
+
+Décision du propriétaire : le préambule « Mode Piloter : ... » n'apprenait rien,
+la conversation tourne déjà dans l'agent `superviseur-orchestrateur`. Le mode
+actif vit maintenant dans une **instruction durable de session** :
+
+- le daemon la pose avec
+  `PUT /api/experimental/session/:id/instructions/entries/superviseur-mode`
+  (`{ value: "Mode actif : Piloter. ..." }`, ou « Mode actif : Investigation, en
+  lecture seule sur le projet « nom » (dossier). ... ») ;
+- OpenCode la rend au modèle comme message **système** au pas suivant :
+  `session.instructions.updated` porte un texte figé à l'émission et l'événement
+  est inséré en `type: system` (vérifié dans le code du serveur OpenCode) ;
+- elle est reposée au changement de mode (`configureSupervisorMode`) et à la
+  création d'une conversation ; un mémo par session évite un `PUT` à chaque poll ;
+- `sendSupervisor` et `queueSupervisor` envoient le texte du propriétaire **tel
+  quel** (`outgoingSupervisorText`), et `stripOwnerWrap` continue de dépouiller
+  l'historique écrit avant.
+
+Pourquoi pas le champ `system` de `POST /api/session/:id/prompt` : l'API
+d'OpenChamber ne le transporte pas (`PromptInput.Prompt` = `text`, `files`,
+`agents`, `skills`), et le serveur OpenCode direct n'est pas joignable (Basic auth
+détenue par OpenChamber).
+
+Conséquence d'exploitation : la définition d'agent est mise en cache par NOM côté
+OpenCode, donc le nouveau texte de `superviseur-orchestrateur.md` (qui dit où lire
+le mode) ne prend effet qu'au redémarrage d'OpenCode ; le daemon, lui, doit
+redémarrer pour poser l'instruction.
+
+### 18.2 Fin de tour : conversation marquée lue
+
+Au passage busy → idle vu par le poll de flotte du daemon (3 s,
+`notifySupervisorStatus`), la conversation est marquée lue (`markSessionRead` :
+`time.viewed` d'OpenCode, puis badge et attention d'OpenChamber). Le patch
+« In work » n'est PAS appliqué : le chat garde `openchamber.work = null` et ne
+s'invite pas dans le home d'OpenChamber. Le marquage vit côté daemon, aucun
+changement OpenChamber.
+
+### 18.3 Nom daté des conversations
+
+Une conversation neuve s'appelle « Superviseur 2026-11-14 14:32 » (heure locale,
+`supervisorTitle`). Une conversation existante restée au nom générique
+« Superviseur » est renommée une fois, avec SA date de création
+(`PATCH /api/session/:id { title }`) ; un nom choisi par le propriétaire n'est
+jamais touché (`isGenericSupervisorTitle`).
+
+### 18.4 Boutons et états des cartes
+
+- Le balai de l'en-tête est remplacé par un bouton « Nouvelle conversation »
+  au-dessus de la zone de saisie (design retenu : une seule action, visible) ;
+  l'ancienne conversation reste dans OpenChamber.
+- Le pied d'une carte « à compléter » porte « Terminé » au lieu de « Détail » :
+  le clic clôt la tâche, comme sur une carte terminée ; ouvrir le détail reste le
+  clic sur la carte.
+- Une carte est TERMINÉE quand le plan est à 100 % et les critères, s'il y en a,
+  sont tous validés (`criteriaSatisfied`) : sans critère défini, le plan suffit.
+  Le warning ne liste plus « Aucun critère défini » comme un manque.

@@ -1,10 +1,11 @@
 /**
- * Geste OpenChamber à la fermeture d'une tâche : marquer la conversation de la
- * tâche comme lue et retirer son état « In work ».
+ * Gestes OpenChamber autour d'une conversation : marquer lue, retirer « In work ».
  *
- * Trois appels, tous best-effort (aucun échec ne remonte, la fermeture de la
- * tâche ne dépend pas d'OpenChamber : session introuvable, instance injoignable,
- * API absente : tout finit en ligne de journal) :
+ * `markSessionRead` fait les deux premiers appels (état « lu » durable d'OpenCode
+ * et badge/attention d'OpenChamber) ; `markTaskSessionRead` ajoute le retrait du
+ * « In work » à la fermeture d'une tâche. Le chat de supervision utilise
+ * `markSessionRead` à la fin de son tour (le mode lecture ne doit pas toucher au
+ * marqueur « In work », qu'il garde à null).
  *
  * 1. OpenCode (proxifié par OpenChamber) : POST /api/session/:id/view avec
  *    { idle: <time.idle courant> } : « Mark the idle transition observed by the
@@ -49,12 +50,14 @@ async function ocFetch(path: string, init?: RequestInit): Promise<{ ok: boolean;
 }
 
 /**
- * Marque la session lue dans OpenChamber et retire son « In work ». Ne lève
- * jamais : la fermeture d'une tâche ne doit pas échouer parce qu'OpenChamber
- * est injoignable ou ne connaît pas la session. Journalise le résultat
- * (succès ou détail de l'échec) dans le journal de la tâche.
+ * Marque une session comme lue dans OpenChamber : l'état « lu » durable
+ * d'OpenCode (time.viewed sur la transition idle observée) puis le badge natif
+ * et l'attention de session. Best-effort, journalisé sous `logId`.
+ *
+ * Utilisé par la fermeture d'une tâche ET par le chat de supervision quand son
+ * tour se termine (le propriétaire n'a plus à marquer lire lui-même).
  */
-export async function markTaskSessionRead(sessionId: string): Promise<{ read: boolean; workDone: boolean }> {
+export async function markSessionRead(sessionId: string, logId = sessionId): Promise<boolean> {
   // 1. état « lu » durable d'OpenCode : time.viewed = transition idle observée
   let read = false;
   const idleRef = await ocFetch(`/api/session/${sessionId}`);
@@ -65,7 +68,7 @@ export async function markTaskSessionRead(sessionId: string): Promise<{ read: bo
       idle = data.data?.time?.idle;
     } catch { /* réponse illisible : on saute le marquage OpenCode */ }
     if (idle === undefined) {
-      logEvent(sessionId, 'note', 'OpenChamber : rien à marquer lu (aucun tour terminé)');
+      logEvent(logId, 'note', 'OpenChamber : rien à marquer lu (aucun tour terminé)');
       read = true;
     } else {
       const view = await ocFetch(`/api/session/${sessionId}/view`, {
@@ -75,23 +78,34 @@ export async function markTaskSessionRead(sessionId: string): Promise<{ read: bo
       });
       if (view.ok) {
         read = true;
-        logEvent(sessionId, 'note', 'OpenChamber : conversation marquée lue (time.viewed)');
+        logEvent(logId, 'note', 'OpenChamber : conversation marquée lue (time.viewed)');
       } else {
-        logEvent(sessionId, 'note', `échec best-effort OpenChamber : marquage lu : ${view.detail}`);
+        logEvent(logId, 'note', `échec best-effort OpenChamber : marquage lu : ${view.detail}`);
         console.warn(`[superviseur] ${sessionId} : échec marquage lu : ${view.detail}`);
       }
     }
   } else {
-    logEvent(sessionId, 'note', `échec best-effort OpenChamber : lecture de la session : ${idleRef.detail}`);
+    logEvent(logId, 'note', `échec best-effort OpenChamber : lecture de la session : ${idleRef.detail}`);
     console.warn(`[superviseur] ${sessionId} : échec lecture session : ${idleRef.detail}`);
   }
 
   // 2. badge natif + attention de session (OpenChamber)
   const attention = await ocFetch(`/api/sessions/${sessionId}/view`, { method: 'POST' });
   if (!attention.ok) {
-    logEvent(sessionId, 'note', `échec best-effort OpenChamber : badge/attention : ${attention.detail}`);
+    logEvent(logId, 'note', `échec best-effort OpenChamber : badge/attention : ${attention.detail}`);
     console.warn(`[superviseur] ${sessionId} : échec badge/attention : ${attention.detail}`);
   }
+  return read;
+}
+
+/**
+ * Marque la session lue dans OpenChamber et retire son « In work ». Ne lève
+ * jamais : la fermeture d'une tâche ne doit pas échouer parce qu'OpenChamber
+ * est injoignable ou ne connaît pas la session. Journalise le résultat
+ * (succès ou détail de l'échec) dans le journal de la tâche.
+ */
+export async function markTaskSessionRead(sessionId: string): Promise<{ read: boolean; workDone: boolean }> {
+  const read = await markSessionRead(sessionId);
 
   // 3. retrait du « In work » (le même patch que le « Done » de l'UI)
   const work = await ocFetch(`/api/openchamber/sessions/${sessionId}/metadata`, {

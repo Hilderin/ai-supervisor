@@ -34,10 +34,13 @@ describe('isDone déterministe (plan 100 % + critères tous validés + au repos)
     expect(isWarning(r)).toBe(true);
   });
 
-  test('critères manquants ou non validés → warning', () => {
+  test('critères non validés → warning ; aucun critère → le plan fait foi', () => {
     expect(isWarning(row({ plan: plan(3, 3), criteria: crit(1, 2) }))).toBe(true);
-    expect(isWarning(row({ plan: plan(3, 3), criteria: crit(0, 0) }))).toBe(true);      // aucun critère défini
-    expect(isDone(row({ plan: plan(3, 3), criteria: crit(0, 0) }))).toBe(false);
+    expect(isDone(row({ plan: plan(3, 3), criteria: crit(1, 2) }))).toBe(false);
+    // décision du 2026-11-14 : sans critère défini, tous les todos suffisent
+    expect(isDone(row({ plan: plan(3, 3), criteria: crit(0, 0) }))).toBe(true);
+    expect(isDone(row({ plan: plan(3, 3) }))).toBe(true);
+    expect(isWarning(row({ plan: plan(3, 3) }))).toBe(false);
   });
 
   test('aucun plan → pas TERMINÉ (le travail n est pas cadré)', () => {

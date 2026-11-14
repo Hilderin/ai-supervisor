@@ -228,7 +228,7 @@ export const useSupervisorStore = create<SupervisorStore>((set, get) => ({
       const next = await newSupervisor();
       set({ state: next, creating: false, loading: false });
     } catch {
-      set({ state: before, creating: false, sendError: 'Nettoyage impossible. Le superviseur ne répond pas.' });
+      set({ state: before, creating: false, sendError: 'Nouvelle conversation impossible. Le superviseur ne répond pas.' });
     }
   },
 
