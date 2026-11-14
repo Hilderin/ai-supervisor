@@ -10,6 +10,7 @@ import { currentFleet, openchamberUrl, pollOnce, type Fleet } from './fleet.mts'
 import { ackAnswers, getAnswers, unreadAnswerCounts } from './answers.mts';
 import { ackRenders, getRenders, unreadRenderCounts } from './renders.mts';
 import { getDelivery } from './delivery.mts';
+import { browserCdpStatus, publishBrowserCdp } from './browser-cdp.mts';
 import { readSessionAsset } from './assets.mts';
 import { openChamberMiniChatUrl } from './openchamber-link.mts';
 import { getSupervisorSession, logEvent, upsertTaskState, getTaskState, reopenTaskState } from './state.mts';
@@ -120,6 +121,21 @@ async function handleApi(req: http.IncomingMessage, res: http.ServerResponse, ur
     const fleet = enrichedFleet();
     void pollOnce();
     json(res, 200, fleet);
+    return;
+  }
+  if (path === '/api/fleet/browser' && req.method === 'GET') {
+    // contrat du navigateur embarqué : le composant l'annonce, on le sert avec
+    // une sonde de vivacité (une entrée périmée n'est jamais « disponible »)
+    json(res, 200, await browserCdpStatus());
+    return;
+  }
+  if (path === '/api/fleet/browser' && req.method === 'POST') {
+    // appelé par le composant Electron : il possède le navigateur, donc lui seul
+    // connaît le port. Un port invalide ne remplace pas l'entrée existante.
+    const body = await readBody(req);
+    const entry = publishBrowserCdp(body);
+    if (!entry) { json(res, 400, { ok: false, error: 'invalid_port' }); return; }
+    json(res, 200, { ok: true, port: entry.port, cdpUrl: `http://127.0.0.1:${entry.port}` });
     return;
   }
   if (path === '/api/supervisor' && req.method === 'GET') {

@@ -23,6 +23,7 @@ import { announceSupervisorMode, isSupervisorBusy, isSupervisorSession, SUPERVIS
 import { taskModelRef } from './prefs.mts';
 import { findModel } from './models.mts';
 import { markTaskSessionRead } from './oc-session.mts';
+import { browserCdpUrl } from './browser-cdp.mts';
 
 export interface ToolResult {
   ok: boolean;
@@ -285,6 +286,17 @@ function composePrompt(p: {
     ...(p.constraints.length ? p.constraints.map(c => `- ${c}`) : ['- Aucune contrainte supplémentaire.']),
   ];
   if (p.context) lines.push('', 'Contexte :', p.context);
+  // Le navigateur appartient au composant : quand il en publie un, la tâche doit
+  // s'y rattacher au lieu de lancer le sien (sinon Chrome jetable et about:blank).
+  const browserCdp = browserCdpUrl();
+  if (browserCdp) {
+    lines.push(
+      '',
+      'Navigateur embarqué du Superviseur :',
+      `- un navigateur piloté par le propriétaire est exposé sur ${browserCdp} ; pour voir ou piloter une page, rattache-toi par CDP (skill browser-attach-cdp : \`chromium.connectOverCDP\`, puis l'onglet déjà ouvert) ;`,
+      '- ne lance jamais ton propre navigateur : un Chrome jetable n\'a pas les sessions du propriétaire et laisse des onglets about:blank.',
+    );
+  }
   lines.push(
     '',
     'Plan : tiens ton plan à jour en continu (pas de limite au nombre d\'éléments) : une liste séquentielle d\'étapes, découpées par petits incréments, posée et modifiée avec `planwrite`.',

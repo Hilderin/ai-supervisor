@@ -19,19 +19,26 @@ Pourquoi c'est la seule bonne façon :
 
 ## 0. État du mécanisme
 
-Le contrat ci-dessous est celui du composant. Si l'endpoint est absent ou ne répond pas, le
-mécanisme n'est pas encore branché sur cette instance : va en section 5, ne lance rien.
-Ne conclus jamais « donc je lance mon navigateur » : un Chrome jetable ne prouve rien au
-propriétaire et laisse des onglets fantômes.
+Le Superviseur embarque ce navigateur et publie son endpoint. Deux cas seulement :
+
+- l'endpoint répond : rattache-toi (sections 1 à 4) ;
+- l'endpoint est absent ou muet (`available: false`) : va en section 5 et ne lance **rien**.
+  Ne conclus jamais « donc je lance mon navigateur » : un Chrome jetable ne prouve rien au
+  propriétaire et laisse des onglets fantômes.
+
+Une page n'existe dans le panneau qu'une fois que le propriétaire (ou toi) y a navigué : si
+`/json/list` ne montre que la page du shell, le panneau est vide, pas cassé.
 
 ## 1. Trouver l'endpoint, dans cet ordre
 
-1. `SUPERVISEUR_BROWSER_CDP` (variable d'environnement posée sur la tâche), valeur
-   `http://127.0.0.1:<port>`.
-2. `%APPDATA%\Superviseur\browser-cdp.json`, champ `cdpUrl` (écrit par le composant).
-3. `GET /api/fleet/browser` sur l'API locale du Superviseur, champ `cdpUrl`.
+1. `GET /api/fleet/browser` sur l'API locale du Superviseur (port `5180` par défaut) : champ
+   `cdpUrl`, plus `available` et `reason`.
+2. `SUPERVISEUR_BROWSER_CDP` (variable d'environnement), s'il y en a une.
+3. Le fichier `<données du Superviseur>/browser-cdp.json`, champ `port` :
+   `%APPDATA%\superviseur\browser-cdp.json` en application empaquetée, `data\browser-cdp.json`
+   du dépôt en développement.
 
-Puis vérifie qu'il répond, sans rien lancer :
+Puis vérifie que le port répond, sans rien lancer :
 
 ```bash
 curl -s http://127.0.0.1:<port>/json/version
@@ -98,13 +105,19 @@ panneau à la fin, le propriétaire peut vouloir la regarder.
 
 Ordre des réponses, du moins intrusif au plus :
 
-1. Vérifier que le port est le bon (`/json/version` répond 403 ? mauvais port).
-2. Dire au propriétaire que le navigateur du Superviseur n'expose pas de port, avec la preuve
-   (`ECONNREFUSED` sur `http://127.0.0.1:<port>`), et proposer de démarrer le composant.
-3. Si le panneau est là mais que Playwright ne voit **aucune** page de panneau (seulement la
-   page du shell), c'est un panneau `webview` : les targets de type `webview` sont ignorés par
-   Playwright. Le dire tel quel, ne pas contourner.
-4. **Jamais** de repli sur un `chromium.launch` personnel.
+1. Lire `reason` dans `GET /api/fleet/browser` : `not_published` (le composant n'a rien
+   annoncé : application ancienne, ou pas encore démarrée) ou `not_responding` (annoncé mais
+   muet : le composant a été fermé depuis, l'entrée est périmée).
+2. Dire au propriétaire, avec la preuve (`ECONNREFUSED` sur `http://127.0.0.1:<port>`, ou la
+   réponse de l'API), que le navigateur n'expose pas de port, et proposer de démarrer ou
+   relancer le Superviseur.
+3. Si le port répond mais que Playwright ne voit que la page du shell, le panneau est vide :
+   demande au propriétaire d'ouvrir le panneau et une adresse (un clic « Navigateur », puis une
+   URL). Ne navigue pas le shell à sa place.
+4. Si les pages du panneau n'apparaissent pas du tout malgré un panneau visible, c'est un
+   panneau `webview` (target de type `webview`, que Playwright ignore) : le dire tel quel, ne
+   pas contourner.
+5. **Jamais** de repli sur un `chromium.launch` personnel.
 
 ## 6. Pièges connus
 

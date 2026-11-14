@@ -207,6 +207,14 @@ Directives pour tout agent travaillant dans ce repo.
 - **UI** : `RendersSection` ne s'affiche qu'avec au moins un rendu ; les non-vus s'affichent en ligne (iframe sandboxée ou `UiBlock`), chacun avec « Vu » (persisté) et « Agrandir » (popup `RenderDialog`, portail, Échap en capture avec `stopPropagation` pour ne pas fermer le détail). Les vus restent dans « Rendus antérieurs », sans iframe par ligne (seul « Agrandir » les ouvre).
 - Tests : `daemon/test/renders.test.mts` (extraction html/ui, refus et partiels ignorés, moissonnage idempotent, compteur, ack par ids, migration) et `ui/src/components/RendersSection.test.tsx` (découpe, section vide, iframe vs `UiBlock`, popup).
 
+### Navigateur embarqué et attache CDP (2026-11-14)
+
+- **Le port CDP est publié par le composant, jamais par le daemon** : le daemon ne possède pas le navigateur et ne peut donc pas ouvrir de port. Electron pose `remote-debugging-port=0`, lit `DevToolsActivePort` puis annonce `{port}` au daemon (`POST /api/fleet/browser`) ; le daemon le sert (`GET`) avec une sonde de vivacité. Doc : `docs/analyses/mvp1/navigateur-embarque.md`.
+- **Playwright ne voit que les targets CDP de type `page`** : une `<webview>` Electron est un target `webview`, donc invisible pour `connectOverCDP` même avec un port ouvert. Le panneau du Superviseur est un `WebContentsView` (type `page`) pour cette raison ; ne pas revenir à `<webview>` en croyant simplifier.
+- **Une seule page, jamais d'onglets** : `target=_blank` et `window.open` chargent dans la page courante. Fermer le panneau cache la vue sans détruire la page, pour que l'agent la retrouve.
+- **Le panneau vit dans le main process** : l'UI ne fournit qu'un rectangle (`superviseur:browser:layout`) via le preload, et reçoit l'état. Une capture de page (CDP `Page.captureScreenshot` sur le shell) montre un trou à la place de la vue native : c'est normal, la vue est une surface séparée.
+- **Port en loopback mais non authentifié** : il expose tous les targets du processus, y compris l'UI. Surface assumée, à traiter comme l'API locale.
+
 ### Repo & docs
 
 - **Backtick dans les commentaires SQL de `db.exec` (state.mts)** : tout le bloc est un template literal JS ; un backtick dans un commentaire SQL (même une ligne de doc) casse le parse de fichier entier avec une erreur d'astuce hors de l'endroit réel. Utiliser des guillemets français dans les commentaires SQL. (Récidive le 2026-11-08 avec la colonne signature de verifier_map : leçon relue puis reappliquée à l'identique.)

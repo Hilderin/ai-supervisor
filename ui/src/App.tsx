@@ -4,6 +4,8 @@ import { PanelLeftIcon } from './components/Icons';
 import { SupervisorChat } from './components/SupervisorChat';
 import { TaskInspector } from './components/TaskInspector';
 import { OpenChamberPanel } from './components/OpenChamberPanel';
+import { BrowserPanel } from './components/BrowserPanel';
+import { browserPanelBridge } from './lib/browserPanel';
 import { useFleetStream } from './hooks/useFleetStream';
 import { useNow } from './hooks/useNow';
 import { cardState } from './lib/cardState';
@@ -24,6 +26,9 @@ const DEFAULT_INSPECTOR = 460;
 const MIN_OPENCHAMBER = 320;
 const MAX_OPENCHAMBER = 680;
 const DEFAULT_OPENCHAMBER = 380;
+const MIN_BROWSER = 340;
+const MAX_BROWSER = 900;
+const DEFAULT_BROWSER = 460;
 const MIN_FLEET = 320;
 
 /** Colonne du chat et sa poignée, ou le rail replié (34 px + 8 px de marge). */
@@ -43,6 +48,10 @@ function clampWidth(n: number): number {
 
 function clampOpenChamber(n: number): number {
   return Math.max(MIN_OPENCHAMBER, Math.min(MAX_OPENCHAMBER, Math.round(n)));
+}
+
+function clampBrowser(n: number): number {
+  return Math.max(MIN_BROWSER, Math.min(MAX_BROWSER, Math.round(n)));
 }
 
 export default function App() {
@@ -69,6 +78,15 @@ export default function App() {
   });
   const [openChamberWidth, setOpenChamberWidth] = useState(
     () => clampOpenChamber(storedWidth('superviseur.openChamberWidth', DEFAULT_OPENCHAMBER)),
+  );
+  // Panneau navigateur : seulement dans l'application de bureau, où le composant
+  // possède une vraie page pilotable par CDP.
+  const browserAvailable = browserPanelBridge() !== null;
+  const [browserOpen, setBrowserOpen] = useState(
+    () => browserAvailable && localStorage.getItem('superviseur.browser') === 'open',
+  );
+  const [browserWidth, setBrowserWidth] = useState(
+    () => clampBrowser(storedWidth('superviseur.browserWidth', DEFAULT_BROWSER)),
   );
   // largeur réelle du conteneur des panneaux (barre de défilement éventuelle déduite)
   const [layoutWidth, setLayoutWidth] = useState(() => window.innerWidth);
@@ -98,6 +116,14 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('superviseur.openChamberWidth', String(openChamberWidth));
   }, [openChamberWidth]);
+
+  useEffect(() => {
+    localStorage.setItem('superviseur.browser', browserOpen ? 'open' : 'closed');
+  }, [browserOpen]);
+
+  useEffect(() => {
+    localStorage.setItem('superviseur.browserWidth', String(browserWidth));
+  }, [browserWidth]);
 
   // mesure le conteneur : fenêtre, barre de défilement, panneaux masqués en étroit
   useLayoutEffect(() => {
@@ -163,6 +189,49 @@ export default function App() {
   const collapseChat = () => {
     autoCollapsedChat.current = false;
     setChatOpen(false);
+  };
+
+  /**
+   * Ouvre le panneau navigateur sans écraser les largeurs voulues : quand la
+   * place manque, c'est le chat qui se replie (même geste que pour OpenChamber).
+   */
+  const openBrowser = () => {
+    const requiredWidth =
+      MIN_FLEET + browserWidth + 15 +
+      (selectedRow ? inspectorWidth + 15 : 0) +
+      (openChamberSessionId ? openChamberWidth + 15 : 0) +
+      chatAreaWidth(chatOpen, chatWidth);
+    const availableWidth = layoutRef.current?.clientWidth ?? window.innerWidth;
+    if (chatOpen && requiredWidth > availableWidth) {
+      autoCollapsedChat.current = true;
+      setChatOpen(false);
+    }
+    setBrowserOpen(true);
+  };
+
+  const closeBrowser = () => {
+    setBrowserOpen(false);
+    if (autoCollapsedChat.current) {
+      autoCollapsedChat.current = false;
+      setChatOpen(true);
+    }
+  };
+
+  const startBrowserResize = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = browserWidth;
+    const move = (ev: PointerEvent) => setBrowserWidth(clampBrowser(startWidth - (ev.clientX - startX)));
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
   };
 
   const expandChat = () => {
@@ -351,7 +420,14 @@ export default function App() {
             (chatOpen && view === 'chat') || view === 'openchamber' ? 'max-[1100px]:hidden' : null,
           )}
         >
-          <FleetBoard fleet={fleet} now={now} onOpenChamber={openChamber} />
+          <FleetBoard
+            fleet={fleet}
+            now={now}
+            onOpenChamber={openChamber}
+            browserAvailable={browserAvailable}
+            browserOpen={browserOpen}
+            onToggleBrowser={() => (browserOpen ? closeBrowser() : openBrowser())}
+          />
           {error ? (
             <div className="mt-[10px] rounded-[8px] bg-orange-soft px-[12px] py-[8px] text-[12px] text-attend">
               {error}
@@ -434,6 +510,37 @@ export default function App() {
                 sessionTitle={openChamberTitle ?? 'Superviseur'}
                 onClose={closeOpenChamber}
               />
+            </aside>
+          </>
+        ) : null}
+        {browserOpen ? (
+          <>
+            <div
+              data-testid="browser-resizer"
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Redimensionner le panneau navigateur"
+              tabIndex={0}
+              title="Redimensionner le navigateur (flèches gauche/droite)"
+              onPointerDown={startBrowserResize}
+              onKeyDown={(e) => {
+                if (e.key === 'ArrowLeft') { e.preventDefault(); setBrowserWidth((w) => clampBrowser(w + 10)); }
+                if (e.key === 'ArrowRight') { e.preventDefault(); setBrowserWidth((w) => clampBrowser(w - 10)); }
+                if (e.key === 'Home') { e.preventDefault(); setBrowserWidth(MIN_BROWSER); }
+                if (e.key === 'End') { e.preventDefault(); setBrowserWidth(MAX_BROWSER); }
+              }}
+              className="group hidden w-[15px] shrink-0 cursor-col-resize touch-none select-none items-stretch justify-center outline-none min-[1100px]:flex"
+            >
+              <span className="relative flex w-[1px] items-center justify-center bg-border transition-colors group-hover:bg-green">
+                <span className="h-[26px] w-[4px] rounded-full bg-[#d5dad5] transition-colors group-hover:bg-green" />
+              </span>
+            </div>
+            <aside
+              data-testid="browser-pane"
+              style={{ '--browser-width': `${browserWidth}px` } as CSSProperties}
+              className="h-full min-h-0 w-[var(--browser-width)] shrink-0 overflow-hidden border-l border-border bg-card max-[1100px]:hidden"
+            >
+              <BrowserPanel onClose={closeBrowser} />
             </aside>
           </>
         ) : null}

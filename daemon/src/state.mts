@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 const here = dirname(fileURLToPath(import.meta.url));
 const dataDir = process.env.SUPERVISEUR_DATA_DIR ?? join(here, '..', '..', 'data');
 mkdirSync(dataDir, { recursive: true });
+export { dataDir };
 
 export const db = new Database(join(dataDir, 'superviseur.db'));
 db.run('PRAGMA journal_mode = WAL;');

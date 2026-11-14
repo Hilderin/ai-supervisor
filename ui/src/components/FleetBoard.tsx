@@ -6,12 +6,17 @@ import { neighborSelection } from '../lib/selection';
 import { useFleetStore, visibleRows } from '../store/fleetStore';
 import type { Fleet } from '../types';
 import { SearchPopover } from './SearchPopover';
+import { GlobeIcon } from './Icons';
 import { SessionCard } from './SessionCard';
 
 interface Props {
   fleet: Fleet | null;
   now: number;
   onOpenChamber: (sessionId: string) => void;
+  /** Le panneau navigateur n'existe que dans l'application de bureau. */
+  browserAvailable?: boolean;
+  browserOpen?: boolean;
+  onToggleBrowser?: () => void;
 }
 
 /**
@@ -19,7 +24,7 @@ interface Props {
  * l'attention est portée par une barre fixe et par la carte elle-même.
  * Le détail d'une tâche est la colonne de droite (montée par App).
  */
-export function FleetBoard({ fleet, now, onOpenChamber }: Props) {
+export function FleetBoard({ fleet, now, onOpenChamber, browserAvailable, browserOpen, onToggleBrowser }: Props) {
   const closed = useFleetStore((s) => s.closed);
   const placements = useFleetStore((s) => s.placements);
   const order = useFleetStore((s) => s.order);
@@ -119,6 +124,24 @@ export function FleetBoard({ fleet, now, onOpenChamber }: Props) {
           </>
         ) : null}
         <span className="flex-1" />
+        {browserAvailable ? (
+          <button
+            type="button"
+            data-testid="toggle-browser"
+            aria-pressed={Boolean(browserOpen)}
+            title={browserOpen ? 'Fermer le navigateur du Superviseur' : 'Ouvrir le navigateur du Superviseur (les tâches peuvent le piloter par CDP)'}
+            onClick={onToggleBrowser}
+            className={cx(
+              'flex h-[22px] shrink-0 cursor-pointer items-center gap-[5px] rounded-[6px] border px-[8px] text-[11.5px]',
+              browserOpen
+                ? 'border-green bg-green-soft text-green'
+                : 'border-border bg-white text-text hover:bg-hover',
+            )}
+          >
+            <GlobeIcon />
+            Navigateur
+          </button>
+        ) : null}
         <SearchPopover now={now} {...restoreHandlers} />
       </div>
 

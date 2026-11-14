@@ -5,7 +5,7 @@
  * 4. ouvre la fenêtre sur l'UI servie par le daemon (http://127.0.0.1:5180/fleet),
  * 5. à la fermeture (et au crash), tue l'arbre watchdog+daemon : aucun process résiduel.
  */
-const { app, BrowserWindow, Menu, dialog, shell } = require('electron');
+const { app, BrowserWindow, Menu, WebContentsView, dialog, ipcMain, shell } = require('electron');
 const { spawn, spawnSync } = require('node:child_process');
 const path = require('node:path');
 const fs = require('node:fs');
@@ -13,6 +13,11 @@ const http = require('node:http');
 
 const SUPERVISEUR_PORT = Number(process.env.SUPERVISEUR_PORT ?? 5180);
 const UI_URL = `http://127.0.0.1:${SUPERVISEUR_PORT}/fleet`;
+
+// Port CDP du navigateur embarqué, choisi par Chromium (0 = libre) : c'est ce
+// port publié qui permet à un agent de s'attacher au navigateur du propriétaire
+// au lieu de lancer son propre Chrome. Doit être posé avant le ready.
+app.commandLine.appendSwitch('remote-debugging-port', '0');
 
 // userData surchargeable (SUPERVISEUR_USER_DATA) : permet de faire tourner une
 // seconde instance sur un autre port avec ses propres données et SON PROPRE
@@ -134,6 +139,8 @@ function spawnWatchdog(adopted) {
     if (!quitting) scheduleRespawn();
   });
   log(`watchdog démarré (pid=${watchdog.pid}, mode=${watchdogMode(adopted)})`);
+  // un daemon qui repart a perdu l'annonce (il la relit du disque, on la refait)
+  void publishBrowserCdp();
   // un watchdog qui tient plus de 60 s remet le compteur de relances à zéro
   setTimeout(() => { if (watchdog) respawnAttempts = 0; }, 60000);
 }
@@ -147,6 +154,232 @@ function killWatchdogTree() {
     spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true });
     log(`arbre watchdog (pid=${pid}) arrêté`);
   } catch (e) { log(`taskkill a échoué : ${e}`); }
+}
+
+// ---------------------------------------------------------------------------
+// Navigateur embarqué
+//
+// Le composant possède le navigateur, donc c'est lui qui publie le port CDP :
+// les agents s'y rattachent (Playwright connectOverCDP) et pilotent la page que
+// le propriétaire voit, au lieu de lancer un Chrome jetable à profil temporaire.
+//
+// Une seule page, volontairement : pas d'onglets, donc pas d'onglets parasites ;
+// fermer le panneau cache la vue sans détruire la page (on la retrouve intacte).
+//
+// Le port est en loopback mais NON authentifié : tout processus local peut
+// piloter ce navigateur, et aussi l'UI du Superviseur. C'est le prix de
+// l'attache, à assumer explicitement (comme l'API locale du daemon).
+// ---------------------------------------------------------------------------
+const BROWSER_PARTITION = 'persist:superviseur-browser';
+let browserView = null;
+let browserAttached = false;
+let browserVisible = false;
+let browserBounds = { x: 0, y: 0, width: 0, height: 0 };
+let cdpInfo = null;             // { port, wsPath, cdpUrl }
+let cdpPublishTimer = null;
+let cdpReadAttempts = 0;
+
+/** Chromium écrit le port retenu dans DevToolsActivePort, à la racine du profil. */
+function readDevToolsPort() {
+  try {
+    const raw = fs.readFileSync(path.join(app.getPath('userData'), 'DevToolsActivePort'), 'utf8');
+    const [portLine, wsPath] = raw.split('\n').map((line) => line.trim());
+    const port = Number(portLine);
+    if (!Number.isInteger(port) || port < 1 || port > 65535) return null;
+    return { port, wsPath: wsPath || null, cdpUrl: `http://127.0.0.1:${port}` };
+  } catch {
+    return null;
+  }
+}
+
+/** POST minimal vers le daemon (pas de dépendance HTTP dans le main process). */
+function postToDaemon(pathname, body) {
+  return new Promise((resolve) => {
+    const payload = Buffer.from(JSON.stringify(body));
+    const req = http.request({
+      host: '127.0.0.1',
+      port: SUPERVISEUR_PORT,
+      path: pathname,
+      method: 'POST',
+      timeout: 3000,
+      headers: { 'Content-Type': 'application/json', 'Content-Length': payload.length },
+    }, (res) => { res.resume(); resolve(res.statusCode === 200); });
+    req.on('timeout', () => { req.destroy(); resolve(false); });
+    req.on('error', () => resolve(false));
+    req.end(payload);
+  });
+}
+
+/**
+ * Annonce le port au daemon, qui le sert (GET /api/fleet/browser) et le rejoue
+ * sur disque. Le daemon peut démarrer après nous : on réessaie sans bloquer.
+ */
+async function publishBrowserCdp() {
+  if (!cdpInfo) {
+    cdpInfo = readDevToolsPort();
+    if (!cdpInfo) {
+      cdpReadAttempts += 1;
+      if (cdpReadAttempts <= 10) {
+        setTimeout(() => { void publishBrowserCdp(); }, 1000);
+      } else {
+        log('navigateur : DevToolsActivePort introuvable, port CDP non publié');
+      }
+      return;
+    }
+  }
+  const ok = await postToDaemon('/api/fleet/browser', {
+    port: cdpInfo.port,
+    wsPath: cdpInfo.wsPath,
+    pid: process.pid,
+  });
+  if (ok) {
+    log(`navigateur : port CDP ${cdpInfo.port} publié (${cdpInfo.cdpUrl})`);
+    if (win && !win.isDestroyed()) win.webContents.send('superviseur:browser:state', browserState());
+    return;
+  }
+  if (cdpPublishTimer) return;
+  cdpPublishTimer = setTimeout(() => { cdpPublishTimer = null; void publishBrowserCdp(); }, 2000);
+}
+
+const isHttpUrl = (value) => {
+  try {
+    const parsed = new URL(String(value));
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
+};
+
+function browserContents() {
+  return browserView && !browserView.webContents.isDestroyed() ? browserView.webContents : null;
+}
+
+/** Electron a déplacé ces prédicats dans navigationHistory : on accepte les deux. */
+function canGo(wc, direction) {
+  try {
+    const history = wc.navigationHistory;
+    if (history && typeof history[`canGo${direction}`] === 'function') return history[`canGo${direction}`]();
+  } catch { /* ancienne API */ }
+  try {
+    return Boolean(wc[`canGo${direction}`]());
+  } catch {
+    return false;
+  }
+}
+
+function browserState() {
+  const wc = browserContents();
+  return {
+    available: true,
+    open: browserVisible,
+    url: wc ? wc.getURL() : '',
+    title: wc ? wc.getTitle() : '',
+    loading: wc ? wc.isLoading() : false,
+    canGoBack: wc ? canGo(wc, 'Back') : false,
+    canGoForward: wc ? canGo(wc, 'Forward') : false,
+    cdpUrl: cdpInfo ? cdpInfo.cdpUrl : null,
+    port: cdpInfo ? cdpInfo.port : null,
+  };
+}
+
+function pushBrowserState() {
+  if (win && !win.isDestroyed()) win.webContents.send('superviseur:browser:state', browserState());
+}
+
+/**
+ * Une page, toujours la même : une demande de nouvel onglet (`target=_blank`,
+ * `window.open`) charge dans cette page au lieu d'en créer une. C'est ce qui
+ * supprime la prolifération d'onglets, côté composant comme côté agent.
+ */
+function ensureBrowserView() {
+  const existing = browserContents();
+  if (existing) return browserView;
+  const view = new WebContentsView({
+    webPreferences: {
+      partition: BROWSER_PARTITION,
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  });
+  browserView = view;
+  const wc = view.webContents;
+  wc.setWindowOpenHandler(({ url }) => {
+    if (isHttpUrl(url)) void wc.loadURL(url);
+    return { action: 'deny' };
+  });
+  wc.on('will-navigate', (event, url) => { if (!isHttpUrl(url)) event.preventDefault(); });
+  for (const name of ['did-navigate', 'did-navigate-in-page', 'did-start-loading', 'did-stop-loading', 'page-title-updated', 'render-process-gone']) {
+    wc.on(name, () => pushBrowserState());
+  }
+  return view;
+}
+
+/** La vue native couvre exactement le rectangle rapporté par l'UI. */
+function applyBrowserLayout() {
+  if (!win || win.isDestroyed()) return;
+  const usable = browserVisible && browserBounds.width >= 1 && browserBounds.height >= 1;
+  if (!usable) {
+    if (browserView && browserAttached) {
+      try { win.contentView.removeChildView(browserView); } catch { /* déjà détachée */ }
+      browserAttached = false;
+    }
+    return;
+  }
+  const view = ensureBrowserView();
+  if (!browserAttached) {
+    win.contentView.addChildView(view);
+    browserAttached = true;
+  }
+  view.setBounds(browserBounds);
+}
+
+function setupBrowserIpc() {
+  const fromOwnWindow = (event) => Boolean(win && !win.isDestroyed() && event.sender === win.webContents);
+
+  ipcMain.handle('superviseur:browser:state', (event) => (fromOwnWindow(event) ? browserState() : null));
+
+  ipcMain.handle('superviseur:browser:layout', (event, layout) => {
+    if (!fromOwnWindow(event)) return null;
+    const num = (value, fallback) => (Number.isFinite(Number(value)) ? Math.round(Number(value)) : fallback);
+    browserBounds = {
+      x: num(layout?.x, 0),
+      y: num(layout?.y, 0),
+      width: Math.max(0, num(layout?.width, 0)),
+      height: Math.max(0, num(layout?.height, 0)),
+    };
+    browserVisible = layout?.visible === true;
+    applyBrowserLayout();
+    return browserState();
+  });
+
+  ipcMain.handle('superviseur:browser:navigate', async (event, url) => {
+    if (!fromOwnWindow(event)) return null;
+    const target = String(url ?? '').trim();
+    if (!isHttpUrl(target)) return { ...browserState(), error: 'invalid_url' };
+    browserVisible = true;
+    const view = ensureBrowserView();
+    applyBrowserLayout();
+    await view.webContents.loadURL(target).catch(() => { /* page refusée : l'état le dit */ });
+    return browserState();
+  });
+
+  ipcMain.handle('superviseur:browser:action', (event, action) => {
+    if (!fromOwnWindow(event)) return null;
+    const wc = browserContents();
+    if (wc) {
+      try {
+        if (action === 'reload') wc.reload();
+        else if (action === 'back') wc.navigationHistory ? wc.navigationHistory.goBack() : wc.goBack();
+        else if (action === 'forward') wc.navigationHistory ? wc.navigationHistory.goForward() : wc.goForward();
+      } catch { /* course avec une destruction de page */ }
+    }
+    if (action === 'hide') {
+      browserVisible = false;
+      applyBrowserLayout();
+    }
+    return browserState();
+  });
 }
 
 function scheduleRespawn() {
@@ -166,6 +399,13 @@ function createWindow() {
     title: 'Superviseur',
     show: false,
     backgroundColor: '#111113',
+    webPreferences: {
+      // Pont du panneau navigateur : la page native (WebContentsView) est
+      // possédée par ce process, l'UI ne fait que lui donner un rectangle.
+      preload: path.join(__dirname, 'preload.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
   });
   Menu.setApplicationMenu(null);
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -173,7 +413,16 @@ function createWindow() {
     return { action: 'deny' };
   });
   win.once('ready-to-show', () => win.show());
-  win.on('closed', () => { win = null; });
+  win.on('closed', () => {
+    win = null;
+    browserAttached = false;
+    browserVisible = false;
+    // la fenêtre ferme la page avec elle : aucun navigateur fantôme ne survit
+    if (browserView) {
+      try { browserView.webContents.close(); } catch { /* déjà détruite */ }
+      browserView = null;
+    }
+  });
 }
 
 function loadUiWhenReady() {
@@ -236,7 +485,9 @@ if (!gotLock) {
     openLog();
     log(`démarrage (packaged=${app.isPackaged}, appRoot=${appRoot}, bun=${bunExe})`);
     setupAppLifecycle();
+    setupBrowserIpc();
     createWindow();
+    void publishBrowserCdp();
 
     const alreadyUp = await probeSuperviseur();
     if (alreadyUp) log('daemon déjà en marche sur le port : adoption, pas de nouveau daemon');

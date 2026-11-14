@@ -10,6 +10,7 @@ directories:
 asar: false
 files:
   - electron/main.cjs
+  - electron/preload.cjs
   - package.json
 extraResources:
   - from: electron/resources/bun.exe
