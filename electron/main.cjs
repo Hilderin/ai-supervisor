@@ -166,6 +166,11 @@ function killWatchdogTree() {
 // Une seule page, volontairement : pas d'onglets, donc pas d'onglets parasites ;
 // fermer le panneau cache la vue sans détruire la page (on la retrouve intacte).
 //
+// Deux règles rendent le panneau visible quand une tâche ouvre une page :
+// la page existe dès le démarrage (une tâche n'a aucune cible à créer : mesuré,
+// Target.createTarget répond « Not supported »), et toute navigation de cette
+// page révèle le panneau, même fermé par le propriétaire.
+//
 // Le port est en loopback mais NON authentifié : tout processus local peut
 // piloter ce navigateur, et aussi l'UI du Superviseur. C'est le prix de
 // l'attache, à assumer explicitement (comme l'API locale du daemon).
@@ -269,10 +274,13 @@ function canGo(wc, direction) {
 
 function browserState() {
   const wc = browserContents();
+  const rawUrl = wc ? wc.getURL() : '';
   return {
     available: true,
     open: browserVisible,
-    url: wc ? wc.getURL() : '',
+    // about:blank = document initial de la vue, pas une page : le panneau doit
+    // garder son invite « Aucune page ouverte » au lieu d'afficher une adresse.
+    url: rawUrl && rawUrl !== 'about:blank' ? rawUrl : '',
     title: wc ? wc.getTitle() : '',
     loading: wc ? wc.isLoading() : false,
     canGoBack: wc ? canGo(wc, 'Back') : false,
@@ -284,6 +292,19 @@ function browserState() {
 
 function pushBrowserState() {
   if (win && !win.isDestroyed()) win.webContents.send('superviseur:browser:state', browserState());
+}
+
+/**
+ * Une navigation de la page du panneau révèle le panneau dans l'UI : ce qu'une
+ * tâche ouvre devient visible sans que le propriétaire ait à cliquer.
+ *
+ * Seule une navigation appelle cette fonction, jamais un changement d'état ni la
+ * fermeture du panneau : fermer ne navigue pas, donc le panneau ne peut pas se
+ * rouvrir en boucle. Panneau déjà affiché : rien à faire.
+ */
+function revealBrowserPanel() {
+  if (browserVisible) return;
+  if (win && !win.isDestroyed()) win.webContents.send('superviseur:browser:reveal');
 }
 
 /**
@@ -309,9 +330,25 @@ function ensureBrowserView() {
     return { action: 'deny' };
   });
   wc.on('will-navigate', (event, url) => { if (!isHttpUrl(url)) event.preventDefault(); });
+  // Electron récent : un objet details en premier argument (les positionnels sont
+  // dépréciés) ; on lit les deux formes pour ne pas dépendre de la version.
+  wc.on('did-start-navigation', (details, url, isInPlace, isMainFrame) => {
+    const target = String(details?.url ?? url ?? '');
+    const sameDocument = details?.isSameDocument ?? isInPlace === true;
+    const mainFrame = details?.isMainFrame ?? isMainFrame !== false;
+    // Seule une vraie page se montre : document principal, http(s) ; une ancre
+    // (même document) ne change pas la page, et l'initialisation de la vue en
+    // about:blank n'est pas une navigation de tâche.
+    if (!mainFrame || sameDocument || !isHttpUrl(target)) return;
+    revealBrowserPanel();
+  });
   for (const name of ['did-navigate', 'did-navigate-in-page', 'did-start-loading', 'did-stop-loading', 'page-title-updated', 'render-process-gone']) {
     wc.on(name, () => pushBrowserState());
   }
+  // Document initial : sans lui la page n'a pas de frame, et un client CDP reste
+  // muet sur les commandes qui en dépendent (mesuré : Page.enable sans réponse,
+  // alors que Playwright l'appelle en s'attachant). Chargé avant toute attache.
+  void wc.loadURL('about:blank').catch(() => { /* vue détruite entre-temps */ });
   return view;
 }
 
@@ -413,6 +450,11 @@ function createWindow() {
     return { action: 'deny' };
   });
   win.once('ready-to-show', () => win.show());
+  // La page du panneau existe dès le démarrage, même panneau fermé : c'est la
+  // seule cible qu'une tâche peut piloter (elle ne peut pas en créer), donc elle
+  // doit être là avant que le propriétaire ouvre quoi que ce soit. Détachée de la
+  // fenêtre tant que le panneau est fermé, elle coûte un process de rendu vide.
+  ensureBrowserView();
   win.on('closed', () => {
     win = null;
     browserAttached = false;

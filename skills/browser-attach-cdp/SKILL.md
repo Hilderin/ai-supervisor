@@ -29,6 +29,11 @@ Le Superviseur embarque ce navigateur et publie son endpoint. Deux cas seulement
 Une page n'existe dans le panneau qu'une fois que le propriétaire (ou toi) y a navigué : si
 `/json/list` ne montre que la page du shell, le panneau est vide, pas cassé.
 
+Depuis le 2026-11-14, la page du panneau existe **dès le démarrage**, même panneau fermé
+(target `page` sur `about:blank`), et ta première navigation la fait **apparaître chez
+le propriétaire** : le panneau s'ouvre tout seul. Le propriétaire peut le refermer, ta
+navigation suivante le rouvrira. Une navigation de même document (ancre) ne l'ouvre pas.
+
 ## 1. Trouver l'endpoint, dans cet ordre
 
 1. `GET /api/fleet/browser` sur l'API locale du Superviseur (port `5180` par défaut) : champ
@@ -72,7 +77,8 @@ Règles dures :
 - **jamais** piloter la page du shell (l'interface du Superviseur). Elle est dans la même
   connexion, elle n'est pas ton sujet. Filtre par URL, pas par index dans la liste ;
 - une action = l'onglet du panneau. Si la page est en `about:blank`, ce n'est pas une raison
-  d'en créer une autre : `page.goto(url)` réutilise celle-là.
+  d'en créer une autre : `page.goto(url)` réutilise celle-là. C'est le cas normal quand
+  personne n'a encore navigué depuis le démarrage.
 
 `isShellUrl` : l'URL du shell est celle du composant (par exemple `.../fleet`, `.../index.html`,
 `file://.../shell.html`). Le plus sûr est de filtrer sur l'URL que la page est censée montrer
@@ -113,7 +119,9 @@ Ordre des réponses, du moins intrusif au plus :
    relancer le Superviseur.
 3. Si le port répond mais que Playwright ne voit que la page du shell, le panneau est vide :
    demande au propriétaire d'ouvrir le panneau et une adresse (un clic « Navigateur », puis une
-   URL). Ne navigue pas le shell à sa place.
+   URL). Ne navigue pas le shell à sa place. Depuis le 2026-11-14 ce cas ne devrait plus
+   arriver (la page du panneau est créée au démarrage) : l'observer signifie une application
+   plus ancienne, pas un contournement à inventer.
 4. Si les pages du panneau n'apparaissent pas du tout malgré un panneau visible, c'est un
    panneau `webview` (target de type `webview`, que Playwright ignore) : le dire tel quel, ne
    pas contourner.

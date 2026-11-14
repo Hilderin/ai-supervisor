@@ -21,4 +21,11 @@ contextBridge.exposeInMainWorld('superviseurBrowser', {
     ipcRenderer.on('superviseur:browser:state', listener);
     return () => ipcRenderer.removeListener('superviseur:browser:state', listener);
   },
+  // Le composant signale une navigation de la page du panneau : c'est elle, et
+  // elle seule, qui fait ouvrir le panneau sans clic du propriétaire.
+  onReveal: (handler) => {
+    const listener = () => handler();
+    ipcRenderer.on('superviseur:browser:reveal', listener);
+    return () => ipcRenderer.removeListener('superviseur:browser:reveal', listener);
+  },
 });

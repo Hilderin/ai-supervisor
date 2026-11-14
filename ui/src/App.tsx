@@ -5,7 +5,7 @@ import { SupervisorChat } from './components/SupervisorChat';
 import { TaskInspector } from './components/TaskInspector';
 import { OpenChamberPanel } from './components/OpenChamberPanel';
 import { BrowserPanel } from './components/BrowserPanel';
-import { browserPanelBridge } from './lib/browserPanel';
+import { browserPanelBridge, watchBrowserReveal } from './lib/browserPanel';
 import { useFleetStream } from './hooks/useFleetStream';
 import { useNow } from './hooks/useNow';
 import { cardState } from './lib/cardState';
@@ -216,6 +216,15 @@ export default function App() {
       setChatOpen(true);
     }
   };
+
+  // Une tâche qui ouvre une page (navigation par CDP) révèle le panneau : c'est
+  // ce qui rend visible ce qu'elle regarde. Le dernier openBrowser est lu par
+  // référence pour que l'abonnement du pont reste posé une seule fois.
+  const openBrowserRef = useRef(openBrowser);
+  useEffect(() => {
+    openBrowserRef.current = openBrowser;
+  });
+  useEffect(() => watchBrowserReveal(browserPanelBridge(), () => openBrowserRef.current()), []);
 
   const startBrowserResize = (e: React.PointerEvent<HTMLDivElement>) => {
     e.preventDefault();

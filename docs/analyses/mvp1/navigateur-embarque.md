@@ -38,6 +38,23 @@ argument de **lancement** et jamais d'une connexion.
   un agent qui n'a que le disque.
 - **Une seule page** : pas d'onglets. `target=_blank` et `window.open` chargent dans la page
   courante. Fermer le panneau cache la vue sans détruire la page.
+- **La page existe dès le démarrage** : le composant crée la vue à l'ouverture de la fenêtre,
+  même panneau fermé (`electron/main.cjs`, `createWindow`), et charge `about:blank` dessus.
+  Elle apparaît alors dans `/json/list` comme un target `page` (`about:blank`), ce qui donne une
+  cible à une tâche avant que le propriétaire ait ouvert quoi que ce soit. Cette règle n'est pas
+  cosmétique : Electron ne sait pas créer de cible à la demande (`Target.createTarget` répond
+  `Not supported`, mesuré le 2026-11-14), donc sans cette page une tâche n'a **rien** à piloter
+  et se rabat sur le shell ou échoue. Le `about:blank` initial n'est pas décoratif non plus :
+  sans document, la page n'a pas de frame et un client CDP reste muet sur les commandes qui en
+  dépendent (`Page.enable` sans réponse au-delà de 6 s, mesuré sur la vue vide ; Playwright
+  l'appelle en s'attachant). `about:blank` est normalisé en URL vide dans l'état du panneau,
+  pour que l'invite « Aucune page ouverte » reste vraie.
+- **Révélation à la navigation** : toute navigation du document principal de la page du panneau
+  vers une adresse http(s) (adresse tapée, `page.goto`, clic, redirection) envoie
+  `superviseur:browser:reveal` au renderer quand le panneau est fermé ; l'UI ouvre alors le
+  panneau, exactement comme le bouton « Navigateur » (repli du chat si la place manque). Une
+  navigation de même document (ancre, `pushState`), une adresse non http(s) et l'initialisation
+  en `about:blank` ne révèlent rien.
 
 ## Pourquoi `WebContentsView` et pas `<webview>`
 
@@ -48,6 +65,34 @@ Electron produit un target `webview`, invisible pour lui, même avec un port ouv
 |---|---|---|
 | `<webview>` | `webview` | non |
 | `WebContentsView` | `page` | oui |
+
+## Révélation du panneau : pourquoi ça ne marchait pas (2026-11-14)
+
+Signalement du propriétaire : une tâche ouvre une page, le panneau navigateur ne s'ouvre pas.
+Deux causes, cumulatives, et aucune ne vivait dans le daemon :
+
+1. **La page n'existait pas tant que le panneau n'avait pas été ouvert.** `ensureBrowserView()`
+   n'était appelé que par `applyBrowserLayout()` (qui exige `visible`) et par le geste
+   « navigate » du panneau. Panneau fermé depuis le démarrage, il n'y avait donc **aucune**
+   cible `page` : `/json/list` ne montrait que le shell, et `Target.createTarget` répond
+   `Not supported`. La tâche ne pouvait rien ouvrir du tout ; le skill lui disait alors de
+   demander au propriétaire d'ouvrir le panneau, d'où « ça ne s'ouvre pas ».
+2. **Une navigation ne réveillait personne.** Même page existante (panneau ouvert puis fermé),
+   `did-navigate` ne faisait que pousser `superviseur:browser:state`, que seul `BrowserPanel`
+   écoutait : le panneau étant démonté, personne ne recevait l'état, et `browserOpen` restait
+   faux. Reproduit sur l'instance réelle : panneau fermé, `Page.navigate` par CDP sur la page
+   du panneau, panneau toujours absent du DOM et `superviseur.browser` toujours `closed`.
+
+Correctif : la vue est créée à l'ouverture de la fenêtre (avec son `about:blank` initial), et
+`did-start-navigation` (document principal, adresse http(s), pas de même-document) envoie
+`superviseur:browser:reveal` ; `App.tsx` s'abonne par `watchBrowserReveal` et appelle
+`openBrowser()` (même geste que le bouton, donc même repli du chat et même largeur). Le pont
+`onReveal` est optionnel côté UI : une page servie avec un preload plus ancien (UI rechargée
+avant redémarrage de l'application) n'ouvre rien plutôt que de jeter au montage.
+
+Pas de réouverture en boucle par construction : **fermer le panneau n'est pas une navigation**.
+Seule une navigation révèle, et le composant ne signale que les navigations. Vérifié : après
+fermeture, 6 s sans réouverture ; une ancre ne rouvre pas ; une nouvelle navigation rouvre.
 
 ## Vérifier
 
@@ -64,6 +109,23 @@ node -e "const {chromium}=require('playwright');(async()=>{const b=await chromiu
 
 Contrôles attendus : les pages listées sont celle du shell et celle du panneau, aucun
 `chrome.exe` n'apparaît, `browser.close()` détache sans fermer le navigateur.
+
+```powershell
+# 4. la page du panneau existe même panneau fermé (titre vide, URL vide)
+curl -s http://127.0.0.1:<port>/json/list
+
+# 5. révélation : fermer le panneau, puis faire naviguer SA page par CDP.
+#    Ici à la main, une tâche le fait par page.goto.
+#    Attendu : le panneau s'ouvre seul sur cette adresse ; le fermer à nouveau
+#    le laisse fermé (aucune navigation ne le rouvre) ; une navigation suivante
+#    le rouvre.
+```
+
+Le scénario complet (cible exposée, révélation, fermeture qui tient, ancre ignorée,
+nouvelle navigation) a été joué sur une seconde instance (port 5181, `SUPERVISEUR_USER_DATA`
+dédié) avec `Page.navigate` par CDP sur la page du panneau : 7 contrôles sur 7. Capture :
+[preuves/panneau-navigateur-revele.png](preuves/panneau-navigateur-revele.png) (panneau ouvert
+par la navigation d'une tâche, seconde instance, panneau jamais ouvert avant).
 
 ## Risques assumés
 

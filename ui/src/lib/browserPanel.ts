@@ -34,6 +34,8 @@ export interface BrowserPanelBridge {
   navigate: (url: string) => Promise<BrowserPanelState | null>;
   action: (name: 'reload' | 'back' | 'forward' | 'hide') => Promise<BrowserPanelState | null>;
   onState: (handler: (state: BrowserPanelState) => void) => () => void;
+  /** Navigation de la page du panneau : le panneau doit se montrer, même fermé. */
+  onReveal: (handler: () => void) => () => void;
 }
 
 export function browserPanelBridge(): BrowserPanelBridge | null {
@@ -41,6 +43,24 @@ export function browserPanelBridge(): BrowserPanelBridge | null {
   if (typeof window === 'undefined') return null;
   const candidate = (window as unknown as { superviseurBrowser?: BrowserPanelBridge }).superviseurBrowser;
   return candidate && candidate.available === true ? candidate : null;
+}
+
+/**
+ * Une navigation de la page du panneau révèle le panneau : c'est ce qui le fait
+ * apparaître quand une tâche ouvre une page par CDP, sans clic du propriétaire.
+ * Le pont ne signale QUE des navigations (jamais une fermeture), donc fermer le
+ * panneau ne peut pas le rouvrir en boucle. Renvoie le désabonnement.
+ *
+ * `onReveal` peut manquer : un pont de composant plus ancien que cette UI (page
+ * rechargée avant redémarrage de l'application) n'a pas le canal, et l'absence de
+ * révélation vaut mieux qu'une erreur au montage.
+ */
+export function watchBrowserReveal(
+  bridge: BrowserPanelBridge | null,
+  onReveal: () => void,
+): () => void {
+  if (!bridge || typeof bridge.onReveal !== 'function') return () => {};
+  return bridge.onReveal(onReveal);
 }
 
 /** L'adresse tapée est-elle une adresse http(s) que le composant acceptera ? */

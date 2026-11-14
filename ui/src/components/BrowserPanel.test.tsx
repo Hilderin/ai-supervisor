@@ -10,6 +10,7 @@ const fakeBridge: BrowserPanelBridge = {
   navigate: async () => null,
   action: async () => null,
   onState: () => () => {},
+  onReveal: () => () => {},
 };
 
 describe('BrowserPanel', () => {
