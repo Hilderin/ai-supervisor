@@ -55,7 +55,7 @@ const REFERENCE = [
   "Tu es le seul juge : il n'y a PAS de vérificateur extérieur. Tu soumets une preuve réelle avec criteria_to_validate, puis tu juges avec criteria_set_status.",
   "Honnêteté obligatoire : ne marque « validé » qu'après une vérification RÉELLE (test passé constaté, fichier ouvert, rendu contrôlé). Le propriétaire lit la liste, les preuves et tes notes : une validation à tort se voit et détruit la confiance.",
   "Les méthodes de validation possibles : " + METHODS + ".",
-  "Une preuve à chemin (screenshot, code_excerpt, artifact) doit pointer vers un fichier existant du projet (chemin relatif).",
+  "Une preuve à chemin (screenshot, code_excerpt, artifact) doit pointer vers un fichier existant sous la racine de la session (chemin relatif, sous-dossiers compris) : « captures/ecran.png » est résolu depuis le dossier de la session, la même racine que celle qui sert ensuite l'image au propriétaire.",
   "Le cycle type : criteria_add quand le critère naît ; criteria_to_validate avec la preuve quand tu penses l'avoir atteint ; criteria_set_status « validated » quand tu as vérifié, ou « to_fix » avec la raison si le critère n'est pas atteint (puis corrige et revalide).",
 ].join(" ");
 
@@ -104,6 +104,43 @@ export default {
 
     /** État du critère pour une session, coercé en forme propre. */
     const read = async (sessionID) => normalizeState(await ctx.storage.get(key(sessionID)));
+
+    /** Premier dossier non vide parmi les candidats. */
+    const firstDir = (...values) => {
+      for (const value of values) {
+        const dir = String(value ?? "").trim();
+        if (dir && dir !== ".") return dir;
+      }
+      return "";
+    };
+
+    /**
+     * Racine des chemins relatifs des preuves : le dossier de la SESSION.
+     *
+     * Le contexte d'exécution d'un tool v2 ne porte pas `directory` (champ de
+     * l'API plugin v1) : le lire laissait `projectDir` vide et TOUTE preuve à
+     * chemin était refusée « dossier du projet inconnu : preuve à chemin
+     * impossible à valider » (constaté le 2026-11-16, tâche « Atelier
+     * Windows »). La vérité est sur la session : `location.directory`, la même
+     * source que l'API OpenChamber et que la route /api/fleet/asset du daemon
+     * qui sert ensuite l'image. Les replis couvrent un hôte qui exposerait
+     * déjà le dossier sur le contexte (v1 ou variante future).
+     */
+    const projectDirectoryOf = async (sessionID, context) => {
+      const direct = firstDir(
+        context?.directory, context?.worktree, context?.location?.directory,
+      );
+      if (direct) return direct;
+      try {
+        const info = await ctx.session.get({ sessionID });
+        return firstDir(info?.location?.directory, info?.directory, info?.worktree);
+      } catch {
+        // session illisible : on ne devine pas un dossier (surtout pas
+        // ctx.location.directory, qui est le dossier du plugin, pas de la
+        // session : un chemin y serait accepté sans être servable ensuite)
+        return "";
+      }
+    };
 
     /** Exécute un changement d'état puis persiste ; renvoie la vue complète.
      *  Sérialisé par session : le read-modify-write est atomique face aux
@@ -230,7 +267,7 @@ export default {
                 properties: {
                   kind: { type: "string", description: "Type de preuve (" + METHODS + ")." },
                   text: { type: "string", description: "Ce qui prouve : sortie de test, parcours suivi, observation, commande et sa sortie." },
-                  path: { type: "string", description: "Fichier relatif au projet (screenshot, code_excerpt, artifact) : il doit exister." },
+                  path: { type: "string", description: "Fichier relatif à la racine de la session (screenshot, code_excerpt, artifact) : il doit exister." },
                   start_line: { type: "number", description: "Première ligne (code_excerpt)." },
                   line_count: { type: "number", description: "Nombre de lignes (code_excerpt)." },
                 },
@@ -244,7 +281,7 @@ export default {
           additionalProperties: false,
         },
         async execute(input, context) {
-          const projectDir = context?.directory ?? "";
+          const projectDir = await projectDirectoryOf(context.sessionID, context);
           return apply(context.sessionID, async (state) =>
             submitEvidence(state, input?.ref, input?.evidence, projectDir || undefined));
         },
@@ -279,7 +316,7 @@ export default {
           additionalProperties: false,
         },
         async execute(input, context) {
-          const projectDir = context?.directory ?? "";
+          const projectDir = await projectDirectoryOf(context.sessionID, context);
           return apply(context.sessionID, async (state) =>
             setStatusCriterion(state, input?.ref, input?.status, input?.note, projectDir || undefined));
         },

@@ -270,7 +270,10 @@ export async function validateEvidencePath(projectDir, rawPath) {
     cursor = resolve(cursor, part);
     let info;
     try { info = await lstat(cursor); } catch {
-      throw new CriteriaError('evidence_path_missing', `fichier de preuve introuvable : ${parts.join('/')}`);
+      throw new CriteriaError(
+        'evidence_path_missing',
+        `fichier de preuve introuvable : ${parts.join('/')} (relatif à ${root})`,
+      );
     }
     if (info.isSymbolicLink()) throw new CriteriaError('invalid_evidence', 'lien symbolique interdit dans une preuve');
   }
@@ -370,8 +373,11 @@ export async function submitEvidence(state, ref, rawEvidence, projectDir) {
     if (ev.path && projectDir) {
       ev.path = await validateEvidencePath(projectDir, ev.path);
     } else if (ev.path && !projectDir) {
-      // dossier du projet inconnu : la preuve sans vérification de chemin est refusée
-      throw new CriteriaError('invalid_evidence', 'dossier du projet inconnu : preuve à chemin impossible à valider');
+      // racine de session inconnue : la preuve sans vérification de chemin est refusée
+      throw new CriteriaError(
+        'invalid_evidence',
+        `dossier de la session inconnu : impossible de résoudre le chemin relatif « ${ev.path} » ; réessaie quand la session porte un dossier`,
+      );
     }
     evidence.push(ev);
   }

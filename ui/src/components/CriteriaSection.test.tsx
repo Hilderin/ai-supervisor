@@ -126,6 +126,24 @@ describe('CriterionRow (compacte)', () => {
     expect(html).toContain('src="/api/fleet/asset?sessionId=s1&amp;path=capture.png"');
   });
 
+  test('une capture en sous-dossier de la session est rendue en image (chemin encodé)', () => {
+    // cas réel du 2026-11-16 : la tâche vivait dans un sous-dossier de la session
+    const nested: Criterion = {
+      ...rejected,
+      status: 'to_validate',
+      review: null,
+      evidence: [{
+        kind: 'screenshot', text: 'écran PAR3800',
+        path: 'SVA-843/captures/par3800-defaut-oui.png', at: 1,
+      }],
+    };
+    const html = renderToStaticMarkup(createElement(CriterionRow, { sessionId: 's1', criterion: nested }));
+    expect(html).toContain('data-testid="evidence-thumb"');
+    expect(html).toContain(
+      'src="/api/fleet/asset?sessionId=s1&amp;path=SVA-843%2Fcaptures%2Fpar3800-defaut-oui.png"',
+    );
+  });
+
   test('une preuve sans image n’offre pas de miniature', () => {
     const html = renderToStaticMarkup(createElement(CriterionRow, { sessionId: 's1', criterion: validated }));
     expect(html).not.toContain('data-testid="evidence-thumb"');

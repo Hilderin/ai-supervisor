@@ -48,8 +48,12 @@ Preuve = `{kind, text, path?, start_line?, line_count?}` ; `screenshot`,
 `code_excerpt` et `artifact` exigent un `path` de fichier existant du projet
 (vérifié au dépôt PAR LE PLUGIN : chemin relatif, pas de sortie du projet, pas
 de lien symbolique, fichier réel), `code_excerpt` exige `start_line` et
-`line_count`. Le dossier projet vient de `context.directory` (le dossier de la
-session OpenCode).
+`line_count`. Le chemin est ancré à la racine de la SESSION
+(`ctx.session.get(...).location.directory`, la même racine que la route
+`/api/fleet/asset` du daemon qui sert l'image) : sous-dossiers compris
+(`captures/ecran.png`). Le champ `directory` du contexte d'exécution est un
+reste de l'API v1, vide sur l'hôte v2 : ne pas s'y fier (une preuve screenshot
+a été refusée pour cette raison le 2026-11-16).
 
 ## Réinjection de contexte
 

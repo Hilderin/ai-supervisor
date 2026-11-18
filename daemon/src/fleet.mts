@@ -23,6 +23,7 @@ import { criteriaCounts, readCriteria, type CriteriaCounts } from './criteria.mt
 import { harvestAnswers } from './answers.mts';
 import { harvestRenders } from './renders.mts';
 import { activityOf, activityTracker, type LiveActivity } from './activity.mts';
+import { settleStoppedTurns } from './turn-end.mts';
 import { SessionIssueTracker, type SessionIssue } from './session-issues.mts';
 const sessionIssues = new SessionIssueTracker();
 
@@ -342,6 +343,17 @@ async function runPoll(): Promise<void> {
     // échantillonnée par le SSE 500 ms et le poll 3 s de l'UI : barres qui se
     // relancent (38 % → 0 → 38 %) et section Plan du détail démontée/remontée.
     const fleet = buildFleet(status);
+    // Un tour stoppé (question écartée, arrêt pendant une question) ne produit
+    // aucun statut `idle` côté OpenChamber : l'entrée reste `busy` jusqu'à son
+    // expiration 24 h et la carte garderait son spinner. La conversation porte
+    // la preuve (message assistant complet avec erreur d'abandon) : on corrige
+    // le statut AVANT le tri et les enrichissements, sinon l'activité et la
+    // progression seraient calculées sur un tour qui n'existe plus.
+    const { settled, fresh } = await settleStoppedTurns(fleet.rows, base);
+    if (settled.length) sortFleetRows(fleet.rows);
+    if (fresh.length) {
+      console.log(`[fleet] tour stoppé reconnu (statut corrigé en idle) : ${fresh.join(', ')}`);
+    }
     // registre du tableau : noter les cartes vues, remettre celles que le
     // statut éphémère d'OpenChamber a perdues (redémarrage, expiration 24 h)
     persistFleetSeen(fleet);
